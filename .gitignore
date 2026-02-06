@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Build outputs
+dist/
+build/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# User data and uploads (but keep the folders themselves)
+data/jobs/*
+!data/jobs/.gitkeep
+upload/*
+!upload/.gitkeep
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-error.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+.tmp/
+temp/
+

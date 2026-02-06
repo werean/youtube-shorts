@@ -1,0 +1,18 @@
+# Script para criar um vídeo MP4 dummy (mínimo válido)
+param(
+    [string]$OutputPath = "dummy.mp4"
+)
+
+# MP4 header mínimo (válido mas sem dados de vídeo)
+$header = @(
+    0x00, 0x00, 0x00, 0x20, # ftyp box size
+    0x66, 0x74, 0x79, 0x70, # "ftyp"
+    0x69, 0x73, 0x6F, 0x6D, # isom
+    0x00, 0x00, 0x00, 0x00, # minor version
+    0x69, 0x73, 0x6F, 0x6D, # compatible brands
+    0x69, 0x73, 0x6F, 0x32,
+    0x6D, 0x70, 0x34, 0x31
+)
+
+[System.IO.File]::WriteAllBytes($OutputPath, $header)
+Write-Host "Vídeo dummy criado em: $OutputPath"
