@@ -26,4 +26,10 @@ export interface Job {
   created_at: string;
   /** Last update timestamp */
   updated_at?: string;
+  /** Absolute path to source video on disk */
+  source_video_path?: string;
+  /** Original file name for local uploads */
+  source_file_name?: string;
+  /** Display name for the video (used in folder organization) */
+  video_name?: string;
 }

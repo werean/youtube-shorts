@@ -7,7 +7,7 @@ import { Cut } from "../models/cut";
 import { JobStatus } from "../models/job";
 import * as files from "../storage/files";
 import * as metadata from "../storage/metadata";
-import { runFfmpeg } from "../video/ffmpeg";
+import { runFfmpegAsync } from "../video/ffmpeg";
 import { buildVerticalNvencCommand } from "../video/vertical";
 
 function loadCuts(jobId: string): Cut[] {
@@ -19,8 +19,8 @@ function loadCuts(jobId: string): Cut[] {
   return JSON.parse(content);
 }
 
-export function renderSuggestedCuts(jobId: string): string[] {
-  console.log(`[rendering] Rendering approved cuts for job ${jobId}`);
+export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
+  console.log(`[rendering] Rendering suggested cuts for job ${jobId}`);
   metadata.updateJobStatus(jobId, JobStatus.RENDERING);
 
   const videoPath = files.findSourceVideo(jobId);
@@ -28,7 +28,7 @@ export function renderSuggestedCuts(jobId: string): string[] {
     throw new Error("Source video not found for job");
   }
 
-  const cuts = loadCuts(jobId).filter((cut) => cut.status === "approved");
+  const cuts = loadCuts(jobId);
   const outputs: string[] = [];
 
   for (const cut of cuts) {
@@ -44,8 +44,8 @@ export function renderSuggestedCuts(jobId: string): string[] {
       end: cut.end,
     });
 
-    runFfmpeg(command);
-    outputs.push(outputPath);
+    await runFfmpegAsync(command);
+    outputs.push(files.renderOutputUrl(jobId, cut.cut_id));
   }
 
   const job = metadata.loadJob(jobId);
@@ -54,4 +54,8 @@ export function renderSuggestedCuts(jobId: string): string[] {
   metadata.saveJob(job);
 
   return outputs;
+}
+
+export function listRenderOutputs(jobId: string): string[] {
+  return files.listRenderOutputUrls(jobId);
 }

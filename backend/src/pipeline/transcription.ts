@@ -2,13 +2,14 @@
  * Pipeline step: transcribe audio with Whisper (local installation).
  */
 
-import { execSync } from "child_process";
+import { spawn } from "child_process";
 import * as fs from "fs";
 import { Segment } from "../models/segment";
 import { JobStatus } from "../models/job";
 import * as files from "../storage/files";
 import * as metadata from "../storage/metadata";
 import { config } from "../core/config";
+import { loadSettings } from "../core/settings";
 
 type TranscriptionFormats = {
   text?: boolean;
@@ -44,6 +45,20 @@ function buildVtt(segments: Segment[]): string {
   return `WEBVTT\n\n${cues}`.trimEnd() + "\n";
 }
 
+function runCommand(command: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, { shell: true, stdio: "inherit" });
+    child.on("error", (error) => reject(error));
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Whisper exited with code ${code}`));
+    });
+  });
+}
+
 function writeTranscriptionArtifacts(
   jobId: string,
   segments: Segment[],
@@ -71,10 +86,10 @@ function writeTranscriptionArtifacts(
   }
 }
 
-export function transcribeJob(
+export async function transcribeJob(
   jobId: string,
   formats: TranscriptionFormats = { text: true, vtt: true },
-): Segment[] {
+): Promise<Segment[]> {
   console.log(`\n[transcription] ============================================`);
   console.log(`[transcription] Starting transcription for job ${jobId}`);
   console.log(`[transcription] ============================================`);
@@ -93,21 +108,25 @@ export function transcribeJob(
 
   console.log(`[transcription] ✓ Usando arquivo: ${videoPath}`);
 
-  const tempDir = files.ensureJobDir(jobId);
+  const tempDir = files.ensureTranscriptionsJobDir(jobId);
   const outputFormat = "json";
 
-  console.log(`[transcription] 📁 Diret\u00f3rio de sa\u00edda: ${tempDir}`);
+  console.log(`[transcription] 📁 Diretório de saída: ${tempDir}`);
   console.log(`[transcription] 🎤 Modelo Whisper: ${config.WHISPER_MODEL_NAME}`);
-  console.log(`[transcription] 🎬 V\u00eddeo de entrada: ${videoPath}`);
-  console.log(`[transcription] 🎯 Iniciando transcri\u00e7\u00e3o com Whisper...`);
+  console.log(`[transcription] 🎬 Vídeo de entrada: ${videoPath}`);
+  console.log(`[transcription] 🎯 Iniciando transcrição com Whisper...`);
 
   try {
-    // Run whisper command - force CUDA
-    const command = `whisper "${videoPath}" --model ${config.WHISPER_MODEL_NAME} --output_format ${outputFormat} --output_dir "${tempDir}" --device cuda`;
+    // Get device from settings (cuda or cpu)
+    const settings = loadSettings();
+    const device = settings.whisper.device;
+
+    // Run whisper command with configured device
+    const command = `whisper "${videoPath}" --model ${config.WHISPER_MODEL_NAME} --output_format ${outputFormat} --output_dir "${tempDir}" --device ${device}`;
     console.log(`[transcription] 💻 Command: ${command}`);
 
-    console.log(`[transcription] ⏳ Executando Whisper com CUDA...`);
-    execSync(command, { stdio: "inherit" });
+    console.log(`[transcription] ⏳ Executando Whisper com ${device.toUpperCase()}...`);
+    await runCommand(command);
     console.log(`[transcription] ✓ Whisper completado com sucesso`);
 
     // Verificar arquivo de saída

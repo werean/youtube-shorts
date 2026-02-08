@@ -17,6 +17,8 @@ import {
   listVideos,
   rejectCut,
   renderJob,
+  listRenderOutputs,
+  renameVideo,
   transcribeJob,
   uploadVideoFile,
   getLLMPrompt,
@@ -24,6 +26,11 @@ import {
   getDependencies,
   getInstallationGuide,
   installDependency,
+  getSettings,
+  saveSettings,
+  getCommonFolders,
+  selectFolder,
+  type AppSettings,
 } from "./api";
 
 const WHISPER_FORMATS = [
@@ -230,6 +237,9 @@ export default function App() {
   const [suggestedCuts, setSuggestedCuts] = useState<Cut[]>([]);
   const [selectedSuggestedCutId, setSelectedSuggestedCutId] = useState<string | null>(null);
   const [renderOutputs, setRenderOutputs] = useState<string[]>([]);
+  const [isRendering, setIsRendering] = useState(false);
+  const [expectedRenderCount, setExpectedRenderCount] = useState(0);
+  const renderPollRef = useRef<number | null>(null);
   const [action, setAction] = useState<ActionState>(initialAction);
   const [showTranscriptionFormatListDialog, setShowTranscriptionFormatListDialog] = useState(false);
   const [showTranscriptionContentDialog, setShowTranscriptionContentDialog] = useState(false);
@@ -259,10 +269,13 @@ export default function App() {
   const [editCutEndSeconds, setEditCutEndSeconds] = useState<string>("");
   const [videoView, setVideoView] = useState<"active" | "archived">("active");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renameVideoId, setRenameVideoId] = useState<string | null>(null);
+  const [renameVideoNewName, setRenameVideoNewName] = useState<string>("");
   const [showLLMConfigDialog, setShowLLMConfigDialog] = useState(false);
   const [showWhisperConfigDialog, setShowWhisperConfigDialog] = useState(false);
   const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
   const [showInstallationDialog, setShowInstallationDialog] = useState(false);
+  const [showConfigureAppDialog, setShowConfigureAppDialog] = useState(false);
   const [selectedDependencyForInstall, setSelectedDependencyForInstall] = useState<string | null>(
     null,
   );
@@ -270,6 +283,13 @@ export default function App() {
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [configBaseDir, setConfigBaseDir] = useState<string>("");
+  const [commonFolders, setCommonFolders] = useState<
+    { name: string; path: string; exists: boolean }[]
+  >([]);
+  const [showMoveUploadDialog, setShowMoveUploadDialog] = useState(false);
+  const [dontAskMoveUpload, setDontAskMoveUpload] = useState(false);
   const [dependencies, setDependencies] = useState<{
     python: { installed: boolean; version: string | null };
     whisper: { installed: boolean; version: string | null };
@@ -305,6 +325,13 @@ export default function App() {
     return blocks.length > 0;
   }, [blocks, activeVideo]);
 
+  useEffect(() => {
+    if (!activeVideo) {
+      stopRenderPolling();
+      return;
+    }
+  }, [activeVideo]);
+
   async function runAction<T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) {
     console.log(`\n[App] Executando ação...`);
     setAction({ busy: true });
@@ -322,6 +349,49 @@ export default function App() {
       console.error(`[App] ✗ Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
     }
+  }
+
+  async function pollRenderOutputs(jobId: string) {
+    try {
+      const outputs = await listRenderOutputs(jobId);
+      setRenderOutputs(outputs);
+
+      const job = await getJob(jobId);
+      updateVideo(jobId, { job });
+
+      if (expectedRenderCount > 0 && outputs.length >= expectedRenderCount) {
+        stopRenderPolling();
+        return;
+      }
+
+      if (job.status === "DONE" || job.status === "ERROR") {
+        stopRenderPolling();
+      }
+    } catch (error) {
+      console.error("[render] Failed to poll outputs:", error);
+    }
+  }
+
+  function startRenderPolling(jobId: string, totalCuts: number) {
+    setExpectedRenderCount(totalCuts);
+    setIsRendering(true);
+
+    if (renderPollRef.current) {
+      window.clearInterval(renderPollRef.current);
+    }
+
+    void pollRenderOutputs(jobId);
+    renderPollRef.current = window.setInterval(() => {
+      void pollRenderOutputs(jobId);
+    }, 2000);
+  }
+
+  function stopRenderPolling() {
+    if (renderPollRef.current) {
+      window.clearInterval(renderPollRef.current);
+      renderPollRef.current = null;
+    }
+    setIsRendering(false);
   }
 
   function updateVideo(jobId: string, updates: Partial<VideoItem>) {
@@ -382,6 +452,23 @@ export default function App() {
     }
     return `${m}:${String(s).padStart(2, "0")}`;
   }
+
+  function buildRenderUrl(renderPath: string): string {
+    if (!renderPath) return "";
+    if (renderPath.startsWith("http://") || renderPath.startsWith("https://")) {
+      return renderPath;
+    }
+    const normalized = renderPath.startsWith("/") ? renderPath : `/${renderPath}`;
+    return `${apiBaseUrl}${normalized}`;
+  }
+
+  useEffect(() => {
+    return () => {
+      if (renderPollRef.current) {
+        window.clearInterval(renderPollRef.current);
+      }
+    };
+  }, []);
 
   function parseTimestampInput(input: string): number | null {
     const trimmed = input.trim();
@@ -621,6 +708,91 @@ export default function App() {
     }
   }, [showAiResponseOnAnalyze, aiResponseRaw]);
 
+  function startUploadSelectedFiles() {
+    if (selectedFiles.length === 0) return;
+
+    console.log(`\n[UI] Botão "Upload de arquivos" clicado`);
+    console.log(`[UI] Arquivos: ${selectedFiles.length}`);
+
+    // Upload all files sequentially
+    const uploadSequentially = async () => {
+      for (const file of selectedFiles) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            runAction(
+              () => uploadVideoFile(file),
+              (result) => {
+                console.log(`[UI] Upload completado: ${result.job.job_id}`);
+                const newVideo: VideoItem = {
+                  job: result.job,
+                  transcriptionLogs: [],
+                  videoPath: result.video_path,
+                };
+                setVideos((current) => [newVideo, ...current]);
+                setActiveVideoId(result.job.job_id);
+                resolve();
+              },
+            );
+          });
+        } catch (error) {
+          console.error(`[UI] Erro ao fazer upload de ${file.name}:`, error);
+        }
+      }
+
+      setSelectedFiles([]);
+      const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
+      if (fileInput) fileInput.value = "";
+      loadVideos();
+    };
+
+    uploadSequentially();
+  }
+
+  async function handleMoveUploadDecision(moveUploads: boolean) {
+    const askAgain = !dontAskMoveUpload;
+    try {
+      const updated = await saveSettings({
+        preferences: {
+          ask_move_on_upload: askAgain,
+          move_uploads: moveUploads,
+        },
+      });
+      setAppSettings(updated);
+    } catch (error) {
+      console.error("Failed to save upload preferences:", error);
+    }
+
+    setShowMoveUploadDialog(false);
+    setDontAskMoveUpload(false);
+    startUploadSelectedFiles();
+  }
+
+  async function saveWhisperConfig() {
+    try {
+      const updated = await saveSettings({
+        whisper: {
+          device: whisperDevice,
+          formats: whisperFormats,
+        },
+      });
+      setAppSettings(updated);
+      console.log("[UI] ✓ Configurações do Whisper salvas");
+      setShowWhisperConfigDialog(false);
+    } catch (error) {
+      console.error("[UI] ✗ Erro ao salvar configurações do Whisper:", error);
+    }
+  }
+
+  async function saveLLMConfig() {
+    try {
+      // TODO: Implement LLM system prompt persistence
+      console.log("[UI] Configurações do LLM salvas (sistema prompt localmente)");
+      setShowLLMConfigDialog(false);
+    } catch (error) {
+      console.error("[UI] ✗ Erro ao salvar configurações do LLM:", error);
+    }
+  }
+
   useEffect(() => {
     const pathname = window.location.pathname;
     if (pathname === "/arquivados") {
@@ -651,6 +823,21 @@ export default function App() {
         setDependencies(depsData.dependencies);
       } catch (error) {
         console.error("Failed to load dependencies:", error);
+      }
+
+      try {
+        const settings = await getSettings();
+        setAppSettings(settings);
+        setConfigBaseDir(settings.media.base_dir);
+      } catch (error) {
+        console.error("Failed to load app settings:", error);
+      }
+
+      try {
+        const foldersData = await getCommonFolders();
+        setCommonFolders(foldersData.folders);
+      } catch (error) {
+        console.error("Failed to load common folders:", error);
       }
     })();
 
@@ -698,6 +885,38 @@ export default function App() {
       <section className="panel">
         <h2>Configurações</h2>
         <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+          {/* Card Configurar Aplicação */}
+          <div
+            style={{
+              border: "1px solid #e5e5e5",
+              borderRadius: "10px",
+              padding: "12px",
+              background: "#fff",
+            }}
+          >
+            <button
+              onClick={() => setShowConfigureAppDialog(true)}
+              style={{
+                width: "100%",
+                borderRadius: "8px",
+                background: "#8b5cf6",
+                color: "white",
+                border: "none",
+                padding: "10px",
+                cursor: "pointer",
+                fontWeight: "600",
+              }}
+            >
+              ⚙️ Configurar aplicação
+            </button>
+            <p
+              className="muted"
+              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
+            >
+              Define onde os vídeos, shorts e transcrições serão armazenados.
+            </p>
+          </div>
+
           {/* Card Dependências */}
           <div
             style={{
@@ -882,7 +1101,7 @@ export default function App() {
                             `[UI] Ingestão completada, vídeo: ${ingestResult.video_path}`,
                           );
                           updateVideo(jobResult.job_id, {
-                            videoPath: `/upload/${jobResult.job_id}/${ingestResult.video_path}`,
+                            videoPath: ingestResult.video_path,
                           });
                           refreshVideo(jobResult.job_id);
                           loadVideos();
@@ -1080,43 +1299,14 @@ export default function App() {
                 onClick={() => {
                   if (selectedFiles.length === 0) return;
 
-                  console.log(`\n[UI] Botão "Upload de arquivos" clicado`);
-                  console.log(`[UI] Arquivos: ${selectedFiles.length}`);
+                  const shouldAsk = appSettings?.preferences?.ask_move_on_upload ?? true;
+                  if (shouldAsk) {
+                    setDontAskMoveUpload(false);
+                    setShowMoveUploadDialog(true);
+                    return;
+                  }
 
-                  // Upload all files sequentially
-                  const uploadSequentially = async () => {
-                    for (const file of selectedFiles) {
-                      try {
-                        await new Promise<void>((resolve, reject) => {
-                          runAction(
-                            () => uploadVideoFile(file),
-                            (result) => {
-                              console.log(`[UI] Upload completado: ${result.job.job_id}`);
-                              const newVideo: VideoItem = {
-                                job: result.job,
-                                transcriptionLogs: [],
-                                videoPath: `/upload/${result.job.job_id}/${result.video_path}`,
-                              };
-                              setVideos((current) => [newVideo, ...current]);
-                              setActiveVideoId(result.job.job_id);
-                              resolve();
-                            },
-                          );
-                        });
-                      } catch (error) {
-                        console.error(`[UI] Erro ao fazer upload de ${file.name}:`, error);
-                      }
-                    }
-
-                    setSelectedFiles([]);
-                    const fileInput = document.getElementById(
-                      "video-file-input",
-                    ) as HTMLInputElement;
-                    if (fileInput) fileInput.value = "";
-                    loadVideos();
-                  };
-
-                  uploadSequentially();
+                  startUploadSelectedFiles();
                 }}
               >
                 🎥 Fazer upload ({selectedFiles.length})
@@ -1193,11 +1383,15 @@ export default function App() {
                           readOnly
                           style={{ pointerEvents: "none" }}
                         />
-                        <span>Vídeo {index + 1}</span>
+                        <span>
+                          {index + 1} - {video.job.video_name || "Sem nome"}
+                        </span>
                       </label>
                     ) : (
                       <div className="video-label">
-                        <span>Vídeo {index + 1}</span>
+                        <span>
+                          {index + 1} - {video.job.video_name || "Sem nome"}
+                        </span>
                       </div>
                     )}
 
@@ -1217,22 +1411,33 @@ export default function App() {
                   {menuOpenId === video.job.job_id && (
                     <div className="menu-popover">
                       {videoView === "active" && (
-                        <button
-                          onClick={() =>
-                            runAction(
-                              () => archiveVideo(video.job.job_id),
-                              () => {
-                                if (activeVideoId === video.job.job_id) {
-                                  setActiveVideoId(null);
-                                }
-                                setMenuOpenId(null);
-                                loadVideos();
-                              },
-                            )
-                          }
-                        >
-                          Arquivar
-                        </button>
+                        <>
+                          <button
+                            onClick={() => {
+                              setRenameVideoId(video.job.job_id);
+                              setRenameVideoNewName(video.job.video_name || "");
+                              setMenuOpenId(null);
+                            }}
+                          >
+                            Renomear
+                          </button>
+                          <button
+                            onClick={() =>
+                              runAction(
+                                () => archiveVideo(video.job.job_id),
+                                () => {
+                                  if (activeVideoId === video.job.job_id) {
+                                    setActiveVideoId(null);
+                                  }
+                                  setMenuOpenId(null);
+                                  loadVideos();
+                                },
+                              )
+                            }
+                          >
+                            Arquivar
+                          </button>
+                        </>
                       )}
                       <button
                         className="danger"
@@ -1279,6 +1484,7 @@ export default function App() {
                   }}
                 >
                   <video
+                    key={`video-${activeVideo.job.job_id}`}
                     ref={videoRef}
                     controls
                     width="100%"
@@ -1534,7 +1740,7 @@ export default function App() {
                     }}
                   >
                     <button
-                      disabled={cuts.length === 0}
+                      disabled={cuts.length === 0 || isRendering}
                       style={{
                         width: "100%",
                         borderRadius: "8px",
@@ -1542,24 +1748,30 @@ export default function App() {
                         color: "white",
                         border: "none",
                         padding: "10px",
-                        cursor: cuts.length === 0 ? "not-allowed" : "pointer",
-                        opacity: cuts.length === 0 ? 0.5 : 1,
+                        cursor: cuts.length === 0 || isRendering ? "not-allowed" : "pointer",
+                        opacity: cuts.length === 0 || isRendering ? 0.5 : 1,
                       }}
                       onClick={() =>
                         runAction(
                           () => renderJob(activeVideo.job.job_id),
-                          (value) => {
-                            console.log(
-                              `[UI] Renderização completada, ${value.length} vídeos gerados`,
-                            );
-                            setRenderOutputs(value);
-                            refreshVideo(activeVideo.job.job_id);
+                          () => {
+                            console.log(`[UI] Renderização iniciada`);
+                            setRenderOutputs([]);
+                            startRenderPolling(activeVideo.job.job_id, suggestedCuts.length);
                           },
                         )
                       }
                     >
-                      🎬 Renderizar
+                      {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
                     </button>
+                    {isRendering && (
+                      <p
+                        className="muted"
+                        style={{ marginTop: "8px", fontSize: "0.8rem", textAlign: "center" }}
+                      >
+                        Gerando cortes: {renderOutputs.length}/{expectedRenderCount || "?"}
+                      </p>
+                    )}
                     <p
                       className="muted"
                       style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
@@ -2269,12 +2481,24 @@ export default function App() {
       <section className="panel">
         <h2>6. Saída final</h2>
         {renderOutputs.length === 0 ? (
-          <p className="muted">Nenhum render finalizado.</p>
+          <p className="muted">{isRendering ? "Gerando cortes..." : "Nenhum render finalizado."}</p>
         ) : (
           <ul className="render-list">
-            {renderOutputs.map((path) => (
-              <li key={path}>{path}</li>
-            ))}
+            {renderOutputs.map((path) => {
+              const url = buildRenderUrl(path);
+              const fileName = path.split("/").pop() || "render.mp4";
+              return (
+                <li key={path}>
+                  <video controls src={url} style={{ width: "100%", maxWidth: "360px" }} />
+                  <div className="muted" style={{ marginTop: "6px" }}>
+                    {fileName}
+                  </div>
+                  <a href={url} target="_blank" rel="noreferrer">
+                    Abrir video
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -2329,7 +2553,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                 <button
-                  onClick={() => setShowLLMConfigDialog(false)}
+                  onClick={saveLLMConfig}
                   className="primary"
                   style={{
                     padding: "10px 20px",
@@ -2478,7 +2702,7 @@ export default function App() {
 
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                 <button
-                  onClick={() => setShowWhisperConfigDialog(false)}
+                  onClick={saveWhisperConfig}
                   className="primary"
                   style={{
                     padding: "10px 20px",
@@ -2813,6 +3037,259 @@ export default function App() {
             dependencyName={selectedDependencyForInstall}
             onClose={() => setShowInstallationDialog(false)}
           />
+        </div>
+      )}
+
+      {renameVideoId && (
+        <div className="dialog-overlay" onClick={() => setRenameVideoId(null)}>
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Renomear Vídeo</h3>
+            <p style={{ color: "#666", marginBottom: "15px" }}>
+              ⚠️ <strong>Importante:</strong> Não renomeie os arquivos no seu computador. Use apenas
+              esta interface para manter a associação entre o vídeo, transcrições e shorts gerados.
+            </p>
+            <input
+              type="text"
+              value={renameVideoNewName}
+              onChange={(e) => setRenameVideoNewName(e.target.value)}
+              placeholder="Digite o novo nome do vídeo"
+              style={{
+                width: "100%",
+                padding: "10px",
+                border: "1px solid #ddd",
+                borderRadius: "4px",
+                marginBottom: "15px",
+                boxSizing: "border-box",
+              }}
+              onKeyUp={(e) => {
+                if (e.key === "Enter") {
+                  if (renameVideoNewName.trim()) {
+                    runAction(
+                      () => renameVideo(renameVideoId, renameVideoNewName),
+                      () => {
+                        setRenameVideoId(null);
+                        setRenameVideoNewName("");
+                        loadVideos();
+                      },
+                    );
+                  }
+                }
+              }}
+            />
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => {
+                  setRenameVideoId(null);
+                  setRenameVideoNewName("");
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                className="primary"
+                onClick={() => {
+                  if (renameVideoNewName.trim()) {
+                    runAction(
+                      () => renameVideo(renameVideoId, renameVideoNewName),
+                      () => {
+                        setRenameVideoId(null);
+                        setRenameVideoNewName("");
+                        loadVideos();
+                      },
+                    );
+                  }
+                }}
+              >
+                Renomear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfigureAppDialog && (
+        <div className="dialog-overlay" onClick={() => setShowConfigureAppDialog(false)}>
+          <div
+            className="dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", padding: "24px" }}
+          >
+            <h3>Configurar Aplicação</h3>
+            <p style={{ color: "#666", marginBottom: "20px" }}>
+              Escolha onde os arquivos (vídeos, shorts e transcrições) serão armazenados no seu
+              computador.
+            </p>
+
+            {/* Native Folder Picker */}
+            <button
+              onClick={async () => {
+                try {
+                  console.log("[UI] Abrindo seletor de pasta...");
+                  const result = await selectFolder();
+                  if (result.selected && result.path) {
+                    console.log("[UI] Pasta selecionada:", result.path);
+                    setConfigBaseDir(result.path);
+                  } else {
+                    console.log("[UI] Nenhuma pasta selecionada");
+                  }
+                } catch (error) {
+                  console.error("Erro ao abrir seletor de pasta:", error);
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "16px",
+                marginBottom: "25px",
+                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                color: "white",
+                border: "none",
+                borderRadius: "10px",
+                cursor: "pointer",
+                fontWeight: "700",
+                fontSize: "1.1rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                transition: "all 0.3s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-2px)";
+                e.currentTarget.style.boxShadow = "0 6px 12px rgba(0, 0, 0, 0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
+              }}
+            >
+              📂 Selecionar Pasta
+            </button>
+
+            {/* Manual Path Input */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
+                📝 Ou digite o caminho manualmente
+              </label>
+              <input
+                type="text"
+                value={configBaseDir}
+                onChange={(e) => setConfigBaseDir(e.target.value)}
+                placeholder="Ex: C:\\Users\\seu_usuario\\Documents\\YouTubeShorts"
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  boxSizing: "border-box",
+                  marginBottom: "8px",
+                  fontFamily: "monospace",
+                  fontSize: "0.9rem",
+                }}
+              />
+              <p style={{ color: "#999", fontSize: "0.8rem" }}>
+                📍 Caminho atual: {appSettings?.media.base_dir}
+              </p>
+            </div>
+
+            {/* Structure Preview */}
+            <div
+              style={{
+                marginBottom: "20px",
+                padding: "12px",
+                background: "#f0f4ff",
+                borderRadius: "6px",
+              }}
+            >
+              <p style={{ color: "#333", fontSize: "0.9rem", margin: "0 0 8px 0" }}>
+                <strong>📂 Estrutura que será criada:</strong>
+              </p>
+              <p
+                style={{
+                  color: "#666",
+                  fontSize: "0.8rem",
+                  margin: "0",
+                  fontFamily: "monospace",
+                  lineHeight: "1.6",
+                }}
+              >
+                {configBaseDir || "pasta_base"}/<br />
+                ├── 🎬 videos/
+                <br />
+                ├── 🎞️ shorts/
+                <br />
+                └── 📄 transcrições/
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button onClick={() => setShowConfigureAppDialog(false)}>Cancelar</button>
+              <button
+                className="primary"
+                onClick={() => {
+                  if (configBaseDir.trim()) {
+                    runAction(
+                      () =>
+                        saveSettings({
+                          media: {
+                            base_dir: configBaseDir,
+                          },
+                        }),
+                      () => {
+                        setShowConfigureAppDialog(false);
+                        getSettings().then((s) => {
+                          setAppSettings(s);
+                          setConfigBaseDir(s.media.base_dir);
+                        });
+                      },
+                    );
+                  }
+                }}
+              >
+                Salvar Configurações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMoveUploadDialog && (
+        <div className="dialog-overlay" onClick={() => setShowMoveUploadDialog(false)}>
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h3>Mover video para a pasta configurada?</h3>
+              <div className="dialog-actions">
+                <button
+                  className="icon-btn close-btn"
+                  onClick={() => setShowMoveUploadDialog(false)}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="dialog-content">
+              <p>
+                Deseja mover o video selecionado para a pasta configurada para evitar uma copia
+                extra em disco?
+              </p>
+              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={dontAskMoveUpload}
+                  onChange={(event) => setDontAskMoveUpload(event.target.checked)}
+                />
+                <span>Nao perguntar novamente</span>
+              </label>
+              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
+                <button className="primary" onClick={() => handleMoveUploadDecision(true)}>
+                  Mover e enviar
+                </button>
+                <button className="secondary" onClick={() => handleMoveUploadDecision(false)}>
+                  Manter copia
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

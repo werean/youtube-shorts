@@ -5,15 +5,17 @@
 import type { FastifyPluginAsync } from "fastify";
 import * as fs from "fs";
 import * as path from "path";
+import { v4 as uuidv4 } from "uuid";
 import {
-  archivedDir,
-  archivedJobDir,
-  jobDir,
-  jobMetadataPath,
-  uploadDir,
-  uploadJobDir,
-} from "../core/paths";
+  archivedVideosDir,
+  getArchivedVideoDir,
+  getVideoDir,
+  loadSettings,
+} from "../core/settings";
 import type { Job } from "../models/job";
+import * as metadata from "../storage/metadata";
+import * as files from "../storage/files";
+import { jobDir } from "../core/paths";
 
 interface VideoRecord {
   job: Job | null;
@@ -22,81 +24,101 @@ interface VideoRecord {
   archived: boolean;
 }
 
-function readJob(jobId: string): Job | null {
-  try {
-    const metadataPath = jobMetadataPath(jobId);
-    if (!fs.existsSync(metadataPath)) {
-      return null;
-    }
-    const raw = fs.readFileSync(metadataPath, "utf-8");
-    return JSON.parse(raw) as Job;
-  } catch (error) {
-    console.error(`[videos] Failed to read job metadata for ${jobId}:`, error);
-    return null;
-  }
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"]);
+
+function isVideoFile(fileName: string): boolean {
+  return VIDEO_EXTENSIONS.has(path.extname(fileName).toLowerCase());
 }
 
-function findSourceVideoFile(jobDir: string): string | null {
-  if (!fs.existsSync(jobDir)) {
-    console.log(`[videos]       Job dir não existe: ${jobDir}`);
-    return null;
-  }
-
-  const entries = fs.readdirSync(jobDir);
-  console.log(`[videos]       Arquivos no job dir: ${entries.join(", ")}`);
-
-  for (const entry of entries) {
-    const entryPath = path.join(jobDir, entry);
-    if (fs.statSync(entryPath).isFile()) {
-      // Aceitar qualquer arquivo que comece com "source" e não seja JSON
-      // Isso inclui: source.mp4, source.mp4.webm, source.webm, etc
-      console.log(`[videos]         Verificando: ${entry}`);
-      if (entry.startsWith("source") && !entry.endsWith(".json")) {
-        console.log(`[videos]         ✓ Match encontrado: ${entry}`);
-        return entry;
-      }
-    }
-  }
-
-  console.log(`[videos]       ✗ Nenhum arquivo source.* encontrado (exceto .json)`);
-  return null;
-}
-
-function listVideos(rootDir: string, prefix: string, archived: boolean): VideoRecord[] {
-  console.log(`\n[videos] Listando vídeos:`);
-  console.log(`[videos]   Root dir: ${rootDir}`);
-  console.log(`[videos]   Prefix: ${prefix}`);
-  console.log(`[videos]   Archived: ${archived}`);
-
+function collectVideoFiles(
+  rootDir: string,
+  archived: boolean,
+): Array<{ fileName: string; filePath: string; videoName: string }> {
   if (!fs.existsSync(rootDir)) {
-    console.log(`[videos]   ⚠ Diretório não existe`);
     return [];
   }
 
   const entries = fs.readdirSync(rootDir);
-  console.log(`[videos]   Entradas encontradas: ${entries.length}`);
-  const records: VideoRecord[] = [];
+  const results: Array<{ fileName: string; filePath: string }> = [];
 
   for (const entry of entries) {
-    const entryPath = path.join(rootDir, entry);
-    if (!fs.statSync(entryPath).isDirectory()) continue;
+    if (!archived && entry === "_archived") continue;
 
-    console.log(`[videos]   Verificando job: ${entry}`);
-    const fileName = findSourceVideoFile(entryPath);
-    if (!fileName) {
-      console.log(`[videos]     ⚠ Nenhum arquivo source encontrado`);
+    const entryPath = path.join(rootDir, entry);
+    const stat = fs.statSync(entryPath);
+
+    if (!stat.isDirectory()) {
       continue;
     }
 
-    console.log(`[videos]     ✓ Arquivo encontrado: ${fileName}`);
-    const job = readJob(entry);
-    const videoPath = `${prefix}/${entry}/${fileName}`;
-    console.log(`[videos]     ✓ Video path: ${videoPath}`);
+    const inner = fs.readdirSync(entryPath);
+    const videoFile = inner.find((file) => file.startsWith("video.") && isVideoFile(file));
+    if (videoFile) {
+      results.push({
+        fileName: videoFile,
+        filePath: path.join(entryPath, videoFile),
+        videoName: entry,
+      });
+    }
+  }
 
+  return results;
+}
+
+function mapJobsBySourcePath(): Map<string, Job> {
+  const jobs = metadata.listJobs();
+  const map = new Map<string, Job>();
+  for (const job of jobs) {
+    if (job.source_video_path) {
+      map.set(path.normalize(job.source_video_path), job);
+    }
+  }
+  return map;
+}
+
+function ensureJobForVideo(
+  filePath: string,
+  fileName: string,
+  videoName: string,
+  jobsByPath: Map<string, Job>,
+): Job {
+  const normalizedPath = path.normalize(filePath);
+  const existing = jobsByPath.get(normalizedPath);
+  if (existing) {
+    return existing;
+  }
+
+  const jobId = uuidv4().replace(/-/g, "");
+  const job: Job = {
+    job_id: jobId,
+    youtube_url: `[Local Video] ${videoName}`,
+    status: "DOWNLOADED",
+    created_at: new Date().toISOString(),
+    source_video_path: filePath,
+    source_file_name: fileName,
+    video_name: videoName,
+  };
+  metadata.saveJob(job);
+  return job;
+}
+
+function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
+  console.log(`\n[videos] Listando vídeos:`);
+  console.log(`[videos]   Root dir: ${rootDir}`);
+  console.log(`[videos]   Archived: ${archived}`);
+
+  const items = collectVideoFiles(rootDir, archived);
+  const records: VideoRecord[] = [];
+
+  // Cache mapping uma única vez ao invés de para cada vídeo
+  const jobsByPath = mapJobsBySourcePath();
+
+  for (const item of items) {
+    const job = ensureJobForVideo(item.filePath, item.fileName, item.videoName, jobsByPath);
     records.push({
       job,
-      job_id: entry,
-      video_path: videoPath,
+      job_id: job.job_id,
+      video_path: `/media/videos/${job.job_id}`,
       archived,
     });
   }
@@ -107,52 +129,62 @@ function listVideos(rootDir: string, prefix: string, archived: boolean): VideoRe
 
 const videosRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/videos", async () => {
-    return listVideos(uploadDir(), "/upload", false);
+    const settings = loadSettings();
+    return listVideosFromDir(settings.media.base_dir, false);
   });
 
   fastify.get("/videos/archived", async () => {
-    return listVideos(archivedDir(), "/arquivados", true);
+    return listVideosFromDir(archivedVideosDir(), true);
   });
 
   fastify.post<{ Params: { job_id: string } }>(
     "/videos/:job_id/archive",
     async (request, reply) => {
       const { job_id } = request.params;
-      const sourceDir = uploadJobDir(job_id);
-      const targetDir = archivedJobDir(job_id);
+      const job = metadata.loadJob(job_id);
 
-      if (!fs.existsSync(sourceDir)) {
+      const videoName = job.video_name || job_id;
+      const videoDir = getVideoDir(job_id, videoName);
+
+      if (!fs.existsSync(videoDir)) {
         return reply.code(404).send({ detail: "Video not found" });
       }
 
-      fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-      fs.renameSync(sourceDir, targetDir);
+      const targetDir = getArchivedVideoDir(videoName);
+      fs.renameSync(videoDir, targetDir);
+
+      const filesInDir = fs.readdirSync(targetDir);
+      const videoFile = filesInDir.find((file) => file.startsWith("video."));
+      if (videoFile) {
+        job.source_video_path = path.join(targetDir, videoFile);
+      }
+      job.updated_at = new Date().toISOString();
+      metadata.saveJob(job);
+
       return { ok: true, job_id };
     },
   );
 
   fastify.delete<{ Params: { job_id: string } }>("/videos/:job_id", async (request, reply) => {
     const { job_id } = request.params;
-    const uploadPath = uploadJobDir(job_id);
-    const archivedPath = archivedJobDir(job_id);
-    const dataPath = jobDir(job_id);
 
-    let removed = false;
-    if (fs.existsSync(uploadPath)) {
-      fs.rmSync(uploadPath, { recursive: true, force: true });
-      removed = true;
+    try {
+      const job = metadata.loadJob(job_id);
+      if (job.source_video_path) {
+        const videoDir = path.dirname(job.source_video_path);
+        if (fs.existsSync(videoDir)) {
+          fs.rmSync(videoDir, { recursive: true, force: true });
+        }
+      }
+    } catch (error) {
+      return reply.code(404).send({ detail: "Video not found" });
     }
-    if (fs.existsSync(archivedPath)) {
-      fs.rmSync(archivedPath, { recursive: true, force: true });
-      removed = true;
-    }
+
+    files.deleteRenderOutputs(job_id);
+
+    const dataPath = jobDir(job_id);
     if (fs.existsSync(dataPath)) {
       fs.rmSync(dataPath, { recursive: true, force: true });
-      removed = true;
-    }
-
-    if (!removed) {
-      return reply.code(404).send({ detail: "Video not found" });
     }
 
     return { ok: true, job_id };

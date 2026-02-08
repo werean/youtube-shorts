@@ -6,6 +6,11 @@ import { FastifyPluginAsync } from "fastify";
 import { SYSTEM_PROMPT_TEMPLATE } from "../llm/prompts";
 import { execSync } from "child_process";
 import { INSTALLATION_GUIDES } from "./installer";
+import { loadSettings, updateSettings } from "../core/settings";
+import type { AppSettings } from "../core/settings";
+import { homedir } from "os";
+import * as fs from "fs";
+import * as path from "path";
 
 interface DependencyStatus {
   installed: boolean;
@@ -59,13 +64,14 @@ const configRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/", async (request, reply) => {
+    const settings = loadSettings();
     return {
       whisper: {
-        device: process.env.WHISPER_DEVICE || "cpu",
-        formats: process.env.WHISPER_FORMATS || "json,vtt,txt",
+        device: settings.whisper.device,
+        formats: settings.whisper.formats.join(","),
       },
       llm: {
-        model: process.env.LLM_MODEL || "llama2",
+        model: settings.llm.model,
       },
     };
   });
@@ -165,6 +171,117 @@ const configRoutes: FastifyPluginAsync = async (fastify) => {
         error: error.message,
         command: guide.automatic.command,
       });
+    }
+  });
+
+  // Get user settings
+  fastify.get("/settings", async (request, reply) => {
+    try {
+      const settings = loadSettings();
+      return settings;
+    } catch (error: any) {
+      reply.code(500).send({ detail: error.message });
+    }
+  });
+
+  // Update user settings
+  fastify.post("/settings", async (request: any, reply) => {
+    try {
+      const body = request.body as Partial<AppSettings>;
+      console.log(`[config] Atualizando settings:`, body);
+
+      // Validate base_dir if provided
+      if (body.media?.base_dir) {
+        const baseDir = body.media.base_dir;
+
+        // Check if path exists or can be created
+        if (!fs.existsSync(baseDir)) {
+          console.log(`[config] Criando diretório: ${baseDir}`);
+          fs.mkdirSync(baseDir, { recursive: true });
+        }
+      }
+
+      const updatedSettings = updateSettings(body);
+      console.log(`[config] ✓ Settings atualizadas`);
+      return updatedSettings;
+    } catch (error: any) {
+      console.error(`[config] ✗ Erro ao atualizar settings:`, error.message);
+      reply.code(500).send({ detail: error.message });
+    }
+  });
+
+  // Get common user folders
+  fastify.get("/common-folders", async (request, reply) => {
+    try {
+      const home = homedir();
+      const folders: { name: string; path: string; exists: boolean }[] = [
+        {
+          name: "📥 Downloads",
+          path: path.join(home, "Downloads"),
+          exists: false,
+        },
+        {
+          name: "📄 Documentos",
+          path: path.join(home, "Documents"),
+          exists: false,
+        },
+        {
+          name: "🏠 Home",
+          path: home,
+          exists: false,
+        },
+        {
+          name: "🖥️ Desktop",
+          path: path.join(home, "Desktop"),
+          exists: false,
+        },
+      ];
+
+      // Check which folders exist
+      folders.forEach((folder) => {
+        folder.exists = fs.existsSync(folder.path);
+      });
+
+      return { folders };
+    } catch (error: any) {
+      reply.code(500).send({ detail: error.message });
+    }
+  });
+
+  // Open folder picker dialog
+  fastify.post("/select-folder", async (request, reply) => {
+    try {
+      console.log(`[config] Abrindo seletor de pasta...`);
+
+      // PowerShell script using Shell.Application for modern folder picker
+      const psScript = `
+$shell = New-Object -ComObject Shell.Application;
+$folder = $shell.BrowseForFolder(0, 'Selecione a pasta para armazenar os arquivos', 0x200, 0);
+if ($folder -ne $null) {
+    $folderPath = $folder.Self.Path;
+    Write-Output $folderPath
+}
+      `.trim();
+
+      // Encode to base64 to avoid escaping issues
+      const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
+
+      const output = execSync(`powershell -NoProfile -EncodedCommand ${encodedScript}`, {
+        encoding: "utf-8",
+        timeout: 60000, // 1 minute timeout
+        windowsHide: false,
+      }).trim();
+
+      console.log(`[config] Pasta selecionada: ${output}`);
+
+      if (!output) {
+        return { selected: false, path: null };
+      }
+
+      return { selected: true, path: output };
+    } catch (error: any) {
+      console.error(`[config] ✗ Erro ao abrir seletor de pasta:`, error.message);
+      reply.code(500).send({ detail: error.message });
     }
   });
 };

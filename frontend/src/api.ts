@@ -124,8 +124,12 @@ export async function rejectCut(jobId: string, cutId: string): Promise<Cut> {
   return request(`/jobs/${jobId}/cuts/${cutId}/reject`, { method: "POST" });
 }
 
-export async function renderJob(jobId: string): Promise<string[]> {
+export async function renderJob(jobId: string): Promise<{ started: boolean }> {
   return request(`/jobs/${jobId}/render`, { method: "POST" });
+}
+
+export async function listRenderOutputs(jobId: string): Promise<string[]> {
+  return request(`/jobs/${jobId}/renders`);
 }
 
 export async function listVideos(): Promise<VideoRecord[]> {
@@ -142,6 +146,10 @@ export async function archiveVideo(jobId: string): Promise<{ ok: boolean; job_id
 
 export async function deleteVideo(jobId: string): Promise<{ ok: boolean; job_id: string }> {
   return request(`/videos/${jobId}`, { method: "DELETE" });
+}
+
+export async function renameVideo(jobId: string, newName: string): Promise<Job> {
+  return request(`/jobs/${jobId}/rename`, { method: "POST", body: { new_name: newName } });
 }
 
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
@@ -195,4 +203,36 @@ export async function installDependency(name: string): Promise<{
   return request(`/config/dependencies/${name}/install`, {
     method: "POST",
   });
+}
+
+export interface AppSettings {
+  media: {
+    base_dir: string;
+  };
+  preferences: {
+    ask_move_on_upload: boolean;
+    move_uploads: boolean;
+  };
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  return request("/config/settings");
+}
+
+export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+  return request("/config/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function getCommonFolders(): Promise<{
+  folders: { name: string; path: string; exists: boolean }[];
+}> {
+  return request("/config/common-folders");
+}
+
+export async function selectFolder(): Promise<{ selected: boolean; path: string | null }> {
+  return request("/config/select-folder", { method: "POST" });
 }

@@ -6,11 +6,13 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import staticPlugin from "@fastify/static";
 import multipart from "@fastify/multipart";
-import { archivedDir, uploadDir } from "./core/paths";
+import { archivedDir, dataDir, uploadDir } from "./core/paths";
 import healthRoutes from "./api/health";
 import jobsRoutes from "./api/jobs";
 import videosRoutes from "./api/videos";
+import mediaRoutes from "./api/media";
 import configRoutes from "./api/config";
+import mediaRoutes from "./api/media";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -39,6 +41,12 @@ fastify.register(staticPlugin, {
 });
 
 fastify.register(staticPlugin, {
+  root: dataDir(),
+  prefix: "/data",
+  decorateReply: false,
+});
+
+fastify.register(staticPlugin, {
   root: archivedDir(),
   prefix: "/arquivados",
   decorateReply: false,
@@ -48,11 +56,16 @@ fastify.register(staticPlugin, {
 fastify.register(healthRoutes);
 fastify.register(jobsRoutes, { prefix: "/jobs" });
 fastify.register(videosRoutes);
+fastify.register(mediaRoutes);
 fastify.register(configRoutes, { prefix: "/config" });
 
 // Hook para logar todas as requisições
 fastify.addHook("onRequest", async (request, reply) => {
-  if (request.url.startsWith("/upload") || request.url.startsWith("/arquivados")) {
+  if (
+    request.url.startsWith("/upload") ||
+    request.url.startsWith("/arquivados") ||
+    request.url.startsWith("/data")
+  ) {
     console.log(`\n[static] 📁 Requisição de arquivo estático:`);
     console.log(`[static]   URL: ${request.url}`);
     console.log(`[static]   Method: ${request.method}`);
@@ -61,7 +74,11 @@ fastify.addHook("onRequest", async (request, reply) => {
 
 // Hook para logar respostas de arquivos estáticos
 fastify.addHook("onSend", async (request, reply, payload) => {
-  if (request.url.startsWith("/upload") || request.url.startsWith("/arquivados")) {
+  if (
+    request.url.startsWith("/upload") ||
+    request.url.startsWith("/arquivados") ||
+    request.url.startsWith("/data")
+  ) {
     console.log(`[static] ✓ Respondendo:`);
     console.log(`[static]   Status: ${reply.statusCode}`);
     console.log(`[static]   Content-Type: ${reply.getHeader("content-type")}`);

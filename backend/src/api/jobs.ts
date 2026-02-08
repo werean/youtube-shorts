@@ -18,6 +18,7 @@ import * as rendering from "../pipeline/rendering";
 import * as orchestrator from "../pipeline/orchestrator";
 import * as files from "../storage/files";
 import * as paths from "../core/paths";
+import { getVideoFilePath } from "../core/settings";
 
 interface CreateJobRequest {
   youtube_url: string;
@@ -47,8 +48,7 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
 
       console.log(`[POST /jobs] Salvando job...`);
       metadata.saveJob(job);
-      console.log(`[POST /jobs] ✓ Job criado com sucesso: ${jobId}`);
-      return job;
+      return { job };
     } catch (error: any) {
       console.error(`[POST /jobs] ✗ Erro:`, error.message);
       console.error(`[POST /jobs] Stack:`, error.stack);
@@ -56,7 +56,6 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  // Upload video file
   fastify.post("/upload", async (request, reply) => {
     try {
       console.log(`[POST /jobs/upload] Request recebido`);
@@ -72,20 +71,18 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       const jobId = uuidv4().replace(/-/g, "");
       console.log(`[POST /jobs/upload] Job ID gerado: ${jobId}`);
 
-      // Create upload directory
-      const uploadJobDir = paths.uploadJobDir(jobId);
-      if (!fs.existsSync(uploadJobDir)) {
-        fs.mkdirSync(uploadJobDir, { recursive: true });
-      }
+      // Get video name from filename
+      const videoName = path.basename(data.filename, path.extname(data.filename));
 
-      // Determine file extension
-      const fileExtension = path.extname(data.filename);
-      const videoFileName = `source${fileExtension}`;
-      const videoPath = path.join(uploadJobDir, videoFileName);
+      // Create video directory and save with standard name
+      const fileExtension = path.extname(data.filename) || ".mp4";
+      const videoPath = getVideoFilePath(jobId, videoName, fileExtension);
+      const videoDir = path.dirname(videoPath);
+      fs.mkdirSync(videoDir, { recursive: true });
 
       console.log(`[POST /jobs/upload] Salvando em: ${videoPath}`);
 
-      // Save file
+      // Save file with standard name
       await pipeline(data.file, fs.createWriteStream(videoPath));
       console.log(`[POST /jobs/upload] ✓ Arquivo salvo`);
 
@@ -95,6 +92,9 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         youtube_url: `[Local Upload] ${data.filename}`,
         status: JobStatus.DOWNLOADED,
         created_at: new Date().toISOString(),
+        source_video_path: videoPath,
+        source_file_name: data.filename,
+        video_name: videoName,
       };
 
       console.log(`[POST /jobs/upload] Salvando job...`);
@@ -103,7 +103,7 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
 
       return {
         job: job,
-        video_path: videoFileName,
+        video_path: `/media/videos/${jobId}`,
       };
     } catch (error: any) {
       console.error(`[POST /jobs/upload] ✗ Erro:`, error.message);
@@ -134,13 +134,10 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       const job = metadata.loadJob(job_id);
       const result = ingest.ingestVideo(job);
 
-      // Extract just the filename for the frontend
-      const videoFileName = result.video_path.split(/[\\/]/).pop() || "source.mp4";
-
       return {
-        video_path: videoFileName,
+        video_path: `/media/videos/${job_id}`,
         metadata_path: result.metadata_path,
-        full_path: result.video_path, // Keep full path for debugging
+        full_path: result.video_path,
       };
     } catch (error: any) {
       reply.code(500).send({ detail: error.message });
@@ -153,7 +150,7 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       const { job_id } = request.params;
       console.log(`[jobs] Transcribing job: ${job_id}`);
       const formats = { text: true, vtt: true };
-      const segments = transcription.transcribeJob(job_id, formats);
+      const segments = await transcription.transcribeJob(job_id, formats);
 
       // Combine segments into full transcription text
       const transcriptionText = segments.map((s: any) => s.text).join(" ");
@@ -395,9 +392,22 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/render", async (request, reply) => {
     try {
       const { job_id } = request.params;
-      console.log(`[jobs] Rendering approved cuts for job: ${job_id}`);
-      const outputs = rendering.renderSuggestedCuts(job_id);
-      return outputs;
+      console.log(`[jobs] Rendering suggested cuts for job: ${job_id}`);
+      void rendering.renderSuggestedCuts(job_id).catch((error) => {
+        console.error(`[jobs] Render failed for job ${job_id}:`, error);
+        metadata.updateJobStatus(job_id, JobStatus.ERROR);
+      });
+      return { started: true };
+    } catch (error: any) {
+      reply.code(500).send({ detail: error.message });
+    }
+  });
+
+  fastify.get<{ Params: { job_id: string } }>("/:job_id/renders", async (request, reply) => {
+    try {
+      const { job_id } = request.params;
+      console.log(`[jobs] Listing renders for job: ${job_id}`);
+      return rendering.listRenderOutputs(job_id);
     } catch (error: any) {
       reply.code(500).send({ detail: error.message });
     }
@@ -414,6 +424,33 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
 
         console.log(`[jobs] Running pipeline for job ${job_id} (include_render=${includeRender})`);
         const job = await orchestrator.runPipeline(job_id, { includeRender });
+        return job;
+      } catch (error: any) {
+        reply.code(500).send({ detail: error.message });
+      }
+    },
+  );
+
+  // Rename video and associated folders
+  fastify.post<{ Params: { job_id: string }; Body: { new_name: string } }>(
+    "/:job_id/rename",
+    async (request, reply) => {
+      try {
+        const { job_id } = request.params;
+        const { new_name } = request.body;
+
+        if (!new_name || typeof new_name !== "string" || !new_name.trim()) {
+          return reply.code(400).send({ detail: "new_name is required" });
+        }
+
+        console.log(`[jobs] Renaming job ${job_id} to "${new_name}"`);
+        const success = files.renameVideo(job_id, new_name.trim());
+
+        if (!success) {
+          return reply.code(500).send({ detail: "Failed to rename video" });
+        }
+
+        const job = metadata.loadJob(job_id);
         return job;
       } catch (error: any) {
         reply.code(500).send({ detail: error.message });

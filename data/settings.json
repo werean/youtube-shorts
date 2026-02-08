@@ -1,0 +1,24 @@
+{
+  "media": {
+    "base_dir": "C:\\Users\\lucas\\Downloads\\uploads",
+    "videos_dir": "C:\\Users\\lucas\\Downloads\\uploads\\videos",
+    "shorts_dir": "C:\\Users\\lucas\\Downloads\\uploads\\shorts",
+    "transcriptions_dir": "C:\\Users\\lucas\\Downloads\\uploads\\transcrições"
+  },
+  "preferences": {
+    "ask_move_on_upload": true,
+    "move_uploads": true
+  },
+  "whisper": {
+    "device": "cuda",
+    "formats": [
+      "json",
+      "vtt",
+      "txt",
+      "srt"
+    ]
+  },
+  "llm": {
+    "model": "llama2"
+  }
+}
