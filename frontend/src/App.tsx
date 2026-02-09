@@ -2329,7 +2329,7 @@ export default function App() {
 
       {showBatchPipelineDialog && (
         <BatchPipelineDialog
-          videos={videos}
+          videos={videos as any}
           selectedVideosForBatch={selectedVideosForBatch}
           batchPipelineOptions={batchPipelineOptions}
           isBatchProcessing={isBatchProcessing}

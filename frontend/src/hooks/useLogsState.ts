@@ -75,7 +75,7 @@ export function useLogs() {
     startLogsPolling,
     stopLogsPolling,
     startIngestLogsPolling,
-    stopIngestLogsPolling,
+    stopIngestPolling,
     pollTaskLogs,
   };
 }
