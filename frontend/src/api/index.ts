@@ -28,6 +28,16 @@ export { cancelTranscription, cancelRendering } from "./cancel";
 // Logs API
 export { getJobLogs } from "./logs";
 
+// Batch Pipeline API
+export {
+  startBatchPipeline,
+  getBatchPipelineStatus,
+  cancelBatchPipeline,
+  continueBatchPipeline,
+  type BatchPipelineOptions,
+  type BatchPipelineProgress,
+} from "./batchPipeline";
+
 // Config API
 export {
   getLLMPrompt,

@@ -23,6 +23,8 @@ interface VideoRecord {
   job_id: string;
   video_path: string;
   archived: boolean;
+  hasTranscription?: boolean;
+  hasAnalysis?: boolean;
 }
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"]);
@@ -120,6 +122,8 @@ function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
       job_id: job.job_id,
       video_path: `/media/videos/${job.job_id}`,
       archived,
+      hasTranscription: files.hasTranscription(job.job_id),
+      hasAnalysis: files.hasAnalysis(job.job_id),
     });
   }
 

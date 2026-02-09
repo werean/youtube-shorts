@@ -1,0 +1,20 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Fraunces:wght@500;700&display=swap");
+
+:root {
+  color-scheme: light;
+  font-family: "Archivo", sans-serif;
+
+  /* Colors */
+  --bg: #f6efe4;
+  --bg-contrast: #efe3d2;
+  --ink: #1c1a16;
+  --muted: #5b5349;
+  --accent: #d97b2b;
+  --accent-dark: #b86423;
+  --accent-2: #1f8a70;
+  --panel: #fff7ec;
+  --border: #e3d7c5;
+
+  /* Effects */
+  --shadow: 0 20px 50px rgba(31, 20, 10, 0.12);
+}

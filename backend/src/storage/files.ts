@@ -226,6 +226,24 @@ export function cutsPath(jobId: string): string {
   return path.join(ensureJobDir(jobId), "cuts.suggested.json");
 }
 
+export function hasTranscription(jobId: string): boolean {
+  try {
+    const segmentsPath = transcriptionPath(jobId);
+    return fs.existsSync(segmentsPath);
+  } catch (error) {
+    return false;
+  }
+}
+
+export function hasAnalysis(jobId: string): boolean {
+  try {
+    const cutsFilePath = cutsPath(jobId);
+    return fs.existsSync(cutsFilePath);
+  } catch (error) {
+    return false;
+  }
+}
+
 export function rendersDir(jobId: string): string {
   return ensureShortsJobDir(jobId);
 }

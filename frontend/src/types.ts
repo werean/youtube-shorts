@@ -44,4 +44,6 @@ export interface VideoRecord {
   job_id: string;
   video_path: string;
   archived: boolean;
+  hasTranscription?: boolean;
+  hasAnalysis?: boolean;
 }

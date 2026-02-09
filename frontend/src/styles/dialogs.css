@@ -1,0 +1,139 @@
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.dialog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 1001;
+  position: relative;
+  box-shadow: var(--shadow);
+}
+
+.dialog.wide {
+  max-width: 800px;
+}
+
+.dialog.scrollable {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-header h3 {
+  margin: 0;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-content {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.transcription-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* Loading states */
+.dialog-loading {
+  text-align: center;
+  color: var(--muted);
+  padding: 40px 20px;
+}
+
+/* Info boxes */
+.info-box {
+  margin-bottom: 20px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.info-box.light {
+  background: #f9fafb;
+}
+
+.info-box.success {
+  background: #f0fdf4;
+  border-left: 4px solid #10b981;
+}
+
+.info-box-title {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.info-box-text {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.info-box code {
+  display: block;
+  padding: 8px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 11px;
+  word-break: break-all;
+  font-family: monospace;
+}
+
+/* Lists in dialogs */
+.dialog-list {
+  margin-left: 20px;
+  line-height: 1.8;
+  font-size: 14px;
+}
+
+.dialog-list li {
+  margin-bottom: 8px;
+}
+
+.dialog-link {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.dialog-link:hover {
+  text-decoration: underline;
+}

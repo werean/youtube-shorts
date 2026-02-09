@@ -13,6 +13,7 @@ import { registerAnalysisRoutes } from "./registerAnalysisRoutes";
 import { registerCutsRoutes } from "./registerCutsRoutes";
 import { registerRenderRoutes } from "./registerRenderRoutes";
 import { registerPipelineRoutes } from "./registerPipelineRoutes";
+import { registerBatchPipelineRoutes } from "./registerBatchPipelineRoutes";
 import { registerRenameRoutes } from "./registerRenameRoutes";
 import { registerLogsRoutes } from "./registerLogsRoutes";
 
@@ -27,6 +28,7 @@ const jobsRoutes: FastifyPluginAsync = async (fastify) => {
   registerCutsRoutes(fastify);
   registerRenderRoutes(fastify);
   registerPipelineRoutes(fastify);
+  registerBatchPipelineRoutes(fastify);
   registerRenameRoutes(fastify);
   registerLogsRoutes(fastify);
 };

@@ -40,195 +40,47 @@ import {
   importToolConfigs,
   getCommonFolders,
   selectFolder,
+  startBatchPipeline,
+  getBatchPipelineStatus,
+  cancelBatchPipeline,
+  continueBatchPipeline,
   type AppSettings,
+  type BatchPipelineProgress,
 } from "./api";
 import { getJobLogs } from "./api/logs";
 import { WhisperConfigDialog } from "./components/WhisperConfigDialog";
 import { FFmpegConfigDialog } from "./components/FFmpegConfigDialog";
+import { InstallationInstructionsDialog } from "./components/InstallationInstructionsDialog";
+import { ConfigurationSection } from "./components/ConfigurationSection";
+import { ActionCard } from "./components/ActionCard";
+import { DependenciesDialog } from "./components/DependenciesDialog";
+import { BatchPipelineDialog } from "./components/BatchPipelineDialog";
+import { LLMConfigDialog } from "./components/LLMConfigDialog";
+import { ConfigureAppDialog } from "./components/ConfigureAppDialog";
+import { TimestampDialog } from "./components/TimestampDialog";
+import { SimpleDialogs } from "./components/SimpleDialogs";
+import { CurationSection } from "./components/CurationSection";
+import { RenderingSection } from "./components/RenderingSection";
+import { UploadSection } from "./components/UploadSection";
+import { VideoListSection } from "./components/VideoListSection";
+import {
+  formatTimestamp,
+  buildRenderUrl as buildRenderUrlUtil,
+  parseTimestampInput,
+} from "./utils/formatters";
+import {
+  VideoItem,
+  recordToVideoItem,
+  buildVtt,
+  getTranscriptionContent,
+} from "./utils/videoHelpers";
 
 interface ActionState {
   busy: boolean;
   error?: string;
 }
 
-interface VideoItem {
-  job: Job;
-  videoPath?: string;
-  transcription?: string;
-  transcriptionSegments?: Segment[];
-  transcriptionFormats?: { segments?: boolean; text?: boolean; vtt?: boolean };
-  isTranscribing?: boolean;
-  transcriptionLogs?: string[];
-}
-
 const initialAction: ActionState = { busy: false };
-
-interface InstallationGuideData {
-  name: string;
-  manual: {
-    title: string;
-    description: string;
-    steps: string[];
-    links?: { text: string; url: string }[];
-  };
-  automatic?: {
-    command: string;
-    description: string;
-  };
-}
-
-function InstallationInstructionsDialog({
-  dependencyName,
-  onClose,
-}: {
-  dependencyName: string;
-  onClose: () => void;
-}) {
-  const [guide, setGuide] = useState<InstallationGuideData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await getInstallationGuide(dependencyName);
-        setGuide(data as InstallationGuideData);
-      } catch (error) {
-        console.error("Failed to load installation guide:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [dependencyName]);
-
-  if (isLoading) {
-    return (
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-      >
-        <p style={{ textAlign: "center", color: "#666" }}>Carregando instruções...</p>
-      </div>
-    );
-  }
-
-  if (!guide) {
-    return (
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-      >
-        <p style={{ textAlign: "center", color: "#666" }}>Erro ao carregar instruções</p>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="dialog"
-      onClick={(e) => e.stopPropagation()}
-      style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-    >
-      <div className="dialog-header">
-        <h3>{guide.manual.title}</h3>
-        <div className="dialog-actions">
-          <button className="icon-btn close-btn" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-      </div>
-      <div className="dialog-content" style={{ padding: "20px" }}>
-        <p style={{ marginBottom: "16px", color: "#666" }}>{guide.manual.description}</p>
-
-        <div style={{ marginBottom: "20px" }}>
-          <h4 style={{ marginBottom: "12px", fontSize: "14px", fontWeight: "600" }}>Passos:</h4>
-          <ol style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px", color: "#333" }}>
-            {guide.manual.steps.map((step, idx) => (
-              <li key={idx} style={{ marginBottom: "8px" }}>
-                {step}
-              </li>
-            ))}
-          </ol>
-        </div>
-
-        {guide.manual.links && guide.manual.links.length > 0 && (
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "12px",
-              background: "#f9fafb",
-              borderRadius: "8px",
-            }}
-          >
-            <h4 style={{ marginBottom: "8px", fontSize: "14px", fontWeight: "600" }}>
-              Links úteis:
-            </h4>
-            <ul style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px" }}>
-              {guide.manual.links.map((link, idx) => (
-                <li key={idx}>
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "#3b82f6" }}
-                  >
-                    {link.text}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {guide.automatic && (
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "12px",
-              background: "#f0fdf4",
-              borderRadius: "8px",
-              borderLeft: "4px solid #10b981",
-            }}
-          >
-            <h4 style={{ marginBottom: "8px", fontSize: "14px", fontWeight: "600" }}>
-              Instalação Automática:
-            </h4>
-            <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
-              {guide.automatic.description}
-            </p>
-            <code
-              style={{
-                display: "block",
-                padding: "8px",
-                background: "#f5f5f5",
-                borderRadius: "4px",
-                fontSize: "11px",
-                wordBreak: "break-all",
-                fontFamily: "monospace",
-              }}
-            >
-              {guide.automatic.command}
-            </code>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "20px" }}>
-          <button
-            onClick={onClose}
-            className="primary"
-            style={{
-              padding: "10px 20px",
-              borderRadius: "8px",
-            }}
-          >
-            Fechar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -298,6 +150,23 @@ export default function App() {
   const [showFFmpegConfigDialog, setShowFFmpegConfigDialog] = useState(false);
   const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
   const [showInstallationDialog, setShowInstallationDialog] = useState(false);
+  const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
+  const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
+  const [batchPipelineOptions, setBatchPipelineOptions] = useState({
+    transcription: true,
+    analysis: false,
+    render: false,
+    preApprove: false,
+  });
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [batchProcessingLogs, setBatchProcessingLogs] = useState<string[]>([]);
+  const [currentBatchVideoIndex, setCurrentBatchVideoIndex] = useState(0);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const batchPollRef = useRef<number | null>(null);
+  const [showBatchCompletionNotification, setShowBatchCompletionNotification] = useState(false);
+  const [batchCompletionMessage, setBatchCompletionMessage] = useState("");
+  const [batchWaitingForApproval, setBatchWaitingForApproval] = useState(false);
+  const [batchPendingCuts, setBatchPendingCuts] = useState<any[]>([]);
   const [showConfigureAppDialog, setShowConfigureAppDialog] = useState(false);
   const [selectedDependencyForInstall, setSelectedDependencyForInstall] = useState<string | null>(
     null,
@@ -482,6 +351,114 @@ export default function App() {
     }
   }
 
+  function startBatchPolling(batchId: string) {
+    if (batchPollRef.current) {
+      window.clearInterval(batchPollRef.current);
+    }
+
+    const pollBatch = async () => {
+      try {
+        const progress = await getBatchPipelineStatus(batchId);
+
+        // Update current video index
+        setCurrentBatchVideoIndex(progress.current_job_index);
+
+        // Check if waiting for approval
+        if (progress.waiting_for_approval) {
+          setBatchWaitingForApproval(true);
+          if (progress.pending_cuts) {
+            setBatchPendingCuts(progress.pending_cuts);
+          }
+
+          const approvalLog = `⏸️ Aguardando aprovação dos cortes do vídeo ${progress.current_job_index + 1}`;
+          setBatchProcessingLogs((prev) => {
+            if (prev[prev.length - 1] !== approvalLog) {
+              return [...prev, approvalLog];
+            }
+            return prev;
+          });
+          return; // Don't update other logs while waiting
+        } else {
+          setBatchWaitingForApproval(false);
+          setBatchPendingCuts([]);
+        }
+
+        // Generate log messages based on progress
+        const stepLabels: Record<string, string> = {
+          starting: "Iniciando...",
+          transcription: "Transcrição",
+          semantic_blocks: "Blocos Semânticos",
+          analysis: "Análise com IA",
+          rendering: "Renderização",
+          completed: "Concluído",
+          waiting_approval: "Aguardando aprovação",
+        };
+
+        const newLog = `📌 Vídeo ${progress.current_job_index + 1} - ${stepLabels[progress.current_step] || progress.current_step}`;
+
+        setBatchProcessingLogs((prev) => {
+          // Avoid duplicate logs
+          if (prev[prev.length - 1] !== newLog) {
+            return [...prev, newLog];
+          }
+          return prev;
+        });
+
+        // Check if processing completed
+        if (!progress.is_running) {
+          stopBatchPolling();
+          setIsBatchProcessing(false);
+          setBatchWaitingForApproval(false);
+
+          // Add summary
+          const completionMessage = `Pipeline em Lote Concluído!\n\nSucesso: ${progress.completed_jobs.length}\nFalhas: ${progress.failed_jobs.length}`;
+
+          setBatchProcessingLogs((prev) => [
+            ...prev,
+            "",
+            `✅ Processamento concluído!`,
+            `   Sucesso: ${progress.completed_jobs.length}`,
+            `   Falhas: ${progress.failed_jobs.length}`,
+          ]);
+
+          // List failed jobs if any
+          if (progress.failed_jobs.length > 0) {
+            setBatchProcessingLogs((prev) => [
+              ...prev,
+              "",
+              "❌ Jobs com falha:",
+              ...progress.failed_jobs.map((f) => `   - ${f.job_id}: ${f.error}`),
+            ]);
+          }
+
+          // Show completion notification
+          setBatchCompletionMessage(completionMessage);
+          setShowBatchCompletionNotification(true);
+
+          // Refresh video list
+          const activeVideos = await listVideos();
+          setVideos(activeVideos.map(recordToVideoItem));
+        }
+      } catch (error: any) {
+        console.error("[UI] Error polling batch status:", error);
+        stopBatchPolling();
+        setBatchProcessingLogs((prev) => [...prev, `❌ Erro ao buscar status: ${error.message}`]);
+        setIsBatchProcessing(false);
+      }
+    };
+
+    // Poll immediately and then every 2 seconds
+    pollBatch();
+    batchPollRef.current = window.setInterval(pollBatch, 2000);
+  }
+
+  function stopBatchPolling() {
+    if (batchPollRef.current) {
+      window.clearInterval(batchPollRef.current);
+      batchPollRef.current = null;
+    }
+  }
+
   async function pollIngestLogs(jobId: string) {
     try {
       const result = await getJobLogs(jobId, "ingest");
@@ -544,54 +521,9 @@ export default function App() {
     );
   }
 
-  function recordToVideoItem(record: VideoRecord): VideoItem {
-    const job =
-      record.job ||
-      ({
-        job_id: record.job_id,
-        youtube_url: "Video sem metadata",
-        status: "CREATED",
-        created_at: new Date().toISOString(),
-      } as Job);
-
-    return {
-      job,
-      videoPath: record.video_path,
-      transcriptionLogs: [],
-    };
-  }
-
-  function formatVttTimestamp(seconds: number): string {
-    const totalMs = Math.max(0, Math.floor(seconds * 1000));
-    const ms = totalMs % 1000;
-    const totalSeconds = Math.floor(totalMs / 1000);
-    const s = totalSeconds % 60;
-    const totalMinutes = Math.floor(totalSeconds / 60);
-    const m = totalMinutes % 60;
-    const h = Math.floor(totalMinutes / 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
-  }
-
-  function formatTimestamp(seconds: number): string {
-    const total = Math.max(0, Math.round(seconds));
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-
-    if (h > 0) {
-      return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    }
-    return `${m}:${String(s).padStart(2, "0")}`;
-  }
-
+  // Helper to build render URL with cache busting
   function buildRenderUrl(renderPath: string): string {
-    if (!renderPath) return "";
-    if (renderPath.startsWith("http://") || renderPath.startsWith("https://")) {
-      return renderPath;
-    }
-    const normalized = renderPath.startsWith("/") ? renderPath : `/${renderPath}`;
-    const separator = normalized.includes("?") ? "&" : "?";
-    return `${apiBaseUrl}${normalized}${separator}v=${renderOutputsVersion}`;
+    return buildRenderUrlUtil(renderPath, renderOutputsVersion);
   }
 
   // Find any video currently transcribing or rendering
@@ -640,6 +572,9 @@ export default function App() {
       }
       if (ingestLogsPollRef.current) {
         window.clearInterval(ingestLogsPollRef.current);
+      }
+      if (batchPollRef.current) {
+        window.clearInterval(batchPollRef.current);
       }
     };
   }, []);
@@ -757,90 +692,6 @@ export default function App() {
         });
     }
   }, [activeVideo?.job?.job_id]);
-
-  function parseTimestampInput(input: string): number | null {
-    const trimmed = input.trim();
-
-    // Try parsing as mm:ss or hh:mm:ss or just seconds
-    const colonParts = trimmed.split(":");
-
-    if (colonParts.length === 1) {
-      // Try parsing as plain seconds
-      const seconds = Number(trimmed);
-      return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
-    }
-
-    if (colonParts.length === 2) {
-      // Format: mm:ss
-      const minutes = Number(colonParts[0]);
-      const seconds = Number(colonParts[1]);
-      if (
-        Number.isFinite(minutes) &&
-        Number.isFinite(seconds) &&
-        minutes >= 0 &&
-        seconds >= 0 &&
-        seconds < 60
-      ) {
-        return minutes * 60 + seconds;
-      }
-    }
-
-    if (colonParts.length === 3) {
-      // Format: hh:mm:ss
-      const hours = Number(colonParts[0]);
-      const minutes = Number(colonParts[1]);
-      const seconds = Number(colonParts[2]);
-      if (
-        Number.isFinite(hours) &&
-        Number.isFinite(minutes) &&
-        Number.isFinite(seconds) &&
-        hours >= 0 &&
-        minutes >= 0 &&
-        minutes < 60 &&
-        seconds >= 0 &&
-        seconds < 60
-      ) {
-        return hours * 3600 + minutes * 60 + seconds;
-      }
-    }
-
-    return null;
-  }
-
-  function buildVtt(segments: Segment[] = []): string {
-    const cues = segments
-      .map((segment, index) => {
-        const start = formatVttTimestamp(segment.start);
-        const end = formatVttTimestamp(segment.end);
-        return `${index + 1}\n${start} --> ${end}\n${segment.text}\n`;
-      })
-      .join("\n");
-    return `WEBVTT\n\n${cues}`.trimEnd() + "\n";
-  }
-
-  function getTranscriptionContent(
-    video: VideoItem,
-    format: "text" | "vtt" | "segments",
-  ): { title: string; content: string } {
-    if (format === "vtt") {
-      return {
-        title: "Transcrição (VTT)",
-        content: buildVtt(video.transcriptionSegments || []),
-      };
-    }
-
-    if (format === "segments") {
-      return {
-        title: "Transcrição (JSON)",
-        content: JSON.stringify(video.transcriptionSegments || [], null, 2),
-      };
-    }
-
-    return {
-      title: "Transcrição (TXT)",
-      content: video.transcription || "",
-    };
-  }
 
   function getTranscriptionFormatLabel(format: "text" | "vtt" | "segments"): string {
     if (format === "segments") return "JSON";
@@ -1238,724 +1089,97 @@ export default function App() {
       </header>
 
       {/* Configurações */}
-      <section className="panel">
-        <h2>Configurações</h2>
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-          {/* Card Configurar Aplicação */}
-          <div
-            style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: "10px",
-              padding: "12px",
-              background: "#fff",
-            }}
-          >
-            <button
-              onClick={() => setShowConfigureAppDialog(true)}
-              style={{
-                width: "100%",
-                borderRadius: "8px",
-                background: "#8b5cf6",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              ⚙️ Configurar aplicação
-            </button>
-            <p
-              className="muted"
-              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-            >
-              Define onde os vídeos, shorts e transcrições serão armazenados.
-            </p>
-          </div>
+      <ConfigurationSection
+        onConfigureApp={() => setShowConfigureAppDialog(true)}
+        onManageDependencies={async () => {
+          setShowDependenciesDialog(true);
+          setDependencies(null);
+          setLoadingDependencies(new Set());
 
-          {/* Card Dependências */}
-          <div
-            style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: "10px",
-              padding: "12px",
-              background: "#fff",
-            }}
-          >
-            <button
-              onClick={async () => {
-                setShowDependenciesDialog(true);
-                // Deixa como null para mostrar spinner global enquanto carrega
-                setDependencies(null);
-                setLoadingDependencies(new Set());
+          try {
+            console.log("[UI] Carregando dependências...");
+            const depsData = await getDependencies();
+            console.log("[UI] Dependências carregadas:", depsData.dependencies);
+            setDependencies(depsData.dependencies);
+            setLoadingDependencies(new Set());
+          } catch (error) {
+            console.error("Failed to load dependencies:", error);
+            setDependencies({
+              python: { installed: false, version: null },
+              whisper: { installed: false, version: null },
+              ffmpeg: { installed: false, version: null },
+              cuda: { installed: false, version: null },
+              pytorch: { installed: false, version: null },
+              ollama: { installed: false, version: null },
+            });
+            setLoadingDependencies(new Set());
+          }
+        }}
+        onConfigureLLM={() => setShowLLMConfigDialog(true)}
+        onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
+        onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
+        onBatchPipeline={() => {
+          setSelectedVideosForBatch([]);
+          setBatchPipelineOptions({
+            transcription: true,
+            analysis: false,
+            render: false,
+            preApprove: false,
+          });
+          setBatchProcessingLogs([]);
+          setShowBatchPipelineDialog(true);
+        }}
+      />
 
-                // Carrega as dependências
-                try {
-                  console.log("[UI] Carregando dependências...");
-                  const depsData = await getDependencies();
-                  console.log("[UI] Dependências carregadas:", depsData.dependencies);
-                  setDependencies(depsData.dependencies);
-                  setLoadingDependencies(new Set());
-                } catch (error) {
-                  console.error("Failed to load dependencies:", error);
-                  // Inicializa com empty state em caso de erro
-                  setDependencies({
-                    python: { installed: false, version: null },
-                    whisper: { installed: false, version: null },
-                    ffmpeg: { installed: false, version: null },
-                    cuda: { installed: false, version: null },
-                    pytorch: { installed: false, version: null },
-                    ollama: { installed: false, version: null },
-                  });
-                  setLoadingDependencies(new Set());
-                }
-              }}
-              style={{
-                width: "100%",
-                borderRadius: "8px",
-                background: "#06b6d4",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              📦 Gerenciar dependências
-            </button>
-            <p
-              className="muted"
-              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-            >
-              Verifica se as ferramentas necessárias estão instaladas.
-            </p>
-          </div>
-
-          {/* Card LLM */}
-          <div
-            style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: "10px",
-              padding: "12px",
-              background: "#fff",
-            }}
-          >
-            <button
-              onClick={() => setShowLLMConfigDialog(true)}
-              style={{
-                width: "100%",
-                borderRadius: "8px",
-                background: "#f59e0b",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              🤖 Configurar LLM
-            </button>
-            <p
-              className="muted"
-              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-            >
-              Edita o prompt do sistema para análise com IA.
-            </p>
-          </div>
-
-          {/* Card Whisper */}
-          <div
-            style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: "10px",
-              padding: "12px",
-              background: "#fff",
-            }}
-          >
-            <button
-              onClick={() => setShowWhisperConfigDialog(true)}
-              style={{
-                width: "100%",
-                borderRadius: "8px",
-                background: "#8b5cf6",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              🎙️ Configurar Whisper
-            </button>
-            <p
-              className="muted"
-              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-            >
-              Personaliza o dispositivo e formatos de transcrição.
-            </p>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              border: "1px solid #e5e5e5",
-              borderRadius: "10px",
-              padding: "12px",
-              background: "#fff",
-            }}
-          >
-            <button
-              onClick={() => setShowFFmpegConfigDialog(true)}
-              style={{
-                width: "100%",
-                borderRadius: "8px",
-                background: "#ec4899",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-              }}
-            >
-              🎬 Configurar FFmpeg
-            </button>
-            <p
-              className="muted"
-              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-            >
-              Personaliza o formato, codecs e filtros de vídeo.
-            </p>
-          </div>
-        </div>
-
-        <div style={{ marginTop: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button className="secondary" onClick={resetAllConfigs}>
-            ♻️ Resetar tudo
-          </button>
-          <button className="secondary" onClick={() => resetConfigSection("whisper")}>
-            Resetar Whisper
-          </button>
-          <button className="secondary" onClick={() => resetConfigSection("ffmpeg")}>
-            Resetar FFmpeg
-          </button>
-          <button className="secondary" onClick={() => resetConfigSection("llm")}>
-            Resetar LLM
-          </button>
-          <button className="secondary" onClick={() => toolConfigsInputRef.current?.click()}>
-            📥 Importar configurações
-          </button>
-          <input
-            ref={toolConfigsInputRef}
-            type="file"
-            accept="application/json"
-            style={{ display: "none" }}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                void handleImportToolConfigs(file);
-                event.currentTarget.value = "";
-              }
-            }}
-          />
-        </div>
-      </section>
-
-      {/* 1. Upload Section */}
-      <section className="grid">
-        <div className="panel">
-          <h2>1. Faça upload de um vídeo</h2>
-
-          <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-            <button
-              className={uploadMode === "url" ? "primary" : "secondary"}
-              onClick={() => {
-                setUploadMode("url");
-                setSelectedFiles([]);
-              }}
-              style={{ borderRadius: "8px" }}
-            >
-              📎 URL do YouTube
-            </button>
-            <button
-              className={uploadMode === "file" ? "primary" : "secondary"}
-              onClick={() => {
-                setUploadMode("file");
-                setYoutubeUrl("");
-              }}
-              style={{ borderRadius: "8px" }}
-            >
-              📁 Arquivo local
-            </button>
-          </div>
-
-          {uploadMode === "url" ? (
-            <>
-              <label className="field">
-                Link do YouTube
-                <input
-                  value={youtubeUrl}
-                  onChange={(event) => setYoutubeUrl(event.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                />
-              </label>
-              <button
-                className="primary"
-                disabled={action.busy || youtubeUrl.length === 0}
-                style={{ borderRadius: "8px" }}
-                onClick={() => {
-                  console.log(`\n[UI] Botão "Faça upload de um vídeo" clicado`);
-                  console.log(`[UI] URL: ${youtubeUrl}`);
-                  return runAction(
-                    () => createJob(youtubeUrl),
-                    (jobResult) => {
-                      console.log(`[UI] Job criado: ${jobResult.job_id}`);
-                      const newVideo: VideoItem = {
-                        job: jobResult,
-                        transcriptionLogs: [],
-                      };
-                      setVideos((current) => [newVideo, ...current]);
-                      setActiveVideoId(jobResult.job_id);
-                      setYoutubeUrl("");
-                      setIsIngesting(true);
-                      setIngestJobId(jobResult.job_id);
-                      setIngestLogs([]);
-                      setExpandIngestLogs(false);
-                      stopIngestLogsPolling();
-                      startIngestLogsPolling(jobResult.job_id);
-
-                      // Auto-ingest
-                      console.log(`[UI] Iniciando ingestão automática...`);
-                      runAction(
-                        () => ingestJob(jobResult.job_id),
-                        (ingestResult) => {
-                          console.log(
-                            `[UI] Ingestão completada, vídeo: ${ingestResult.video_path}`,
-                          );
-                          setIsIngesting(false);
-                          stopIngestLogsPolling();
-                          updateVideo(jobResult.job_id, {
-                            videoPath: ingestResult.video_path,
-                          });
-                          refreshVideo(jobResult.job_id);
-                          loadVideos();
-                        },
-                      );
-                    },
-                  );
-                }}
-              >
-                🎥 Fazer upload
-              </button>
-              {(isIngesting || ingestLogs.length > 0) && (
-                <div
-                  style={{
-                    marginTop: "12px",
-                    padding: "12px",
-                    borderRadius: "10px",
-                    border: "1px solid #e5e7eb",
-                    background: "#0f172a",
-                    color: "#e2e8f0",
-                    fontFamily: "monospace",
-                    fontSize: "12px",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: "8px",
-                      color: "#93c5fd",
-                      fontWeight: 600,
-                    }}
-                  >
-                    <span>⬇️ Logs do download</span>
-                    <button
-                      className="secondary"
-                      onClick={() => setExpandIngestLogs((current) => !current)}
-                      style={{
-                        padding: "4px 8px",
-                        fontSize: "11px",
-                        borderRadius: "6px",
-                      }}
-                    >
-                      {expandIngestLogs ? "Mostrar menos" : "Mostrar mais"}
-                    </button>
-                  </div>
-                  <div
-                    ref={ingestLogsContainerRef}
-                    style={{
-                      height: expandIngestLogs ? "220px" : "52px",
-                      maxHeight: "320px",
-                      minHeight: "52px",
-                      overflowY: "auto",
-                      whiteSpace: "pre-wrap",
-                      resize: "vertical",
-                    }}
-                  >
-                    {(expandIngestLogs ? ingestLogs : ingestLogs.slice(-2)).length === 0
-                      ? "Aguardando logs..."
-                      : (expandIngestLogs ? ingestLogs : ingestLogs.slice(-2)).map(
-                          (line, index) => <div key={`${index}-${line}`}>{line}</div>,
-                        )}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div
-                style={{
-                  background: selectedFiles.length > 0 ? "var(--panel)" : "var(--bg-contrast)",
-                  border:
-                    selectedFiles.length > 0
-                      ? "1px solid var(--border)"
-                      : "2px dashed var(--border)",
-                  borderRadius: "8px",
-                  padding: "32px 24px",
-                  marginBottom: "12px",
-                  textAlign: "center",
-                  cursor: "pointer",
-                  transition: "all 0.2s ease",
-                  opacity: isDraggingFile ? 0.7 : 1,
-                  transform: isDraggingFile ? "scale(1.02)" : "scale(1)",
-                }}
-                onClick={() => {
-                  const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
-                  fileInput?.click();
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsDraggingFile(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsDraggingFile(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsDraggingFile(false);
-
-                  const files = e.dataTransfer.files;
-                  if (files && files.length > 0) {
-                    const videoFiles = Array.from(files).filter((file) =>
-                      file.type.startsWith("video/"),
-                    );
-                    if (videoFiles.length > 0) {
-                      setSelectedFiles((current) => [...current, ...videoFiles]);
-                    } else {
-                      alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
-                    }
-                  }
-                }}
-              >
-                {selectedFiles.length > 0 ? (
-                  <div>
-                    <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>🎬</div>
-                    <div style={{ fontWeight: 600, marginBottom: "16px", color: "var(--ink)" }}>
-                      {selectedFiles.length} arquivo(s) selecionado(s)
-                    </div>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: "8px",
-                        marginBottom: "16px",
-                        maxHeight: "200px",
-                        overflowY: "auto",
-                      }}
-                    >
-                      {selectedFiles.map((file, index) => (
-                        <div
-                          key={index}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "8px",
-                            background: "var(--bg-contrast)",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          <div style={{ flex: 1, textAlign: "left" }}>
-                            <div
-                              style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "2px" }}
-                            >
-                              {file.name}
-                            </div>
-                            <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-                              {(file.size / 1024 / 1024).toFixed(2)} MB
-                            </div>
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedFiles((current) => current.filter((_, i) => i !== index));
-                            }}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#dc2626",
-                              cursor: "pointer",
-                              fontSize: "1rem",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = "#fee";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = "transparent";
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedFiles([]);
-                        const fileInput = document.getElementById(
-                          "video-file-input",
-                        ) as HTMLInputElement;
-                        if (fileInput) fileInput.value = "";
-                      }}
-                      style={{
-                        background: "#fee",
-                        border: "1px solid #fcc",
-                        color: "#dc2626",
-                        padding: "6px 12px",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        fontSize: "0.85rem",
-                        fontWeight: 600,
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#fdd";
-                        e.currentTarget.style.borderColor = "#f99";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "#fee";
-                        e.currentTarget.style.borderColor = "#fcc";
-                      }}
-                    >
-                      ✕ Remover todos
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>📹</div>
-                    <div style={{ fontWeight: 600, marginBottom: "4px", color: "var(--ink)" }}>
-                      Nenhum arquivo selecionado
-                    </div>
-                    <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "4px" }}>
-                      Clique ou arraste vídeos aqui
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <input
-                id="video-file-input"
-                type="file"
-                accept="video/*"
-                multiple
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  const files = event.target.files;
-                  if (files) {
-                    const videoFiles = Array.from(files).filter((file) =>
-                      file.type.startsWith("video/"),
-                    );
-                    if (videoFiles.length > 0) {
-                      setSelectedFiles((current) => [...current, ...videoFiles]);
-                    } else {
-                      alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
-                    }
-                  }
-                }}
-              />
-
-              <button
-                className="primary"
-                disabled={action.busy || selectedFiles.length === 0}
-                style={{ borderRadius: "8px", width: "100%" }}
-                onClick={() => {
-                  if (selectedFiles.length === 0) return;
-
-                  const shouldAsk = appSettings?.preferences?.ask_move_on_upload ?? true;
-                  if (shouldAsk) {
-                    setDontAskMoveUpload(false);
-                    setShowMoveUploadDialog(true);
-                    return;
-                  }
-
-                  startUploadSelectedFiles();
-                }}
-              >
-                🎥 Fazer upload ({selectedFiles.length})
-              </button>
-            </>
-          )}
-        </div>
-      </section>
+      <UploadSection
+        action={action}
+        onVideoAdded={(video) => {
+          setVideos((current) => [video, ...current]);
+          setActiveVideoId(video.job.job_id);
+        }}
+        onLoadVideos={loadVideos}
+        appSettings={appSettings}
+        onShowMoveUploadDialog={() => {
+          setDontAskMoveUpload(false);
+          setShowMoveUploadDialog(true);
+        }}
+      />
 
       {/* 2. Video List */}
-      <section className="panel">
-        <div className="panel-header">
-          <h2>2. Seus vídeos</h2>
-          <div className="view-tabs">
-            <button
-              className={`tab ${videoView === "active" ? "active" : ""}`}
-              onClick={() => setView("active")}
-            >
-              Seus vídeos
-            </button>
-            <button
-              className={`tab ${videoView === "archived" ? "active" : ""}`}
-              onClick={() => setView("archived")}
-            >
-              Arquivados
-            </button>
-          </div>
-        </div>
-
-        {(videoView === "active" ? videos : archivedVideos).length === 0 ? (
-          <p className="muted">
-            {videoView === "active"
-              ? "Nenhum vídeo ainda. Faça upload de um para começar."
-              : "Nenhum vídeo arquivado."}
-          </p>
-        ) : (
-          <div className="video-list">
-            {(videoView === "active" ? videos : archivedVideos).slice().map((video, index) => (
-              <div key={video.job.job_id} className="video-item">
-                <div
-                  className="video-row"
-                  onClick={() => {
-                    if (videoView === "active") {
-                      if (activeVideoId === video.job.job_id) {
-                        // Desmarcar se já estiver selecionado
-                        console.log(`[UI] ✗ Vídeo desmarcado`);
-                        setActiveVideoId(null);
-                      } else {
-                        // Check if can switch to another video
-                        const validation = canStartOperation(video.job.job_id);
-                        if (!validation.allowed) {
-                          console.warn(`[UI] ⚠️  ${validation.message}`);
-                          alert(`⚠️ ${validation.message}`);
-                          return;
-                        }
-                        // Marcar novo vídeo
-                        console.log(`\n[UI] ✓ Vídeo selecionado:`);
-                        console.log(`[UI]   Job ID: ${video.job.job_id}`);
-                        console.log(`[UI]   Video Path: ${video.videoPath}`);
-                        console.log(`[UI]   Status: ${video.job.status}`);
-                        console.log(`[UI]   URL completa: ${apiBaseUrl}${video.videoPath}`);
-                        setActiveVideoId(video.job.job_id);
-                      }
-                    }
-                  }}
-                  style={{
-                    cursor: videoView === "active" ? "pointer" : "default",
-                  }}
-                >
-                  {videoView === "active" ? (
-                    <label
-                      className="video-checkbox"
-                      style={{ cursor: "pointer", pointerEvents: "none" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={activeVideoId === video.job.job_id}
-                        readOnly
-                        style={{ pointerEvents: "none" }}
-                      />
-                      <span>
-                        {index + 1} - {video.job.video_name || "Sem nome"}
-                      </span>
-                    </label>
-                  ) : (
-                    <div className="video-label">
-                      <span>
-                        {index + 1} - {video.job.video_name || "Sem nome"}
-                      </span>
-                    </div>
-                  )}
-
-                  <button
-                    className="menu-button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpenId((current) =>
-                        current === video.job.job_id ? null : video.job.job_id,
-                      );
-                    }}
-                  >
-                    ...
-                  </button>
-                </div>
-
-                {menuOpenId === video.job.job_id && (
-                  <div className="menu-popover">
-                    {videoView === "active" && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setRenameVideoId(video.job.job_id);
-                            setRenameVideoNewName(video.job.video_name || "");
-                            setMenuOpenId(null);
-                          }}
-                        >
-                          Renomear
-                        </button>
-                        <button
-                          onClick={() =>
-                            runAction(
-                              () => archiveVideo(video.job.job_id),
-                              () => {
-                                if (activeVideoId === video.job.job_id) {
-                                  setActiveVideoId(null);
-                                }
-                                setMenuOpenId(null);
-                                loadVideos();
-                              },
-                            )
-                          }
-                        >
-                          Arquivar
-                        </button>
-                      </>
-                    )}
-                    <button
-                      className="danger"
-                      onClick={() =>
-                        runAction(
-                          () => deleteVideo(video.job.job_id),
-                          () => {
-                            if (activeVideoId === video.job.job_id) {
-                              setActiveVideoId(null);
-                            }
-                            setMenuOpenId(null);
-                            loadVideos();
-                          },
-                        )
-                      }
-                    >
-                      Excluir
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <VideoListSection
+        videos={videos}
+        archivedVideos={archivedVideos}
+        activeVideoId={activeVideoId}
+        videoView={videoView}
+        action={action}
+        onSelectVideo={(videoId) => {
+          if (videoId === null) {
+            console.log(`[UI] ✗ Vídeo desmarcado`);
+            setActiveVideoId(null);
+          } else {
+            const validation = canStartOperation(videoId);
+            if (!validation.allowed) {
+              console.warn(`[UI] ⚠️  ${validation.message}`);
+              alert(`⚠️ ${validation.message}`);
+              return;
+            }
+            const video = videos.find((v) => v.job.job_id === videoId);
+            console.log(`\n[UI] ✓ Vídeo selecionado:`);
+            console.log(`[UI]   Job ID: ${videoId}`);
+            console.log(`[UI]   Video Path: ${video?.videoPath}`);
+            console.log(`[UI]   Status: ${video?.job.status}`);
+            console.log(`[UI]   URL completa: ${apiBaseUrl}${video?.videoPath}`);
+            setActiveVideoId(videoId);
+          }
+        }}
+        onSetView={setView}
+        onLoadVideos={loadVideos}
+        onShowRenameDialog={(videoId, currentName) => {
+          setRenameVideoId(videoId);
+          setRenameVideoNewName(currentName);
+        }}
+        onRunAction={runAction}
+      />
       {/* 3. Video Player */}
       {activeVideo && (
         <section className="panel">
@@ -1963,19 +1187,7 @@ export default function App() {
           <div className="video-player-container">
             {activeVideo.videoPath ? (
               <>
-                <div
-                  className="video-player-wrapper"
-                  style={{
-                    width: "100%",
-                    background: "#000",
-                    borderRadius: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minHeight: "400px",
-                    position: "relative",
-                  }}
-                >
+                <div className="video-player-wrapper">
                   <video
                     key={`video-${activeVideo.job.job_id}`}
                     ref={videoRef}
@@ -1983,7 +1195,6 @@ export default function App() {
                     width="100%"
                     src={`${apiBaseUrl}${activeVideo.videoPath}`}
                     className="video-player"
-                    style={{ maxHeight: "400px" }}
                     onLoadStart={() => {
                       console.log(`\n[video] 🎬 Iniciando carregamento do vídeo:`);
                       console.log(`[video]   Job ID: ${activeVideo.job.job_id}`);
@@ -2013,29 +1224,21 @@ export default function App() {
                   />
                 </div>
 
+                {/* Batch Processing Logs */}
+                {isBatchProcessing && batchProcessingLogs.length > 0 && (
+                  <div className="batch-logs">
+                    <h4 className="batch-logs-title">📋 Logs do Pipeline em Lote</h4>
+                    <div className="batch-logs-content">
+                      {batchProcessingLogs.map((log, idx) => (
+                        <div key={idx}>{log}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {activeTaskLogType && (
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      padding: "12px",
-                      borderRadius: "10px",
-                      border: "1px solid #e5e7eb",
-                      background: "#0f172a",
-                      color: "#e2e8f0",
-                      fontFamily: "monospace",
-                      fontSize: "12px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        marginBottom: "8px",
-                        color: "#93c5fd",
-                        fontWeight: 600,
-                      }}
-                    >
+                  <div className="log-container">
+                    <div className="log-header">
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span>
                           {activeTaskLogType === "transcription"
@@ -2044,17 +1247,7 @@ export default function App() {
                         </span>
                         {activeTaskLogType === "transcription" && activeVideo?.isTranscribing && (
                           <button
-                            style={{
-                              borderRadius: "6px",
-                              background: "#ef4444",
-                              color: "white",
-                              border: "none",
-                              padding: "4px 8px",
-                              cursor: "pointer",
-                              fontSize: "11px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                            }}
+                            className="cancel-button"
                             onClick={async () => {
                               console.log(`[UI] Cancelando transcrição: ${activeVideo.job.job_id}`);
                               try {
@@ -2072,17 +1265,7 @@ export default function App() {
                         )}
                         {activeTaskLogType === "render" && isRendering && (
                           <button
-                            style={{
-                              borderRadius: "6px",
-                              background: "#ef4444",
-                              color: "white",
-                              border: "none",
-                              padding: "4px 8px",
-                              cursor: "pointer",
-                              fontSize: "11px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                            }}
+                            className="cancel-button"
                             onClick={async () => {
                               console.log(
                                 `[UI] Cancelando renderização: ${activeVideo.job.job_id}`,
@@ -2103,27 +1286,15 @@ export default function App() {
                         )}
                       </div>
                       <button
-                        className="secondary"
+                        className="secondary log-toggle-button"
                         onClick={() => setExpandTaskLogs((current) => !current)}
-                        style={{
-                          padding: "4px 8px",
-                          fontSize: "11px",
-                          borderRadius: "6px",
-                        }}
                       >
                         {expandTaskLogs ? "Mostrar menos" : "Mostrar mais"}
                       </button>
                     </div>
                     <div
                       ref={taskLogsContainerRef}
-                      style={{
-                        height: expandTaskLogs ? "220px" : "52px",
-                        maxHeight: "320px",
-                        minHeight: "52px",
-                        overflowY: "auto",
-                        whiteSpace: "pre-wrap",
-                        resize: "vertical",
-                      }}
+                      className={expandTaskLogs ? "log-content expanded" : "log-content"}
                     >
                       {(expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).length === 0
                         ? "Aguardando logs..."
@@ -2133,153 +1304,92 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: "12px",
-                    marginTop: "12px",
-                  }}
-                >
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
+                <div className="action-cards-grid">
+                  <ActionCard description="Abre a transcrição nos formatos disponíveis.">
                     <button
                       disabled={!hasAnyTranscription}
                       onClick={() => setShowTranscriptionFormatListDialog(true)}
+                      className="config-card-button blue"
                       style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background: "#3b82f6",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
                         cursor: hasAnyTranscription ? "pointer" : "not-allowed",
                         opacity: hasAnyTranscription ? 1 : 0.5,
                       }}
                     >
                       📄 Visualizar transcrição
                     </button>
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-                    >
-                      Abre a transcrição nos formatos disponíveis.
-                    </p>
-                  </div>
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        disabled={action.busy}
-                        style={{
-                          flex: 1,
-                          borderRadius: "8px",
-                          background: "#10b981",
-                          color: "white",
-                          border: "none",
-                          padding: "10px",
-                          cursor: action.busy ? "not-allowed" : "pointer",
-                          opacity: action.busy ? 0.5 : 1,
-                        }}
-                        onClick={() => {
-                          // Check if another video is being transcribed/rendered
-                          const validation = canStartOperation(activeVideo.job.job_id);
-                          if (!validation.allowed) {
-                            console.warn(`[UI] ⚠️  ${validation.message}`);
-                            alert(`⚠️ ${validation.message}`);
-                            return;
-                          }
+                  </ActionCard>
+                  <ActionCard description="Gera ou recria a transcrição do vídeo.">
+                    <button
+                      disabled={action.busy}
+                      className="config-card-button green"
+                      style={{
+                        cursor: action.busy ? "not-allowed" : "pointer",
+                        opacity: action.busy ? 0.5 : 1,
+                      }}
+                      onClick={() => {
+                        // Check if another video is being transcribed/rendered
+                        const validation = canStartOperation(activeVideo.job.job_id);
+                        if (!validation.allowed) {
+                          console.warn(`[UI] ⚠️  ${validation.message}`);
+                          alert(`⚠️ ${validation.message}`);
+                          return;
+                        }
 
-                          console.log(
-                            `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
-                          );
-                          setShowTranscriptionFormatListDialog(false);
-                          setShowTranscriptionContentDialog(false);
-                          setShowTranscriptionDeleteDialog(false);
-                          setShowBlocksDialog(false);
-                          setSelectedTranscriptionFormat(null);
-                          setPendingDeleteFormat(null);
-                          setSelectedSuggestedCutId(null);
-                          setBlocks([]);
-                          setSuggestedCuts([]);
-                          setActiveTaskLogType("transcription");
-                          setActiveTaskLogs([]);
-                          setExpandTaskLogs(false);
-                          stopLogsPolling();
-                          updateVideo(activeVideo.job.job_id, {
-                            isTranscribing: true,
-                            transcriptionLogs: [],
-                            transcription: "",
-                            transcriptionSegments: [],
-                            transcriptionFormats: undefined,
-                          });
+                        console.log(
+                          `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
+                        );
+                        setShowTranscriptionFormatListDialog(false);
+                        setShowTranscriptionContentDialog(false);
+                        setShowTranscriptionDeleteDialog(false);
+                        setShowBlocksDialog(false);
+                        setSelectedTranscriptionFormat(null);
+                        setPendingDeleteFormat(null);
+                        setSelectedSuggestedCutId(null);
+                        setBlocks([]);
+                        setSuggestedCuts([]);
+                        setActiveTaskLogType("transcription");
+                        setActiveTaskLogs([]);
+                        setExpandTaskLogs(false);
+                        stopLogsPolling();
+                        updateVideo(activeVideo.job.job_id, {
+                          isTranscribing: true,
+                          transcriptionLogs: [],
+                          transcription: "",
+                          transcriptionSegments: [],
+                          transcriptionFormats: undefined,
+                        });
 
-                          return runAction(
-                            async () => {
-                              if (hasAnyTranscription) {
-                                await deleteTranscription(activeVideo.job.job_id, "all");
-                              }
-                              return transcribeJob(activeVideo.job.job_id);
-                            },
-                            (result: any) => {
-                              console.log(`[UI] Transcrição completada`);
-                              updateVideo(activeVideo.job.job_id, {
-                                transcription: result.transcription,
-                                transcriptionSegments: result.segments,
-                                transcriptionFormats: result.available_formats,
-                                isTranscribing: false,
-                              });
-                              refreshVideo(activeVideo.job.job_id);
-                            },
-                          );
-                        }}
-                      >
-                        {activeVideo.isTranscribing
-                          ? "⏳ Transcrevendo..."
-                          : hasAnyTranscription
-                            ? "Gerar nova transcrição"
-                            : "🎙️ Transcrever"}
-                      </button>
-                    </div>
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
+                        return runAction(
+                          async () => {
+                            if (hasAnyTranscription) {
+                              await deleteTranscription(activeVideo.job.job_id, "all");
+                            }
+                            return transcribeJob(activeVideo.job.job_id);
+                          },
+                          (result: any) => {
+                            console.log(`[UI] Transcrição completada`);
+                            updateVideo(activeVideo.job.job_id, {
+                              transcription: result.transcription,
+                              transcriptionSegments: result.segments,
+                              transcriptionFormats: result.available_formats,
+                              isTranscribing: false,
+                            });
+                            refreshVideo(activeVideo.job.job_id);
+                          },
+                        );
+                      }}
                     >
-                      Gera ou recria a transcrição do vídeo.
-                    </p>
-                  </div>
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
+                      {activeVideo.isTranscribing
+                        ? "⏳ Transcrevendo..."
+                        : hasAnyTranscription
+                          ? "Gerar nova transcrição"
+                          : "🎙️ Transcrever"}
+                    </button>
+                  </ActionCard>
+                  <ActionCard description="Agrupa a transcrição em blocos semânticos.">
                     <button
                       disabled={!hasAnyTranscription}
-                      style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background: "#8b5cf6",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
-                        cursor: !hasAnyTranscription ? "not-allowed" : "pointer",
-                        opacity: !hasAnyTranscription ? 0.5 : 1,
-                      }}
+                      className="config-card-button purple"
                       onClick={() =>
                         runAction(
                           () => buildBlocks(activeVideo.job.job_id),
@@ -2293,43 +1403,14 @@ export default function App() {
                     >
                       🔗 Blocos
                     </button>
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-                    >
-                      Agrupa a transcrição em blocos semânticos.
-                    </p>
-                  </div>
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
+                  </ActionCard>
+                  <div className="action-card">
                     <button
                       disabled={
                         isAnalyzing ||
                         (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
                       }
-                      style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background:
-                          isAnalyzing ||
-                          (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
-                            ? "#ccc"
-                            : "#f59e0b",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
-                        cursor:
-                          isAnalyzing ||
-                          (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
-                            ? "not-allowed"
-                            : "pointer",
-                      }}
+                      className="config-card-button orange"
                       onClick={() => {
                         if (suggestedCuts.length > 0) {
                           setKeepCutIds([]);
@@ -2356,21 +1437,8 @@ export default function App() {
                           ? "Gerar nova análise"
                           : "🤖 Análise"}
                     </button>
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-                    >
-                      Analisa com IA para encontrar hooks.
-                    </p>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "8px",
-                        alignItems: "center",
-                        marginTop: "10px",
-                        justifyContent: "center",
-                      }}
-                    >
+                    <p className="config-card-description">Analisa com IA para encontrar hooks.</p>
+                    <div className="checkbox-container">
                       <input
                         type="checkbox"
                         checked={showAiResponseOnAnalyze}
@@ -2379,26 +1447,10 @@ export default function App() {
                       <span style={{ fontSize: "0.85rem" }}>exibir resultado da IA</span>
                     </div>
                   </div>
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
+                  <div className="action-card">
                     <button
                       disabled={cuts.length === 0 || isRendering}
-                      style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background: "#ec4899",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
-                        cursor: cuts.length === 0 || isRendering ? "not-allowed" : "pointer",
-                        opacity: cuts.length === 0 || isRendering ? 0.5 : 1,
-                      }}
+                      className="config-card-button pink"
                       onClick={() => {
                         // Check if another video is being transcribed/rendered
                         const validation = canStartOperation(activeVideo.job.job_id);
@@ -2436,31 +1488,13 @@ export default function App() {
                         Gerando cortes: {renderOutputs.length}/{expectedRenderCount || "?"}
                       </p>
                     )}
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-                    >
+                    <p className="config-card-description">
                       Renderiza os cortes em vídeos verticals.
                     </p>
                   </div>
-                  <div
-                    style={{
-                      border: "1px solid #e5e5e5",
-                      borderRadius: "10px",
-                      padding: "12px",
-                      background: "#fff",
-                    }}
-                  >
+                  <div className="action-card">
                     <button
-                      style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background: "#10b981",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
-                        cursor: "pointer",
-                      }}
+                      className="config-card-button green"
                       onClick={() => {
                         setNewCutStartMinutes("");
                         setNewCutStartSeconds("");
@@ -2471,28 +1505,35 @@ export default function App() {
                     >
                       ➕ Adicionar Corte Manual
                     </button>
-                    <p
-                      className="muted"
-                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
-                    >
+                    <p className="config-card-description">
                       Cria um corte com timestamps específicos.
+                    </p>
+                  </div>
+                  <div className="action-card">
+                    <button
+                      className="config-card-button indigo"
+                      onClick={() => {
+                        setSelectedVideosForBatch([]);
+                        setBatchPipelineOptions({
+                          transcription: true,
+                          analysis: false,
+                          render: false,
+                          preApprove: false,
+                        });
+                        setBatchProcessingLogs([]);
+                        setShowBatchPipelineDialog(true);
+                      }}
+                    >
+                      🚀 Pipeline em Lote
+                    </button>
+                    <p className="config-card-description">
+                      Processa múltiplos vídeos sequencialmente.
                     </p>
                   </div>
                 </div>
                 {isLoadingCuts && (
-                  <div
-                    style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "8px" }}
-                  >
-                    <div
-                      style={{
-                        width: "16px",
-                        height: "16px",
-                        border: "2px solid #f0f0f0",
-                        borderTop: "2px solid #666",
-                        borderRadius: "50%",
-                        animation: "spin 1s linear infinite",
-                      }}
-                    />
+                  <div className="loading-container">
+                    <div className="spinner" />
                     <span style={{ fontSize: "0.9rem" }}>Carregando cortes...</span>
                   </div>
                 )}
@@ -2501,6 +1542,42 @@ export default function App() {
                     <p style={{ marginBottom: "12px", fontWeight: "600" }}>
                       Cortes sugeridos ({suggestedCuts.length}):
                     </p>
+
+                    {/* Botão Continuar Pipeline (aparece se estiver aguardando aprovação) */}
+                    {batchWaitingForApproval && activeBatchId && (
+                      <div style={{ marginBottom: "16px", textAlign: "center" }}>
+                        <button
+                          className="primary"
+                          onClick={async () => {
+                            try {
+                              await continueBatchPipeline(activeBatchId);
+                              setBatchWaitingForApproval(false);
+                              setBatchPendingCuts([]);
+                              setBatchProcessingLogs((prev) => [
+                                ...prev,
+                                "✅ Cortes aprovados, continuando pipeline...",
+                              ]);
+                            } catch (error: any) {
+                              console.error("[UI] Error continuing batch pipeline:", error);
+                              setBatchProcessingLogs((prev) => [
+                                ...prev,
+                                `❌ Erro ao continuar: ${error.message}`,
+                              ]);
+                            }
+                          }}
+                          style={{
+                            padding: "12px 24px",
+                            fontSize: "16px",
+                            fontWeight: "600",
+                            borderRadius: "8px",
+                            background: "#10b981",
+                          }}
+                        >
+                          ▶️ Continuar Pipeline
+                        </button>
+                      </div>
+                    )}
+
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {suggestedCuts.map((cut) => (
                         <div
@@ -2557,8 +1634,14 @@ export default function App() {
                                 setEditCutEndSeconds(String(endSec).padStart(2, "0"));
                                 setShowCutEditDialog(true);
                               }}
-                              onMouseEnter={() => setHoveredCutAction("edit")}
-                              onMouseLeave={() => setHoveredCutAction(null)}
+                              onMouseEnter={() => {
+                                setHoveredCutId(cut.cut_id);
+                                setHoveredCutAction("edit");
+                              }}
+                              onMouseLeave={() => {
+                                setHoveredCutId(null);
+                                setHoveredCutAction(null);
+                              }}
                               style={{
                                 width: "16px",
                                 height: "16px",
@@ -2569,7 +1652,10 @@ export default function App() {
                                 padding: 0,
                                 fontSize: "12px",
                                 lineHeight: "16px",
-                                color: hoveredCutAction === "edit" ? "#1d4ed8" : "#666",
+                                color:
+                                  hoveredCutId === cut.cut_id && hoveredCutAction === "edit"
+                                    ? "#1d4ed8"
+                                    : "#666",
                               }}
                               aria-label="Editar timestamp"
                             >
@@ -2600,8 +1686,14 @@ export default function App() {
                                 }
                                 setHoveredCutId(null);
                               }}
-                              onMouseEnter={() => setHoveredCutAction("delete")}
-                              onMouseLeave={() => setHoveredCutAction(null)}
+                              onMouseEnter={() => {
+                                setHoveredCutId(cut.cut_id);
+                                setHoveredCutAction("delete");
+                              }}
+                              onMouseLeave={() => {
+                                setHoveredCutId(null);
+                                setHoveredCutAction(null);
+                              }}
                               style={{
                                 width: "16px",
                                 height: "16px",
@@ -2612,7 +1704,10 @@ export default function App() {
                                 padding: 0,
                                 fontSize: "12px",
                                 lineHeight: "16px",
-                                color: hoveredCutAction === "delete" ? "#dc2626" : "#666",
+                                color:
+                                  hoveredCutId === cut.cut_id && hoveredCutAction === "delete"
+                                    ? "#dc2626"
+                                    : "#666",
                               }}
                               aria-label="Deletar timestamp"
                             >
@@ -2974,9 +2069,13 @@ export default function App() {
 
       {/* Edit Cut Dialog */}
       {showCutEditDialog && editingCutId && (
-        <div
-          className="dialog-overlay"
-          onClick={() => {
+        <TimestampDialog
+          mode="edit"
+          initialStartMinutes={editCutStartMinutes}
+          initialStartSeconds={editCutStartSeconds}
+          initialEndMinutes={editCutEndMinutes}
+          initialEndSeconds={editCutEndSeconds}
+          onClose={() => {
             setShowCutEditDialog(false);
             setEditingCutId(null);
             setEditCutStartMinutes("");
@@ -2984,604 +2083,116 @@ export default function App() {
             setEditCutEndMinutes("");
             setEditCutEndSeconds("");
           }}
-        >
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Editar timestamp</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => {
-                    setShowCutEditDialog(false);
-                    setEditingCutId(null);
-                    setEditCutStartMinutes("");
-                    setEditCutStartSeconds("");
-                    setEditCutEndMinutes("");
-                    setEditCutEndSeconds("");
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "12px",
-                  marginBottom: "16px",
-                }}
-              >
-                <label className="field">
-                  Início - Minutos
-                  <input
-                    type="number"
-                    min="0"
-                    value={editCutStartMinutes}
-                    onChange={(event) => setEditCutStartMinutes(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  Início - Segundos
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={editCutStartSeconds}
-                    onChange={(event) => setEditCutStartSeconds(event.target.value)}
-                  />
-                </label>
-              </div>
+          onSave={async (startValue, endValue) => {
+            const newSuggestedCuts = suggestedCuts.map((item) =>
+              item.cut_id === editingCutId ? { ...item, start: startValue, end: endValue } : item,
+            );
+            const newCuts = cuts.map((item) =>
+              item.cut_id === editingCutId ? { ...item, start: startValue, end: endValue } : item,
+            );
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "12px",
-                  marginBottom: "16px",
-                }}
-              >
-                <label className="field">
-                  Fim - Minutos
-                  <input
-                    type="number"
-                    min="0"
-                    value={editCutEndMinutes}
-                    onChange={(event) => setEditCutEndMinutes(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  Fim - Segundos
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={editCutEndSeconds}
-                    onChange={(event) => setEditCutEndSeconds(event.target.value)}
-                  />
-                </label>
-              </div>
+            setSuggestedCuts(newSuggestedCuts);
+            setCuts(newCuts);
 
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button
-                  className="primary"
-                  onClick={async () => {
-                    const startMin = Number(editCutStartMinutes);
-                    const startSec = Number(editCutStartSeconds);
-                    const endMin = Number(editCutEndMinutes);
-                    const endSec = Number(editCutEndSeconds);
+            if (activeVideo) {
+              try {
+                await updateCuts(activeVideo.job.job_id, newCuts);
+              } catch (error) {
+                console.error("Failed to update cuts:", error);
+              }
+            }
 
-                    if (
-                      !Number.isFinite(startMin) ||
-                      !Number.isFinite(startSec) ||
-                      !Number.isFinite(endMin) ||
-                      !Number.isFinite(endSec)
-                    ) {
-                      setAction({ busy: false, error: "Todos os campos devem ser números." });
-                      return;
-                    }
-
-                    if (
-                      startMin < 0 ||
-                      startSec < 0 ||
-                      startSec > 59 ||
-                      endMin < 0 ||
-                      endSec < 0 ||
-                      endSec > 59
-                    ) {
-                      setAction({ busy: false, error: "Minutos devem ser >= 0, segundos 0-59." });
-                      return;
-                    }
-
-                    const startValue = startMin * 60 + startSec;
-                    const endValue = endMin * 60 + endSec;
-
-                    if (endValue <= startValue) {
-                      setAction({ busy: false, error: "O fim precisa ser maior que o início." });
-                      return;
-                    }
-
-                    const newSuggestedCuts = suggestedCuts.map((item) =>
-                      item.cut_id === editingCutId
-                        ? { ...item, start: startValue, end: endValue }
-                        : item,
-                    );
-                    const newCuts = cuts.map((item) =>
-                      item.cut_id === editingCutId
-                        ? { ...item, start: startValue, end: endValue }
-                        : item,
-                    );
-
-                    setSuggestedCuts(newSuggestedCuts);
-                    setCuts(newCuts);
-
-                    if (activeVideo) {
-                      try {
-                        await updateCuts(activeVideo.job.job_id, newCuts);
-                      } catch (error) {
-                        console.error("Failed to update cuts:", error);
-                      }
-                    }
-
-                    setSelectedSuggestedCutId(editingCutId);
-                    if (videoRef.current) {
-                      videoRef.current.currentTime = startValue;
-                      videoRef.current.play();
-                    }
-                    setShowCutEditDialog(false);
-                    setEditingCutId(null);
-                  }}
-                >
-                  Salvar
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setShowCutEditDialog(false);
-                    setEditingCutId(null);
-                    setEditCutStartMinutes("");
-                    setEditCutStartSeconds("");
-                    setEditCutEndMinutes("");
-                    setEditCutEndSeconds("");
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+            setSelectedSuggestedCutId(editingCutId);
+            if (videoRef.current) {
+              videoRef.current.currentTime = startValue;
+              videoRef.current.play();
+            }
+            setShowCutEditDialog(false);
+            setEditingCutId(null);
+            setEditCutStartMinutes("");
+            setEditCutStartSeconds("");
+            setEditCutEndMinutes("");
+            setEditCutEndSeconds("");
+          }}
+        />
       )}
 
       {/* Add Manual Cut Dialog */}
       {showAddManualCutDialog && (
-        <div
-          className="dialog-overlay"
-          onClick={() => {
+        <TimestampDialog
+          mode="add"
+          onClose={() => {
             setShowAddManualCutDialog(false);
             setNewCutStartMinutes("");
             setNewCutStartSeconds("");
             setNewCutEndMinutes("");
             setNewCutEndSeconds("");
           }}
-        >
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Adicionar Corte Manual</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => {
-                    setShowAddManualCutDialog(false);
-                    setNewCutStartMinutes("");
-                    setNewCutStartSeconds("");
-                    setNewCutEndMinutes("");
-                    setNewCutEndSeconds("");
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "12px",
-                  marginBottom: "16px",
-                }}
-              >
-                <label className="field">
-                  Início - Minutos
-                  <input
-                    type="number"
-                    min="0"
-                    value={newCutStartMinutes}
-                    onChange={(event) => setNewCutStartMinutes(event.target.value)}
-                    placeholder="0"
-                  />
-                </label>
-                <label className="field">
-                  Início - Segundos
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={newCutStartSeconds}
-                    onChange={(event) => setNewCutStartSeconds(event.target.value)}
-                    placeholder="0"
-                  />
-                </label>
-              </div>
+          onSave={async (startValue, endValue) => {
+            const newCutId = `manual_${Date.now()}`;
+            const newCut: Cut = {
+              cut_id: newCutId,
+              block_ids: [],
+              start: startValue,
+              end: endValue,
+              status: "approved",
+              hook_reason: "Corte adicionado manualmente",
+              content_reason: "Corte adicionado manualmente",
+            };
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "12px",
-                  marginBottom: "16px",
-                }}
-              >
-                <label className="field">
-                  Fim - Minutos
-                  <input
-                    type="number"
-                    min="0"
-                    value={newCutEndMinutes}
-                    onChange={(event) => setNewCutEndMinutes(event.target.value)}
-                    placeholder="0"
-                  />
-                </label>
-                <label className="field">
-                  Fim - Segundos
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={newCutEndSeconds}
-                    onChange={(event) => setNewCutEndSeconds(event.target.value)}
-                    placeholder="0"
-                  />
-                </label>
-              </div>
+            const newSuggestedCuts = [...suggestedCuts, newCut];
+            const newCuts = [...cuts, newCut];
 
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button
-                  className="primary"
-                  onClick={async () => {
-                    const startMin = Number(newCutStartMinutes) || 0;
-                    const startSec = Number(newCutStartSeconds) || 0;
-                    const endMin = Number(newCutEndMinutes) || 0;
-                    const endSec = Number(newCutEndSeconds) || 0;
+            setSuggestedCuts(newSuggestedCuts);
+            setCuts(newCuts);
 
-                    if (
-                      !Number.isFinite(startMin) ||
-                      !Number.isFinite(startSec) ||
-                      !Number.isFinite(endMin) ||
-                      !Number.isFinite(endSec)
-                    ) {
-                      setAction({ busy: false, error: "Todos os campos devem ser números." });
-                      return;
-                    }
+            if (activeVideo) {
+              try {
+                await updateCuts(activeVideo.job.job_id, newCuts);
+              } catch (error) {
+                console.error("Failed to update cuts:", error);
+              }
+            }
 
-                    if (
-                      startMin < 0 ||
-                      startSec < 0 ||
-                      startSec > 59 ||
-                      endMin < 0 ||
-                      endSec < 0 ||
-                      endSec > 59
-                    ) {
-                      setAction({ busy: false, error: "Minutos devem ser >= 0, segundos 0-59." });
-                      return;
-                    }
-
-                    const startValue = startMin * 60 + startSec;
-                    const endValue = endMin * 60 + endSec;
-
-                    if (endValue <= startValue) {
-                      setAction({ busy: false, error: "O fim precisa ser maior que o início." });
-                      return;
-                    }
-
-                    // Create new cut
-                    const newCutId = `manual_${Date.now()}`;
-                    const newCut: Cut = {
-                      cut_id: newCutId,
-                      block_ids: [],
-                      start: startValue,
-                      end: endValue,
-                      status: "approved",
-                      hook_reason: "Corte adicionado manualmente",
-                      content_reason: "Corte adicionado manualmente",
-                    };
-
-                    const newSuggestedCuts = [...suggestedCuts, newCut];
-                    const newCuts = [...cuts, newCut];
-
-                    setSuggestedCuts(newSuggestedCuts);
-                    setCuts(newCuts);
-
-                    if (activeVideo) {
-                      try {
-                        await updateCuts(activeVideo.job.job_id, newCuts);
-                      } catch (error) {
-                        console.error("Failed to update cuts:", error);
-                      }
-                    }
-
-                    setSelectedSuggestedCutId(newCutId);
-                    if (videoRef.current) {
-                      videoRef.current.currentTime = startValue;
-                      videoRef.current.play();
-                    }
-                    setShowAddManualCutDialog(false);
-                    setNewCutStartMinutes("");
-                    setNewCutStartSeconds("");
-                    setNewCutEndMinutes("");
-                    setNewCutEndSeconds("");
-                  }}
-                >
-                  Adicionar
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setShowAddManualCutDialog(false);
-                    setNewCutStartMinutes("");
-                    setNewCutStartSeconds("");
-                    setNewCutEndMinutes("");
-                    setNewCutEndSeconds("");
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+            setSelectedSuggestedCutId(newCutId);
+            if (videoRef.current) {
+              videoRef.current.currentTime = startValue;
+              videoRef.current.play();
+            }
+            setShowAddManualCutDialog(false);
+            setNewCutStartMinutes("");
+            setNewCutStartSeconds("");
+            setNewCutEndMinutes("");
+            setNewCutEndSeconds("");
+          }}
+        />
       )}
+      <CurationSection isLoadingCuts={isLoadingCuts} cuts={cuts} />
 
-      {/* 5. Curation */}
-      <section className="panel">
-        <h2>5. Curadoria</h2>
-        {isLoadingCuts ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <div
-              style={{
-                width: "20px",
-                height: "20px",
-                border: "3px solid #f0f0f0",
-                borderTop: "3px solid #666",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-            <span>Carregando cortes...</span>
-          </div>
-        ) : cuts.length === 0 ? (
-          <p className="muted">Execute a análise para ver os cortes.</p>
-        ) : (
-          <div className="cuts">
-            {cuts.map((cut) => (
-              <article key={cut.cut_id} className="cut-card">
-                <header>
-                  <div>
-                    <h3>{cut.cut_id}</h3>
-                    <p>
-                      {formatTimestamp(cut.start)} - {formatTimestamp(cut.end)}
-                    </p>
-                    <p className="muted">Status: {cut.status}</p>
-                  </div>
-                  {cut.score !== undefined && cut.score !== null && (
-                    <div className="score">{cut.score}</div>
-                  )}
-                </header>
-                <div className="reason">
-                  <strong>🎣 Hook:</strong> {cut.hook_reason || "-"}
-                </div>
-                <div className="reason">
-                  <strong>📢 Conteúdo:</strong> {cut.content_reason || "-"}
-                </div>
-                <div className="actions">
-                  <button
-                    className="primary"
-                    disabled={action.busy}
-                    onClick={() =>
-                      runAction(
-                        () => approveCut(activeVideo!.job.job_id, cut.cut_id),
-                        (value) => {
-                          setCuts((current) =>
-                            current.map((item) => (item.cut_id === value.cut_id ? value : item)),
-                          );
-                        },
-                      )
-                    }
-                  >
-                    ✓ Aprovar
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={action.busy}
-                    onClick={() =>
-                      runAction(
-                        () => rejectCut(activeVideo!.job.job_id, cut.cut_id),
-                        (value) => {
-                          setCuts((current) =>
-                            current.map((item) => (item.cut_id === value.cut_id ? value : item)),
-                          );
-                        },
-                      )
-                    }
-                  >
-                    ✗ Reprovar
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* 6. Output */}
-      <section className="panel">
-        <h2>6. Saída final</h2>
-        {isLoadingRenderOutputs ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <div
-              style={{
-                width: "20px",
-                height: "20px",
-                border: "3px solid #f0f0f0",
-                borderTop: "3px solid #666",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-            <span>Carregando renderizações...</span>
-          </div>
-        ) : renderOutputs.length === 0 ? (
-          <p className="muted">{isRendering ? "Gerando cortes..." : "Nenhum render finalizado."}</p>
-        ) : (
-          <div className="shorts-grid">
-            {renderOutputs.map((path) => {
-              const url = buildRenderUrl(path);
-              const fileName = path.split("/").pop() || "render.mp4";
-              console.log(`[UI] Render output path: ${path}, URL: ${url}`);
-              return (
-                <article key={path} className="short-card">
-                  <header>
-                    <h3>{fileName}</h3>
-                  </header>
-                  <div style={{ overflow: "hidden", borderRadius: "12px", marginBottom: "12px" }}>
-                    <video
-                      controls
-                      preload="metadata"
-                      src={url}
-                      style={{
-                        width: "100%",
-                        height: "280px",
-                        objectFit: "cover",
-                        display: "block",
-                      }}
-                      onError={(e) => {
-                        console.error(`[UI] Error loading video: ${url}`, e);
-                      }}
-                      onLoadedMetadata={() => {
-                        console.log(`[UI] Video metadata loaded: ${url}`);
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      className="primary"
-                      style={{ flex: 1 }}
-                      onClick={() => {
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.target = "_blank";
-                        a.rel = "noreferrer";
-                        a.click();
-                      }}
-                    >
-                      👁️ Abrir vídeo
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={async () => {
-                        try {
-                          await deleteRenderOutput(activeVideo!.job.job_id, fileName);
-                          setRenderOutputs((current) => current.filter((item) => item !== path));
-                        } catch (error) {
-                          console.error("Failed to delete render:", error);
-                        }
-                      }}
-                    >
-                      🗑️ Deletar
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+      <RenderingSection
+        isLoadingRenderOutputs={isLoadingRenderOutputs}
+        isRendering={isRendering}
+        renderOutputs={renderOutputs}
+        buildRenderUrl={buildRenderUrl}
+        onDeleteRender={async (fileName) => {
+          if (activeVideo) {
+            await deleteRenderOutput(activeVideo.job.job_id, fileName);
+            setRenderOutputs((current) => current.filter((path) => !path.endsWith(fileName)));
+          }
+        }}
+      />
 
       {/* LLM Config Dialog */}
       {showLLMConfigDialog && (
-        <div className="dialog-overlay" onClick={() => setShowLLMConfigDialog(false)}>
-          <div
-            className="dialog"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-          >
-            <div className="dialog-header">
-              <h3>🤖 Configurar LLM</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowLLMConfigDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content" style={{ padding: "20px" }}>
-              <div style={{ marginBottom: "12px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "14px",
-                    fontWeight: "500",
-                    marginBottom: "8px",
-                  }}
-                >
-                  System Prompt
-                </label>
-                <textarea
-                  value={llmSystemPrompt}
-                  onChange={(e) => setLlmSystemPrompt(e.target.value)}
-                  style={{
-                    width: "100%",
-                    minHeight: "400px",
-                    padding: "12px",
-                    borderRadius: "8px",
-                    border: "1px solid #ccc",
-                    fontFamily: "monospace",
-                    fontSize: "12px",
-                    resize: "vertical",
-                    boxSizing: "border-box",
-                  }}
-                  placeholder="Cole o system prompt aqui..."
-                />
-              </div>
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button
-                  onClick={saveLLMConfig}
-                  className="primary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  ✓ Salvar
-                </button>
-                <button
-                  onClick={() => setShowLLMConfigDialog(false)}
-                  className="secondary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <LLMConfigDialog
+          llmSystemPrompt={llmSystemPrompt}
+          action={action}
+          onSave={(prompt) => {
+            setLlmSystemPrompt(prompt);
+            saveLLMConfig();
+          }}
+          onCancel={() => setShowLLMConfigDialog(false)}
+        />
       )}
       {/* Whisper Config Dialog */}
       {showWhisperConfigDialog && (
@@ -3606,350 +2217,76 @@ export default function App() {
 
       {/* Dependencies Dialog */}
       {showDependenciesDialog && (
-        <div className="dialog-overlay" onClick={() => setShowDependenciesDialog(false)}>
-          <div
-            className="dialog"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "500px" }}
-          >
-            <div className="dialog-header">
-              <h3>📦 Gerenciar dependências</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowDependenciesDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content" style={{ padding: "20px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {Object.entries(
-                  dependencies || {
-                    python: { installed: false, version: null },
-                    whisper: { installed: false, version: null },
-                    ffmpeg: { installed: false, version: null },
-                    cuda: { installed: false, version: null },
-                    pytorch: { installed: false, version: null },
-                    ollama: { installed: false, version: null },
-                  },
-                ).map(([name, status]) => {
-                  const isLoading = loadingDependencies.has(name);
-                  const isLoadingInitial = !dependencies;
-                  const displayName =
-                    name === "pytorch" ? "PyTorch" : name.charAt(0).toUpperCase() + name.slice(1);
-                  if (isLoading) {
-                    console.log(`[UI] ${displayName} está em loading`);
-                  }
-                  return (
-                    <div
-                      key={name}
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        padding: "14px 16px",
-                        borderRadius: "8px",
-                        border: "1px solid #e5e5e5",
-                        background:
-                          isLoading || isLoadingInitial
-                            ? "#f3f4f6"
-                            : status.installed
-                              ? "#f0fdf4"
-                              : "#fef2f2",
-                        gap: "12px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          width: "100%",
-                        }}
-                      >
-                        <div style={{ flex: 1 }}></div>
-                        {isLoadingInitial ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: "14px",
-                                height: "14px",
-                                border: "2px solid #e5e7eb",
-                                borderTop: "2px solid #3b82f6",
-                                borderRadius: "50%",
-                                animation: "spin 1s linear infinite",
-                              }}
-                            />
-                            <span
-                              style={{
-                                fontWeight: "600",
-                                fontSize: "14px",
-                                color: "#9ca3af",
-                              }}
-                            >
-                              {displayName}
-                            </span>
-                          </div>
-                        ) : (
-                          <span
-                            style={{ fontWeight: "600", fontSize: "14px", textAlign: "center" }}
-                          >
-                            {displayName}
-                            {!isLoading && status.version && (
-                              <span
-                                style={{ fontWeight: "normal", color: "#666", marginLeft: "6px" }}
-                              >
-                                — {status.version}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-                          {isLoading || isLoadingInitial ? (
-                            <div
-                              style={{
-                                width: "16px",
-                                height: "16px",
-                                border: "2px solid #e5e7eb",
-                                borderTop: "2px solid #3b82f6",
-                                borderRadius: "50%",
-                                animation: "spin 1s linear infinite",
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                width: "24px",
-                                height: "24px",
-                                borderRadius: "50%",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: "14px",
-                                fontWeight: "bold",
-                                background: status.installed ? "#10b981" : "#ef4444",
-                                color: "white",
-                              }}
-                            >
-                              {status.installed ? "✓" : "✗"}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          justifyContent: "center",
-                          width: "100%",
-                        }}
-                      >
-                        <button
-                          onClick={() => {
-                            setSelectedDependencyForInstall(name);
-                            setShowInstallationDialog(true);
-                          }}
-                          disabled={isLoading || isLoadingInitial}
-                          style={{
-                            padding: "4px 8px",
-                            background: "transparent",
-                            color: isLoading || isLoadingInitial ? "#9ca3af" : "#3b82f6",
-                            border: "1px solid transparent",
-                            borderRadius: "4px",
-                            cursor: isLoading || isLoadingInitial ? "not-allowed" : "pointer",
-                            fontSize: "12px",
-                            fontWeight: "700",
-                            opacity: isLoading || isLoadingInitial ? 0.6 : 1,
-                            transition: "border-color 0.15s ease",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isLoading && !isLoadingInitial)
-                              e.currentTarget.style.borderColor = "#3b82f6";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isLoading && !isLoadingInitial)
-                              e.currentTarget.style.borderColor = "transparent";
-                          }}
-                        >
-                          📋 Manual
-                        </button>
-                        {name !== "ollama" && (
-                          <button
-                            disabled={
-                              installingDependency === name || isLoading || isLoadingInitial
-                            }
-                            onClick={async () => {
-                              console.log(`[UI] Iniciando instalação de ${name}`);
-                              setInstallingDependency(name);
-                              // Adiciona ao set de loading
-                              setLoadingDependencies((prev) => {
-                                const next = new Set(prev);
-                                next.add(name);
-                                console.log(`[UI] Loading ${name} marcado como true:`, next);
-                                return next;
-                              });
-                              try {
-                                const result = await installDependency(name);
-                                if (result.success) {
-                                  alert(`${name} instalado com sucesso!`);
-                                  try {
-                                    // Marca como carregando enquanto atualiza
-                                    console.log(
-                                      `[UI] Atualizando lista de dependências para ${name}`,
-                                    );
-                                    const depsData = await getDependencies();
-                                    setDependencies(depsData.dependencies);
-                                    // Remove do loading após sucesso
-                                    setLoadingDependencies((prev) => {
-                                      const next = new Set(prev);
-                                      next.delete(name);
-                                      console.log(`[UI] Loading ${name} marcado como false:`, next);
-                                      return next;
-                                    });
-                                  } catch (error) {
-                                    console.error("Failed to refresh dependencies:", error);
-                                    // Remove do loading em caso de erro
-                                    setLoadingDependencies((prev) => {
-                                      const next = new Set(prev);
-                                      next.delete(name);
-                                      return next;
-                                    });
-                                  }
-                                } else {
-                                  alert(
-                                    `Erro ao instalar ${name}: ${result.error || result.message}`,
-                                  );
-                                  // Remove do loading em caso de erro
-                                  setLoadingDependencies((prev) => {
-                                    const next = new Set(prev);
-                                    next.delete(name);
-                                    return next;
-                                  });
-                                }
-                              } catch (error) {
-                                console.error(`Failed to install ${name}:`, error);
-                                alert(`Erro ao instalar ${name}`);
-                                // Remove do loading em caso de erro
-                                setLoadingDependencies((prev) => {
-                                  const next = new Set(prev);
-                                  next.delete(name);
-                                  return next;
-                                });
-                              } finally {
-                                console.log(`[UI] Finalizando instalação de ${name}`);
-                                setInstallingDependency(null);
-                              }
-                            }}
-                            style={{
-                              padding: "4px 8px",
-                              background: "transparent",
-                              color:
-                                installingDependency === name || isLoading || isLoadingInitial
-                                  ? "#9ca3af"
-                                  : "#10b981",
-                              border: "1px solid transparent",
-                              borderRadius: "4px",
-                              cursor:
-                                installingDependency === name || isLoading || isLoadingInitial
-                                  ? "not-allowed"
-                                  : "pointer",
-                              fontSize: "12px",
-                              fontWeight: "700",
-                              opacity:
-                                installingDependency === name || isLoading || isLoadingInitial
-                                  ? 0.6
-                                  : 1,
-                              transition: "border-color 0.15s ease",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (
-                                installingDependency !== name &&
-                                !isLoading &&
-                                !isLoadingInitial
-                              ) {
-                                e.currentTarget.style.borderColor = "#10b981";
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (
-                                installingDependency !== name &&
-                                !isLoading &&
-                                !isLoadingInitial
-                              ) {
-                                e.currentTarget.style.borderColor = "transparent";
-                              }
-                            }}
-                          >
-                            {installingDependency === name ? "⏳ Instalando..." : "⚡ Automático"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div
-                style={{
-                  marginTop: "20px",
-                  padding: "12px",
-                  background: "#f9fafb",
-                  borderRadius: "8px",
-                }}
-              >
-                <p style={{ fontSize: "12px", color: "#666", margin: 0, lineHeight: "1.5" }}>
-                  <strong>Nota:</strong> Dependências marcadas com ✗ precisam ser instaladas
-                  manualmente. Consulte a documentação do projeto para instruções de instalação.
-                </p>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  justifyContent: "flex-end",
-                  marginTop: "16px",
-                }}
-              >
-                <button
-                  onClick={async () => {
-                    try {
-                      const depsData = await getDependencies();
-                      setDependencies(depsData.dependencies);
-                    } catch (error) {
-                      console.error("Failed to refresh dependencies:", error);
-                    }
-                  }}
-                  className="secondary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  🔄 Atualizar
-                </button>
-                <button
-                  onClick={() => setShowDependenciesDialog(false)}
-                  className="primary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  Fechar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DependenciesDialog
+          dependencies={dependencies}
+          loadingDependencies={loadingDependencies}
+          installingDependency={installingDependency}
+          onClose={() => setShowDependenciesDialog(false)}
+          onRefresh={async () => {
+            try {
+              const depsData = await getDependencies();
+              setDependencies(depsData.dependencies);
+            } catch (error) {
+              console.error("Failed to refresh dependencies:", error);
+            }
+          }}
+          onShowInstallInstructions={(name) => {
+            setSelectedDependencyForInstall(name);
+            setShowInstallationDialog(true);
+          }}
+          onInstallDependency={async (name) => {
+            console.log(`[UI] Iniciando instalação de ${name}`);
+            setInstallingDependency(name);
+            setLoadingDependencies((prev) => {
+              const next = new Set(prev);
+              next.add(name);
+              console.log(`[UI] Loading ${name} marcado como true:`, next);
+              return next;
+            });
+            try {
+              const result = await installDependency(name);
+              if (result.success) {
+                alert(`${name} instalado com sucesso!`);
+                try {
+                  console.log(`[UI] Atualizando lista de dependências para ${name}`);
+                  const depsData = await getDependencies();
+                  setDependencies(depsData.dependencies);
+                  setLoadingDependencies((prev) => {
+                    const next = new Set(prev);
+                    next.delete(name);
+                    console.log(`[UI] Loading ${name} marcado como false:`, next);
+                    return next;
+                  });
+                } catch (error) {
+                  console.error("Failed to refresh dependencies:", error);
+                  setLoadingDependencies((prev) => {
+                    const next = new Set(prev);
+                    next.delete(name);
+                    return next;
+                  });
+                }
+              } else {
+                alert(`Erro ao instalar ${name}: ${result.error || result.message}`);
+                setLoadingDependencies((prev) => {
+                  const next = new Set(prev);
+                  next.delete(name);
+                  return next;
+                });
+              }
+            } catch (error) {
+              console.error(`Failed to install ${name}:`, error);
+              alert(`Erro ao instalar ${name}`);
+              setLoadingDependencies((prev) => {
+                const next = new Set(prev);
+                next.delete(name);
+                return next;
+              });
+            } finally {
+              console.log(`[UI] Finalizando instalação de ${name}`);
+              setInstallingDependency(null);
+            }
+          }}
+        />
       )}
 
       {showInstallationDialog && selectedDependencyForInstall && (
@@ -3961,287 +2298,176 @@ export default function App() {
         </div>
       )}
 
-      {renameVideoId && (
-        <div className="dialog-overlay" onClick={() => setRenameVideoId(null)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Renomear Vídeo</h3>
-            <p style={{ color: "#666", marginBottom: "15px" }}>
-              ⚠️ <strong>Importante:</strong> Não renomeie os arquivos no seu computador. Use apenas
-              esta interface para manter a associação entre o vídeo, transcrições e shorts gerados.
-            </p>
-            <input
-              type="text"
-              value={renameVideoNewName}
-              onChange={(e) => setRenameVideoNewName(e.target.value)}
-              placeholder="Digite o novo nome do vídeo"
-              style={{
-                width: "100%",
-                padding: "10px",
-                border: "1px solid #ddd",
-                borderRadius: "4px",
-                marginBottom: "15px",
-                boxSizing: "border-box",
-              }}
-              onKeyUp={(e) => {
-                if (e.key === "Enter") {
-                  if (renameVideoNewName.trim()) {
-                    runAction(
-                      () => renameVideo(renameVideoId, renameVideoNewName),
-                      () => {
-                        setRenameVideoId(null);
-                        setRenameVideoNewName("");
-                        loadVideos();
-                      },
-                    );
-                  }
-                }
-              }}
-            />
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => {
-                  setRenameVideoId(null);
-                  setRenameVideoNewName("");
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                className="primary"
-                onClick={() => {
-                  if (renameVideoNewName.trim()) {
-                    runAction(
-                      () => renameVideo(renameVideoId, renameVideoNewName),
-                      () => {
-                        setRenameVideoId(null);
-                        setRenameVideoNewName("");
-                        loadVideos();
-                      },
-                    );
-                  }
-                }}
-              >
-                Renomear
-              </button>
-            </div>
-          </div>
-        </div>
+      {showConfigureAppDialog && (
+        <ConfigureAppDialog
+          configBaseDir={configBaseDir}
+          configDownloadResolution={configDownloadResolution}
+          appSettings={appSettings}
+          action={action}
+          onSave={(baseDir, resolution) => {
+            runAction(
+              () =>
+                saveSettings({
+                  media: {
+                    base_dir: baseDir,
+                    download_resolution: resolution,
+                  },
+                }),
+              () => {
+                setShowConfigureAppDialog(false);
+                getSettings().then((s) => {
+                  setAppSettings(s);
+                  setConfigBaseDir(s.media.base_dir);
+                  setConfigDownloadResolution(s.media.download_resolution || "1080p");
+                });
+              },
+            );
+          }}
+          onCancel={() => setShowConfigureAppDialog(false)}
+        />
       )}
 
-      {showConfigureAppDialog && (
-        <div className="dialog-overlay" onClick={() => setShowConfigureAppDialog(false)}>
+      {showBatchPipelineDialog && (
+        <BatchPipelineDialog
+          videos={videos}
+          selectedVideosForBatch={selectedVideosForBatch}
+          batchPipelineOptions={batchPipelineOptions}
+          isBatchProcessing={isBatchProcessing}
+          activeBatchId={activeBatchId}
+          onClose={() => setShowBatchPipelineDialog(false)}
+          onVideoToggle={(videoId) => {
+            setSelectedVideosForBatch((prev) =>
+              prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId],
+            );
+          }}
+          onOptionChange={(changes) => {
+            setBatchPipelineOptions((prev) => ({ ...prev, ...changes }));
+          }}
+          onCancel={async () => {
+            if (isBatchProcessing && activeBatchId) {
+              try {
+                setBatchProcessingLogs((prev) => [...prev, "⚠️ Cancelamento solicitado..."]);
+                await cancelBatchPipeline(activeBatchId);
+                stopBatchPolling();
+                setIsBatchProcessing(false);
+                setBatchProcessingLogs((prev) => [...prev, "❌ Processamento cancelado"]);
+              } catch (error: any) {
+                console.error("[UI] Error cancelling batch:", error);
+                setBatchProcessingLogs((prev) => [
+                  ...prev,
+                  `❌ Erro ao cancelar: ${error.message}`,
+                ]);
+              }
+            } else {
+              setShowBatchPipelineDialog(false);
+            }
+          }}
+          onStart={async () => {
+            if (selectedVideosForBatch.length === 0) {
+              alert("Selecione pelo menos um vídeo");
+              return;
+            }
+
+            try {
+              setIsBatchProcessing(true);
+              setBatchProcessingLogs([
+                `🚀 Iniciando processamento de ${selectedVideosForBatch.length} vídeo(s)...`,
+              ]);
+
+              setShowBatchPipelineDialog(false);
+
+              const result = await startBatchPipeline(selectedVideosForBatch, batchPipelineOptions);
+
+              setActiveBatchId(result.batch_id);
+              setBatchProcessingLogs((prev) => [
+                ...prev,
+                `✅ Pipeline iniciado (ID: ${result.batch_id})`,
+              ]);
+
+              startBatchPolling(result.batch_id);
+            } catch (error: any) {
+              console.error("[UI] Error starting batch pipeline:", error);
+              setBatchProcessingLogs((prev) => [
+                ...prev,
+                `❌ Erro ao iniciar pipeline: ${error.message}`,
+              ]);
+              setIsBatchProcessing(false);
+            }
+          }}
+        />
+      )}
+
+      {/* Batch Completion Notification */}
+      {showBatchCompletionNotification && (
+        <div
+          className="dialog-overlay"
+          style={{ zIndex: 10000 }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div
             className="dialog"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", padding: "24px" }}
+            style={{ maxWidth: "400px" }}
           >
-            <h3>Configurar Aplicação</h3>
-            <p style={{ color: "#666", marginBottom: "20px" }}>
-              Escolha onde os arquivos (vídeos, shorts e transcrições) serão armazenados no seu
-              computador.
-            </p>
-
-            {/* Native Folder Picker */}
-            <button
-              onClick={async () => {
-                try {
-                  console.log("[UI] Abrindo seletor de pasta...");
-                  const result = await selectFolder();
-                  if (result.selected && result.path) {
-                    console.log("[UI] Pasta selecionada:", result.path);
-                    setConfigBaseDir(result.path);
-                  } else {
-                    console.log("[UI] Nenhuma pasta selecionada");
-                  }
-                } catch (error) {
-                  console.error("Erro ao abrir seletor de pasta:", error);
-                }
-              }}
-              style={{
-                width: "100%",
-                padding: "16px",
-                marginBottom: "25px",
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                color: "white",
-                border: "none",
-                borderRadius: "10px",
-                cursor: "pointer",
-                fontWeight: "700",
-                fontSize: "1.1rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "10px",
-                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                transition: "all 0.3s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow = "0 6px 12px rgba(0, 0, 0, 0.15)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
-              }}
-            >
-              📂 Selecionar Pasta
-            </button>
-
-            {/* Manual Path Input */}
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
-                📝 Ou digite o caminho manualmente
-              </label>
-              <input
-                type="text"
-                value={configBaseDir}
-                onChange={(e) => setConfigBaseDir(e.target.value)}
-                placeholder="Ex: C:\\Users\\seu_usuario\\Documents\\YouTubeShorts"
-                style={{
-                  width: "100%",
-                  padding: "10px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  boxSizing: "border-box",
-                  marginBottom: "8px",
-                  fontFamily: "monospace",
-                  fontSize: "0.9rem",
-                }}
-              />
-              <p style={{ color: "#999", fontSize: "0.8rem" }}>
-                📍 Caminho atual: {appSettings?.media.base_dir}
-              </p>
-            </div>
-
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
-                🎞️ Resolução de download
-              </label>
-              <select
-                value={configDownloadResolution}
-                onChange={(e) =>
-                  setConfigDownloadResolution(e.target.value as "1080p" | "1440p" | "4k")
-                }
-                style={{
-                  width: "100%",
-                  padding: "10px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  boxSizing: "border-box",
-                  fontSize: "0.9rem",
-                }}
-              >
-                <option value="1080p">1080p (padrao)</option>
-                <option value="1440p">1440p</option>
-                <option value="4k">4k</option>
-              </select>
-              <p style={{ color: "#999", fontSize: "0.8rem", marginTop: "6px" }}>
-                📍 Resolução atual: {appSettings?.media.download_resolution || "1080p"}
-              </p>
-            </div>
-
-            {/* Structure Preview */}
-            <div
-              style={{
-                marginBottom: "20px",
-                padding: "12px",
-                background: "#f0f4ff",
-                borderRadius: "6px",
-              }}
-            >
-              <p style={{ color: "#333", fontSize: "0.9rem", margin: "0 0 8px 0" }}>
-                <strong>📂 Estrutura que será criada:</strong>
-              </p>
-              <p
-                style={{
-                  color: "#666",
-                  fontSize: "0.8rem",
-                  margin: "0",
-                  fontFamily: "monospace",
-                  lineHeight: "1.6",
-                }}
-              >
-                {configBaseDir || "pasta_base"}/<br />
-                ├── 🎬 videos/
-                <br />
-                ├── 🎞️ shorts/
-                <br />
-                └── 📄 transcrições/
-              </p>
-            </div>
-
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <button onClick={() => setShowConfigureAppDialog(false)}>Cancelar</button>
-              <button
-                className="primary"
-                onClick={() => {
-                  if (configBaseDir.trim()) {
-                    runAction(
-                      () =>
-                        saveSettings({
-                          media: {
-                            base_dir: configBaseDir,
-                            download_resolution: configDownloadResolution,
-                          },
-                        }),
-                      () => {
-                        setShowConfigureAppDialog(false);
-                        getSettings().then((s) => {
-                          setAppSettings(s);
-                          setConfigBaseDir(s.media.base_dir);
-                          setConfigDownloadResolution(s.media.download_resolution || "1080p");
-                        });
-                      },
-                    );
-                  }
-                }}
-              >
-                Salvar Configurações
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showMoveUploadDialog && (
-        <div className="dialog-overlay" onClick={() => setShowMoveUploadDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <div className="dialog-header">
-              <h3>Mover video para a pasta configurada?</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowMoveUploadDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
+              <h3>✅ Pipeline Concluído</h3>
             </div>
-            <div className="dialog-content">
-              <p>
-                Deseja mover o video selecionado para a pasta configurada para evitar uma copia
-                extra em disco?
-              </p>
-              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={dontAskMoveUpload}
-                  onChange={(event) => setDontAskMoveUpload(event.target.checked)}
-                />
-                <span>Nao perguntar novamente</span>
-              </label>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button className="primary" onClick={() => handleMoveUploadDecision(true)}>
-                  Mover e enviar
-                </button>
-                <button className="secondary" onClick={() => handleMoveUploadDecision(false)}>
-                  Manter copia
+            <div className="dialog-content" style={{ padding: "20px" }}>
+              <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
+              <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    setShowBatchCompletionNotification(false);
+                    setBatchCompletionMessage("");
+                  }}
+                  style={{
+                    padding: "10px 30px",
+                    borderRadius: "8px",
+                    fontSize: "16px",
+                    fontWeight: "600",
+                  }}
+                >
+                  OK
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      <SimpleDialogs
+        renameVideoId={renameVideoId}
+        renameVideoNewName={renameVideoNewName}
+        onRenameChange={(name) => setRenameVideoNewName(name)}
+        onRenameClose={() => {
+          setRenameVideoId(null);
+          setRenameVideoNewName("");
+        }}
+        onRenameSave={() => {
+          if (renameVideoNewName.trim()) {
+            runAction(
+              () => renameVideo(renameVideoId!, renameVideoNewName),
+              () => {
+                setRenameVideoId(null);
+                setRenameVideoNewName("");
+                loadVideos();
+              },
+            );
+          }
+        }}
+        showMoveUploadDialog={showMoveUploadDialog}
+        dontAskMoveUpload={dontAskMoveUpload}
+        onDontAskChange={(value) => setDontAskMoveUpload(value)}
+        onMoveUploadClose={() => setShowMoveUploadDialog(false)}
+        onMoveUploadDecision={handleMoveUploadDecision}
+        showBatchCompletionNotification={showBatchCompletionNotification}
+        batchCompletionMessage={batchCompletionMessage}
+        onBatchCompletionClose={() => {
+          setShowBatchCompletionNotification(false);
+          setBatchCompletionMessage("");
+        }}
+      />
 
       {action.error && <div className="toast error">{action.error}</div>}
     </div>

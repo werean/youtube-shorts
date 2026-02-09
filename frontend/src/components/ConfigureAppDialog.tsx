@@ -4,20 +4,25 @@ import type { ActionState } from "../hooks/useAppAction";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;
+  configDownloadResolution: string;
   appSettings: any;
   action: ActionState;
-  onSave: (baseDir: string) => void;
+  onSave: (baseDir: string, resolution: "1080p" | "1440p" | "4k") => void;
   onCancel: () => void;
 }
 
 export function ConfigureAppDialog({
   configBaseDir: initialDir,
+  configDownloadResolution: initialResolution,
   appSettings,
   action,
   onSave,
   onCancel,
 }: ConfigureAppDialogProps) {
   const [baseDir, setBaseDir] = useState(initialDir);
+  const [resolution, setResolution] = useState<"1080p" | "1440p" | "4k">(
+    initialResolution as "1080p" | "1440p" | "4k",
+  );
 
   return (
     <div className="dialog-overlay" onClick={onCancel}>
@@ -100,6 +105,31 @@ export function ConfigureAppDialog({
           </p>
         </div>
 
+        <div style={{ marginBottom: "20px" }}>
+          <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
+            🎞️ Resolução de download
+          </label>
+          <select
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value as "1080p" | "1440p" | "4k")}
+            style={{
+              width: "100%",
+              padding: "10px",
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              boxSizing: "border-box",
+              fontSize: "0.9rem",
+            }}
+          >
+            <option value="1080p">1080p (padrao)</option>
+            <option value="1440p">1440p</option>
+            <option value="4k">4k</option>
+          </select>
+          <p style={{ color: "#999", fontSize: "0.8rem", marginTop: "6px" }}>
+            📍 Resolução atual: {appSettings?.media.download_resolution || "1080p"}
+          </p>
+        </div>
+
         {/* Structure Preview */}
         <div
           style={{
@@ -137,7 +167,7 @@ export function ConfigureAppDialog({
             disabled={action.busy || !baseDir.trim()}
             onClick={() => {
               if (baseDir.trim()) {
-                onSave(baseDir);
+                onSave(baseDir, resolution);
               }
             }}
           >

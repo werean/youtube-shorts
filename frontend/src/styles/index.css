@@ -1,0 +1,17 @@
+/* YouTube Shorts - Main Stylesheet */
+
+/* Core */
+@import "./variables.css";
+@import "./reset.css";
+@import "./animations.css";
+
+/* Layout */
+@import "./layout.css";
+
+/* Components */
+@import "./components.css";
+@import "./forms.css";
+@import "./dialogs.css";
+
+/* Responsive */
+@import "./media.css";
