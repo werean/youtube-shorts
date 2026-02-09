@@ -3,18 +3,168 @@
  */
 
 import { spawn } from "child_process";
+import type { ChildProcess } from "child_process";
 import * as fs from "fs";
 import { Segment } from "../models/segment";
 import { JobStatus } from "../models/job";
 import * as files from "../storage/files";
 import * as metadata from "../storage/metadata";
 import { config } from "../core/config";
-import { loadSettings } from "../core/settings";
+import { loadActiveToolConfigs } from "../core/toolConfigs";
+import { appendTaskLog, appendTaskLogs, clearTaskLogs } from "../core/taskLogs";
 
 type TranscriptionFormats = {
   text?: boolean;
   vtt?: boolean;
 };
+
+const activeTranscriptions = new Map<string, ChildProcess>();
+
+function readFileTextWithFallback(filePath: string): string {
+  const buffer = fs.readFileSync(filePath);
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    return decoder.decode(buffer);
+  } catch (error) {
+    return buffer.toString("latin1");
+  }
+}
+
+function resolveTranscriptionFormats(): TranscriptionFormats {
+  const toolConfigs = loadActiveToolConfigs();
+  const formats = Array.isArray(toolConfigs.whisper.output_format)
+    ? toolConfigs.whisper.output_format
+    : [];
+  const useAll = formats.includes("all");
+  return {
+    text: useAll || formats.includes("txt"),
+    vtt: useAll || formats.includes("vtt"),
+  };
+}
+
+function buildWhisperCommand(
+  videoPath: string,
+  outputDir: string,
+  toolConfigs = loadActiveToolConfigs(),
+): string {
+  const whisper = toolConfigs.whisper;
+  const outputFormats = Array.isArray(whisper.output_format) ? [...whisper.output_format] : [];
+  if (!outputFormats.includes("json") && !outputFormats.includes("all")) {
+    outputFormats.push("json");
+  }
+  const normalizedFormats = outputFormats.filter(Boolean);
+  const outputFormatArg = normalizedFormats.includes("all")
+    ? "all"
+    : normalizedFormats.length > 1
+      ? "all"
+      : normalizedFormats[0] || "json";
+
+  const args: string[] = [
+    "whisper",
+    `"${videoPath}"`,
+    "--model",
+    String(whisper.model || config.WHISPER_MODEL_NAME),
+    "--output_format",
+    outputFormatArg,
+    "--output_dir",
+    `"${outputDir}"`,
+    "--device",
+    whisper.device === "cpu" ? "cpu" : "cuda",
+  ];
+
+  if (whisper.verbose !== undefined) {
+    args.push("--verbose", whisper.verbose ? "True" : "False");
+  }
+  if (whisper.task) {
+    args.push("--task", whisper.task);
+  }
+  if (whisper.language) {
+    args.push("--language", whisper.language);
+  }
+  if (whisper.temperature !== undefined) {
+    args.push("--temperature", String(whisper.temperature));
+  }
+  if (whisper.best_of !== undefined) {
+    args.push("--best_of", String(whisper.best_of));
+  }
+  if (whisper.beam_size !== undefined) {
+    args.push("--beam_size", String(whisper.beam_size));
+  }
+  if (whisper.patience !== undefined && whisper.patience !== null) {
+    args.push("--patience", String(whisper.patience));
+  }
+  if (whisper.length_penalty !== undefined && whisper.length_penalty !== null) {
+    args.push("--length_penalty", String(whisper.length_penalty));
+  }
+  if (whisper.suppress_tokens !== undefined) {
+    args.push("--suppress_tokens", `"${whisper.suppress_tokens}"`);
+  }
+  if (whisper.initial_prompt) {
+    args.push("--initial_prompt", `"${whisper.initial_prompt}"`);
+  }
+  if (whisper.carry_initial_prompt !== undefined) {
+    args.push("--carry_initial_prompt", whisper.carry_initial_prompt ? "True" : "False");
+  }
+  if (whisper.condition_on_previous_text !== undefined) {
+    args.push(
+      "--condition_on_previous_text",
+      whisper.condition_on_previous_text ? "True" : "False",
+    );
+  }
+  if (whisper.fp16 !== undefined) {
+    args.push("--fp16", whisper.fp16 ? "True" : "False");
+  }
+  if (whisper.temperature_increment_on_fallback !== undefined) {
+    args.push(
+      "--temperature_increment_on_fallback",
+      String(whisper.temperature_increment_on_fallback),
+    );
+  }
+  if (whisper.compression_ratio_threshold !== undefined) {
+    args.push("--compression_ratio_threshold", String(whisper.compression_ratio_threshold));
+  }
+  if (whisper.logprob_threshold !== undefined) {
+    args.push("--logprob_threshold", String(whisper.logprob_threshold));
+  }
+  if (whisper.no_speech_threshold !== undefined) {
+    args.push("--no_speech_threshold", String(whisper.no_speech_threshold));
+  }
+  if (whisper.word_timestamps !== undefined) {
+    args.push("--word_timestamps", whisper.word_timestamps ? "True" : "False");
+  }
+  if (whisper.prepend_punctuations) {
+    args.push("--prepend_punctuations", `"${whisper.prepend_punctuations}"`);
+  }
+  if (whisper.append_punctuations) {
+    args.push("--append_punctuations", `"${whisper.append_punctuations}"`);
+  }
+  if (whisper.highlight_words !== undefined) {
+    args.push("--highlight_words", whisper.highlight_words ? "True" : "False");
+  }
+  if (whisper.max_line_width !== undefined && whisper.max_line_width !== null) {
+    args.push("--max_line_width", String(whisper.max_line_width));
+  }
+  if (whisper.max_line_count !== undefined && whisper.max_line_count !== null) {
+    args.push("--max_line_count", String(whisper.max_line_count));
+  }
+  if (whisper.max_words_per_line !== undefined && whisper.max_words_per_line !== null) {
+    args.push("--max_words_per_line", String(whisper.max_words_per_line));
+  }
+  if (whisper.threads !== undefined) {
+    args.push("--threads", String(whisper.threads));
+  }
+  if (whisper.clip_timestamps) {
+    args.push("--clip_timestamps", `"${whisper.clip_timestamps}"`);
+  }
+  if (
+    whisper.hallucination_silence_threshold !== undefined &&
+    whisper.hallucination_silence_threshold !== null
+  ) {
+    args.push("--hallucination_silence_threshold", String(whisper.hallucination_silence_threshold));
+  }
+
+  return args.join(" ");
+}
 
 function formatVttTimestamp(seconds: number): string {
   const totalMs = Math.max(0, Math.floor(seconds * 1000));
@@ -45,11 +195,62 @@ function buildVtt(segments: Segment[]): string {
   return `WEBVTT\n\n${cues}`.trimEnd() + "\n";
 }
 
-function runCommand(command: string): Promise<void> {
+function flushLines(buffer: { value: string }, onLines: (lines: string[]) => void): void {
+  const parts = buffer.value.split(/[\r\n]+/);
+  buffer.value = parts.pop() || "";
+  const lines = parts.filter((line) => line.trim().length > 0);
+  if (lines.length > 0) {
+    onLines(lines);
+  }
+}
+
+function runCommand(
+  command: string,
+  onLog: (lines: string[]) => void,
+  onSpawn?: (child: ChildProcess) => void,
+  onClose?: () => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, { shell: true, stdio: "inherit" });
+    const child = spawn(command, {
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
+    });
+    if (onSpawn) {
+      onSpawn(child);
+    }
+    const stdoutBuffer = { value: "" };
+    const stderrBuffer = { value: "" };
+
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString();
+      process.stdout.write(text);
+      stdoutBuffer.value += text;
+      flushLines(stdoutBuffer, onLog);
+    });
+
+    child.stderr?.on("data", (chunk) => {
+      const text = chunk.toString();
+      process.stderr.write(text);
+      stderrBuffer.value += text;
+      flushLines(stderrBuffer, onLog);
+    });
+
     child.on("error", (error) => reject(error));
     child.on("exit", (code) => {
+      if (onClose) {
+        onClose();
+      }
+      if (stdoutBuffer.value.trim().length > 0) {
+        onLog([stdoutBuffer.value.trim()]);
+      }
+      if (stderrBuffer.value.trim().length > 0) {
+        onLog([stderrBuffer.value.trim()]);
+      }
       if (code === 0) {
         resolve();
         return;
@@ -57,6 +258,30 @@ function runCommand(command: string): Promise<void> {
       reject(new Error(`Whisper exited with code ${code}`));
     });
   });
+}
+
+export function cancelTranscription(jobId: string): boolean {
+  const child = activeTranscriptions.get(jobId);
+  if (!child || !child.pid) {
+    return false;
+  }
+
+  appendTaskLog(jobId, "transcription", "[transcription] Cancel requested");
+
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch (error) {
+    console.error(`[transcription] Failed to cancel process for job ${jobId}:`, error);
+  }
+
+  activeTranscriptions.delete(jobId);
+  metadata.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+  appendTaskLog(jobId, "transcription", "[transcription] Cancelled");
+  return true;
 }
 
 function writeTranscriptionArtifacts(
@@ -88,11 +313,25 @@ function writeTranscriptionArtifacts(
 
 export async function transcribeJob(
   jobId: string,
-  formats: TranscriptionFormats = { text: true, vtt: true },
+  formats: TranscriptionFormats = resolveTranscriptionFormats(),
 ): Promise<Segment[]> {
+  // Check if another transcription is already running
+  if (activeTranscriptions.size > 0) {
+    const activeJobIds = Array.from(activeTranscriptions.keys());
+    if (!activeJobIds.includes(jobId)) {
+      const errorMsg = `Transcrição já em andamento para outro vídeo (${activeJobIds[0]}). Cancele a transcrição anterior para começar uma nova.`;
+      console.error(`[transcription] ✗ ${errorMsg}`);
+      appendTaskLog(jobId, "transcription", `[transcription] ✗ ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+  }
+
+  clearTaskLogs(jobId, "render");
+  clearTaskLogs(jobId, "transcription");
   console.log(`\n[transcription] ============================================`);
   console.log(`[transcription] Starting transcription for job ${jobId}`);
   console.log(`[transcription] ============================================`);
+  appendTaskLog(jobId, "transcription", "[transcription] Starting transcription");
   metadata.updateJobStatus(jobId, JobStatus.TRANSCRIBING);
 
   console.log(`[transcription] Procurando arquivo de vídeo...`);
@@ -107,6 +346,11 @@ export async function transcribeJob(
   }
 
   console.log(`[transcription] ✓ Usando arquivo: ${videoPath}`);
+  appendTaskLog(jobId, "transcription", `[transcription] Using file: ${videoPath}`);
+
+  const clearedDir = files.removeTranscriptionsJobDir(jobId);
+  console.log(`[transcription] 🧹 Limpando pasta de transcrição: ${clearedDir}`);
+  appendTaskLog(jobId, "transcription", `[transcription] Cleared dir: ${clearedDir}`);
 
   const tempDir = files.ensureTranscriptionsJobDir(jobId);
   const outputFormat = "json";
@@ -115,19 +359,28 @@ export async function transcribeJob(
   console.log(`[transcription] 🎤 Modelo Whisper: ${config.WHISPER_MODEL_NAME}`);
   console.log(`[transcription] 🎬 Vídeo de entrada: ${videoPath}`);
   console.log(`[transcription] 🎯 Iniciando transcrição com Whisper...`);
+  appendTaskLogs(jobId, "transcription", [
+    `[transcription] Output dir: ${tempDir}`,
+    `[transcription] Input: ${videoPath}`,
+  ]);
 
   try {
-    // Get device from settings (cuda or cpu)
-    const settings = loadSettings();
-    const device = settings.whisper.device;
+    const toolConfigs = loadActiveToolConfigs();
+    const device = toolConfigs.whisper.device === "cpu" ? "cpu" : "cuda";
 
-    // Run whisper command with configured device
-    const command = `whisper "${videoPath}" --model ${config.WHISPER_MODEL_NAME} --output_format ${outputFormat} --output_dir "${tempDir}" --device ${device}`;
+    const command = buildWhisperCommand(videoPath, tempDir, toolConfigs);
     console.log(`[transcription] 💻 Command: ${command}`);
+    appendTaskLog(jobId, "transcription", `[transcription] Command: ${command}`);
 
     console.log(`[transcription] ⏳ Executando Whisper com ${device.toUpperCase()}...`);
-    await runCommand(command);
+    await runCommand(
+      command,
+      (lines) => appendTaskLogs(jobId, "transcription", lines),
+      (child) => activeTranscriptions.set(jobId, child),
+      () => activeTranscriptions.delete(jobId),
+    );
     console.log(`[transcription] ✓ Whisper completado com sucesso`);
+    appendTaskLog(jobId, "transcription", "[transcription] Whisper completed successfully");
 
     // Verificar arquivo de saída
     const videoBasename = require("path").basename(videoPath, require("path").extname(videoPath));
@@ -138,7 +391,8 @@ export async function transcribeJob(
       throw new Error("Whisper output file not found");
     }
 
-    const whisperData = JSON.parse(fs.readFileSync(whisperOutputPath, "utf-8"));
+    const whisperRaw = readFileTextWithFallback(whisperOutputPath);
+    const whisperData = JSON.parse(whisperRaw);
 
     const segments: Segment[] = [];
     const whisperSegments = whisperData.segments || [];
@@ -156,6 +410,7 @@ export async function transcribeJob(
     const outputPath = files.transcriptionPath(jobId);
     fs.writeFileSync(outputPath, JSON.stringify(segments, null, 2), "utf-8");
     console.log(`[transcription] ✓ Transcription saved for job ${jobId}`);
+    appendTaskLog(jobId, "transcription", "[transcription] Transcription saved");
     writeTranscriptionArtifacts(jobId, segments, formats);
 
     const job = metadata.loadJob(jobId);
@@ -172,6 +427,10 @@ export async function transcribeJob(
     console.error(`[transcription] ✗ Mensagem: ${error.message}`);
     console.error(`[transcription] ✗ Código: ${error.code}`);
     console.error(`[transcription] ✗ Stack: ${error.stack}`);
+    appendTaskLogs(jobId, "transcription", [
+      "[transcription] ERROR executing Whisper",
+      `[transcription] ${error.message}`,
+    ]);
     console.error(`[transcription] ==========================================\n`);
 
     // Verificar se é um arquivo não encontrado
@@ -180,50 +439,15 @@ export async function transcribeJob(
         `[transcription] 🎯 Parece que o Whisper não está instalado ou não foi encontrado no PATH`,
       );
       console.error(`[transcription] Tente instalar com: pip install openai-whisper`);
+      appendTaskLog(
+        jobId,
+        "transcription",
+        "[transcription] Whisper not found. Install with: pip install openai-whisper",
+      );
     }
 
-    console.log(`[transcription] ⚠️ USANDO DADOS DUMMY APENAS PARA TESTES`);
-    console.log(`[transcription] 🔧 Por favor, instale Whisper ou configure corretamente`);
-
-    // Fallback: criar transcrição dummy
-    const dummySegments: Segment[] = [
-      {
-        segment_id: "s1",
-        start: 0.0,
-        end: 5.0,
-        text: "Olá, este é um vídeo de teste.",
-      },
-      {
-        segment_id: "s2",
-        start: 5.0,
-        end: 10.0,
-        text: "A transcrição está funcionando com dados dummy.",
-      },
-      {
-        segment_id: "s3",
-        start: 10.0,
-        end: 15.0,
-        text: "Você pode agora testar todo o pipeline de processamento.",
-      },
-      {
-        segment_id: "s4",
-        start: 15.0,
-        end: 20.0,
-        text: "Isso inclui análise semântica, curadoria e renderização.",
-      },
-    ];
-
-    const outputPath = files.transcriptionPath(jobId);
-    fs.writeFileSync(outputPath, JSON.stringify(dummySegments, null, 2), "utf-8");
-    console.log(`[transcription] ✓ Dummy transcription saved for job ${jobId}`);
-    writeTranscriptionArtifacts(jobId, dummySegments, formats);
-
-    const job = metadata.loadJob(jobId);
-    job.status = JobStatus.BUILDING_BLOCKS;
-    job.updated_at = new Date().toISOString();
-    metadata.saveJob(job);
-
+    metadata.updateJobStatus(jobId, JobStatus.ERROR);
     console.log(`[transcription] ============================================\n`);
-    return dummySegments;
+    throw error;
   }
 }

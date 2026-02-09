@@ -1,0 +1,60 @@
+{
+  "whisper": {
+    "model": "small",
+    "device": "cuda",
+    "output_format": [
+      "json",
+      "vtt",
+      "txt"
+    ],
+    "verbose": true,
+    "task": "transcribe",
+    "language": null,
+    "temperature": 0,
+    "best_of": 5,
+    "beam_size": 5,
+    "patience": null,
+    "length_penalty": null,
+    "suppress_tokens": "-1",
+    "initial_prompt": null,
+    "carry_initial_prompt": false,
+    "condition_on_previous_text": true,
+    "fp16": true,
+    "temperature_increment_on_fallback": 0.2,
+    "compression_ratio_threshold": 2.4,
+    "logprob_threshold": -1,
+    "no_speech_threshold": 0.6,
+    "word_timestamps": false,
+    "prepend_punctuations": null,
+    "append_punctuations": null,
+    "highlight_words": false,
+    "max_line_width": null,
+    "max_line_count": null,
+    "max_words_per_line": null,
+    "threads": 0,
+    "clip_timestamps": "0",
+    "hallucination_silence_threshold": null
+  },
+  "ffmpeg": {
+    "format": "mp4",
+    "video_codec": "h264_nvenc",
+    "audio_codec": "aac",
+    "video_preset": "p5",
+    "video_bitrate": null,
+    "audio_bitrate": null,
+    "framerate": null,
+    "aspect_ratio": "9:16",
+    "audio_sample_rate": null,
+    "audio_channels": null,
+    "disable_video": false,
+    "disable_audio": false,
+    "disable_subtitle": false,
+    "video_filter": null,
+    "audio_filter": null,
+    "metadata": null
+  },
+  "llm": {
+    "model": "gpt-oss:120b-cloud",
+    "system_prompt": "You are selecting highlight cuts for short-form vertical videos.\n\nInput consists of semantic blocks with timestamps. Each block is a coherent unit.\nYou must propose MULTIPLE cuts that form complete mini-stories (beginning, middle, end) on a single topic.\nTarget duration is about 60 seconds. Prefer 45-70s, allow up to 75s only if the idea requires it.\nAvoid cuts shorter than 30s unless absolutely necessary.\nThe first block of each cut MUST be a strong hook.\n\nIMPORTANT: Scan through ALL blocks and identify ALL potential cuts. A good video can have 3-10+ cuts depending on content length and quality.\nEach cut should be a standalone piece with its own hook and complete narrative arc.\n\nHook criteria (first 1-3 seconds):\n- Immediate impact\n- Strong claim\n- Clear opinion\n- Surprise or tension\n- Avoid introductions or context-dependent openings\n\nRules:\n- Use only the provided blocks.\n- Use consecutive blocks only; do not skip around.\n- Start at the first block of a topic (avoid starting mid-thought).\n- End at a natural conclusion (avoid cutting off a thought).\n- The cut start time must match the first block start.\n- The cut end time must match the last block end.\n- Do NOT edit or rewrite text.\n- Do NOT include any extra commentary.\n- Output JSON only, no markdown.\n- Cuts must not overlap (each block can only be in one cut).\n- Sort cuts by score (best first).\n\nOutput format (JSON array):\n[\n\t{\n\t\t\"blocks\": [\"b12\", \"b13\"],\n\t\t\"start\": 42.1,\n\t\t\"end\": 71.2,\n\t\t\"score\": 94,\n\t\t\"hook_reason\": \"...\",\n\t\t\"content_reason\": \"...\"\n\t}\n]"
+  }
+}

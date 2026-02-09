@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Cut, Job, Segment, VideoRecord } from "./types";
+import type { FFmpegConfig } from "./types/ffmpeg";
+import type { WhisperConfig } from "./types/whisper";
+import type { ToolConfigs } from "./types/toolConfigs";
 import {
   analyzeJob,
   apiBaseUrl,
   archiveVideo,
   approveCut,
   buildBlocks,
+  cancelTranscription,
+  cancelRendering,
   createJob,
   deleteTranscription,
   deleteVideo,
@@ -18,27 +23,28 @@ import {
   rejectCut,
   renderJob,
   listRenderOutputs,
+  deleteRenderOutput,
   renameVideo,
   transcribeJob,
+  updateCuts,
   uploadVideoFile,
-  getLLMPrompt,
-  getConfig,
   getDependencies,
   getInstallationGuide,
   installDependency,
   getSettings,
   saveSettings,
+  getToolConfigs,
+  saveToolConfigs,
+  resetAllToolConfigs,
+  resetToolConfigSection,
+  importToolConfigs,
   getCommonFolders,
   selectFolder,
   type AppSettings,
 } from "./api";
-
-const WHISPER_FORMATS = [
-  { id: "json", label: "JSON", description: "Formato JSON com segmentos detalhados e timestamps" },
-  { id: "vtt", label: "VTT", description: "WebVTT - formato de legendas para web players" },
-  { id: "txt", label: "TXT", description: "Texto simples sem timestamps" },
-  { id: "srt", label: "SRT", description: "SubRip - formato de legendas universal" },
-] as const;
+import { getJobLogs } from "./api/logs";
+import { WhisperConfigDialog } from "./components/WhisperConfigDialog";
+import { FFmpegConfigDialog } from "./components/FFmpegConfigDialog";
 
 interface ActionState {
   busy: boolean;
@@ -226,6 +232,7 @@ function InstallationInstructionsDialog({
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const toolConfigsInputRef = useRef<HTMLInputElement>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [uploadMode, setUploadMode] = useState<"url" | "file">("url");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -237,9 +244,19 @@ export default function App() {
   const [suggestedCuts, setSuggestedCuts] = useState<Cut[]>([]);
   const [selectedSuggestedCutId, setSelectedSuggestedCutId] = useState<string | null>(null);
   const [renderOutputs, setRenderOutputs] = useState<string[]>([]);
+  const [renderOutputsVersion, setRenderOutputsVersion] = useState(0);
   const [isRendering, setIsRendering] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingCuts, setIsLoadingCuts] = useState(false);
+  const [isLoadingRenderOutputs, setIsLoadingRenderOutputs] = useState(false);
   const [expectedRenderCount, setExpectedRenderCount] = useState(0);
   const renderPollRef = useRef<number | null>(null);
+  const renderPollStartTimeRef = useRef<number | null>(null);
+  const renderOutputsKeyRef = useRef<string>("");
+  const logsPollRef = useRef<number | null>(null);
+  const ingestLogsPollRef = useRef<number | null>(null);
+  const taskLogsContainerRef = useRef<HTMLDivElement>(null);
+  const ingestLogsContainerRef = useRef<HTMLDivElement>(null);
   const [action, setAction] = useState<ActionState>(initialAction);
   const [showTranscriptionFormatListDialog, setShowTranscriptionFormatListDialog] = useState(false);
   const [showTranscriptionContentDialog, setShowTranscriptionContentDialog] = useState(false);
@@ -267,12 +284,18 @@ export default function App() {
   const [editCutStartSeconds, setEditCutStartSeconds] = useState<string>("");
   const [editCutEndMinutes, setEditCutEndMinutes] = useState<string>("");
   const [editCutEndSeconds, setEditCutEndSeconds] = useState<string>("");
+  const [showAddManualCutDialog, setShowAddManualCutDialog] = useState(false);
+  const [newCutStartMinutes, setNewCutStartMinutes] = useState<string>("");
+  const [newCutStartSeconds, setNewCutStartSeconds] = useState<string>("");
+  const [newCutEndMinutes, setNewCutEndMinutes] = useState<string>("");
+  const [newCutEndSeconds, setNewCutEndSeconds] = useState<string>("");
   const [videoView, setVideoView] = useState<"active" | "archived">("active");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renameVideoId, setRenameVideoId] = useState<string | null>(null);
   const [renameVideoNewName, setRenameVideoNewName] = useState<string>("");
   const [showLLMConfigDialog, setShowLLMConfigDialog] = useState(false);
   const [showWhisperConfigDialog, setShowWhisperConfigDialog] = useState(false);
+  const [showFFmpegConfigDialog, setShowFFmpegConfigDialog] = useState(false);
   const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
   const [showInstallationDialog, setShowInstallationDialog] = useState(false);
   const [showConfigureAppDialog, setShowConfigureAppDialog] = useState(false);
@@ -283,8 +306,22 @@ export default function App() {
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
+  const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
+  const [ffmpegConfig, setFfmpegConfig] = useState<FFmpegConfig | null>(null);
+  const [activeTaskLogs, setActiveTaskLogs] = useState<string[]>([]);
+  const [activeTaskLogType, setActiveTaskLogType] = useState<"transcription" | "render" | null>(
+    null,
+  );
+  const [expandTaskLogs, setExpandTaskLogs] = useState(false);
+  const [ingestLogs, setIngestLogs] = useState<string[]>([]);
+  const [expandIngestLogs, setExpandIngestLogs] = useState(false);
+  const [ingestJobId, setIngestJobId] = useState<string | null>(null);
+  const [isIngesting, setIsIngesting] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [configBaseDir, setConfigBaseDir] = useState<string>("");
+  const [configDownloadResolution, setConfigDownloadResolution] = useState<
+    "1080p" | "1440p" | "4k"
+  >("1080p");
   const [commonFolders, setCommonFolders] = useState<
     { name: string; path: string; exists: boolean }[]
   >([]);
@@ -354,18 +391,50 @@ export default function App() {
   async function pollRenderOutputs(jobId: string) {
     try {
       const outputs = await listRenderOutputs(jobId);
-      setRenderOutputs(outputs);
+      const outputsKey = outputs.join("|");
+      if (outputsKey !== renderOutputsKeyRef.current) {
+        renderOutputsKeyRef.current = outputsKey;
+        setRenderOutputs(outputs);
+        setRenderOutputsVersion((value) => value + 1);
+      }
 
       const job = await getJob(jobId);
       updateVideo(jobId, { job });
 
       if (expectedRenderCount > 0 && outputs.length >= expectedRenderCount) {
+        console.log(
+          `[render] All expected renders completed (${outputs.length}/${expectedRenderCount})`,
+        );
         stopRenderPolling();
         return;
       }
 
       if (job.status === "DONE" || job.status === "ERROR") {
+        console.log(`[render] Job status is ${job.status}, stopping polling`);
+        setRenderOutputsVersion((value) => value + 1);
         stopRenderPolling();
+        return;
+      }
+
+      if (job.status !== "RENDERING") {
+        console.log(`[render] Job status is ${job.status}, stopping polling`);
+        setRenderOutputsVersion((value) => value + 1);
+        stopRenderPolling();
+        return;
+      }
+
+      // Check if polling has been running too long (2 hours)
+      if (renderPollStartTimeRef.current) {
+        const elapsedMs = Date.now() - renderPollStartTimeRef.current;
+        const maxTimeMs = 2 * 60 * 60 * 1000; // 2 hours
+        if (elapsedMs > maxTimeMs) {
+          console.error(`[render] Render polling timeout after ${elapsedMs}ms`);
+          setAction({
+            busy: false,
+            error: "Renderização demorou muito tempo. Processo foi cancelado.",
+          });
+          stopRenderPolling();
+        }
       }
     } catch (error) {
       console.error("[render] Failed to poll outputs:", error);
@@ -375,6 +444,7 @@ export default function App() {
   function startRenderPolling(jobId: string, totalCuts: number) {
     setExpectedRenderCount(totalCuts);
     setIsRendering(true);
+    renderPollStartTimeRef.current = Date.now();
 
     if (renderPollRef.current) {
       window.clearInterval(renderPollRef.current);
@@ -386,13 +456,74 @@ export default function App() {
     }, 2000);
   }
 
+  async function pollTaskLogs(jobId: string, task: "transcription" | "render") {
+    try {
+      const result = await getJobLogs(jobId, task);
+      setActiveTaskLogs(result.logs || []);
+    } catch (error) {
+      console.error("[logs] Failed to fetch task logs:", error);
+    }
+  }
+
+  function startLogsPollingInterval(jobId: string, task: "transcription" | "render") {
+    if (logsPollRef.current) {
+      window.clearInterval(logsPollRef.current);
+    }
+    void pollTaskLogs(jobId, task);
+    logsPollRef.current = window.setInterval(() => {
+      void pollTaskLogs(jobId, task);
+    }, 1500);
+  }
+
+  function stopLogsPolling() {
+    if (logsPollRef.current) {
+      window.clearInterval(logsPollRef.current);
+      logsPollRef.current = null;
+    }
+  }
+
+  async function pollIngestLogs(jobId: string) {
+    try {
+      const result = await getJobLogs(jobId, "ingest");
+      setIngestLogs(result.logs || []);
+    } catch (error) {
+      console.error("[logs] Failed to fetch ingest logs:", error);
+    }
+  }
+
+  function startIngestLogsPolling(jobId: string) {
+    if (ingestLogsPollRef.current) {
+      window.clearInterval(ingestLogsPollRef.current);
+    }
+    void pollIngestLogs(jobId);
+    ingestLogsPollRef.current = window.setInterval(() => {
+      void pollIngestLogs(jobId);
+    }, 1500);
+  }
+
+  function stopIngestLogsPolling() {
+    if (ingestLogsPollRef.current) {
+      window.clearInterval(ingestLogsPollRef.current);
+      ingestLogsPollRef.current = null;
+    }
+  }
+
   function stopRenderPolling() {
     if (renderPollRef.current) {
       window.clearInterval(renderPollRef.current);
       renderPollRef.current = null;
     }
+    renderPollStartTimeRef.current = null;
     setIsRendering(false);
   }
+
+  // Ensure polling stops if isRendering becomes false externally
+  useEffect(() => {
+    if (isRendering === false && renderPollRef.current !== null) {
+      console.log("[render] isRendering false but poll still running, stopping...");
+      stopRenderPolling();
+    }
+  }, [isRendering]);
 
   function updateVideo(jobId: string, updates: Partial<VideoItem>) {
     setVideos((current) => current.map((v) => (v.job.job_id === jobId ? { ...v, ...updates } : v)));
@@ -459,16 +590,173 @@ export default function App() {
       return renderPath;
     }
     const normalized = renderPath.startsWith("/") ? renderPath : `/${renderPath}`;
-    return `${apiBaseUrl}${normalized}`;
+    const separator = normalized.includes("?") ? "&" : "?";
+    return `${apiBaseUrl}${normalized}${separator}v=${renderOutputsVersion}`;
   }
+
+  // Find any video currently transcribing or rendering
+  function findActiveTranscriptionOrRendering(): string | null {
+    // Check if any video is transcribing
+    const transcribingVideo = videos.find((v) => v.isTranscribing);
+    if (transcribingVideo) return transcribingVideo.job.job_id;
+
+    // Check if rendering is in progress (applies to activeVideo)
+    if (isRendering && activeVideoId) return activeVideoId;
+
+    return null;
+  }
+
+  function canStartOperation(targetJobId: string): { allowed: boolean; message?: string } {
+    const activeJobId = findActiveTranscriptionOrRendering();
+    if (!activeJobId) return { allowed: true };
+    if (activeJobId === targetJobId) return { allowed: true }; // Same video can continue
+    return {
+      allowed: false,
+      message: `Transcrição ou renderização já em andamento. Cancele para iniciar outra operação.`,
+    };
+  }
+
+  // Auto-scroll task logs to bottom when new logs arrive
+  useEffect(() => {
+    if (taskLogsContainerRef.current) {
+      taskLogsContainerRef.current.scrollTop = taskLogsContainerRef.current.scrollHeight;
+    }
+  }, [activeTaskLogs]);
+
+  // Auto-scroll ingest logs to bottom when new logs arrive
+  useEffect(() => {
+    if (ingestLogsContainerRef.current) {
+      ingestLogsContainerRef.current.scrollTop = ingestLogsContainerRef.current.scrollHeight;
+    }
+  }, [ingestLogs]);
 
   useEffect(() => {
     return () => {
       if (renderPollRef.current) {
         window.clearInterval(renderPollRef.current);
       }
+      if (logsPollRef.current) {
+        window.clearInterval(logsPollRef.current);
+      }
+      if (ingestLogsPollRef.current) {
+        window.clearInterval(ingestLogsPollRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeVideoId || !activeTaskLogType) {
+      stopLogsPolling();
+      return;
+    }
+
+    const shouldPoll =
+      activeTaskLogType === "transcription" ? Boolean(activeVideo?.isTranscribing) : isRendering;
+
+    if (!shouldPoll) {
+      stopLogsPolling();
+      return;
+    }
+
+    if (!logsPollRef.current) {
+      startLogsPollingInterval(activeVideoId, activeTaskLogType);
+    }
+  }, [activeVideoId, activeTaskLogType, activeVideo?.isTranscribing, isRendering]);
+
+  // Fetch final logs when transcription or rendering completes
+  useEffect(() => {
+    if (
+      activeVideoId &&
+      activeTaskLogType === "transcription" &&
+      activeVideo?.isTranscribing === false
+    ) {
+      // Transcription just finished - fetch final logs
+      void pollTaskLogs(activeVideoId, "transcription");
+    }
+  }, [activeVideo?.isTranscribing, activeVideoId, activeTaskLogType]);
+
+  // Fetch final logs when rendering completes
+  useEffect(() => {
+    if (activeVideoId && activeTaskLogType === "render" && isRendering === false) {
+      // Rendering just finished - fetch final logs
+      void pollTaskLogs(activeVideoId, "render");
+    }
+  }, [isRendering, activeVideoId, activeTaskLogType]);
+
+  useEffect(() => {
+    if (!ingestJobId || !isIngesting || uploadMode !== "url") {
+      stopIngestLogsPolling();
+      return;
+    }
+
+    if (!ingestLogsPollRef.current) {
+      startIngestLogsPolling(ingestJobId);
+    }
+  }, [ingestJobId, isIngesting, uploadMode]);
+
+  // Load render outputs when active video changes
+  useEffect(() => {
+    if (activeVideo?.job?.job_id) {
+      renderOutputsKeyRef.current = "";
+      setRenderOutputs([]);
+      setIsLoadingRenderOutputs(true);
+      console.log(`[UI] Set isLoadingRenderOutputs to true`);
+
+      const startLoadTime = Date.now();
+
+      pollRenderOutputs(activeVideo.job.job_id).finally(() => {
+        // Ensure spinner shows for at least 500ms
+        const elapsedTime = Date.now() - startLoadTime;
+        const remainingTime = Math.max(0, 500 - elapsedTime);
+
+        setTimeout(() => {
+          console.log(
+            `[UI] Set isLoadingRenderOutputs to false after ${elapsedTime + remainingTime}ms`,
+          );
+          setIsLoadingRenderOutputs(false);
+        }, remainingTime);
+      });
+    }
+  }, [activeVideo?.job?.job_id]);
+
+  // Load cuts when active video changes
+  useEffect(() => {
+    if (activeVideo?.job?.job_id) {
+      // Clear previous cuts immediately to avoid flashing old data
+      console.log(`[UI] Loading cuts for video ${activeVideo.job.job_id}`);
+      setCuts([]);
+      setSuggestedCuts([]);
+      setRenderOutputs([]);
+
+      // Start loading new cuts
+      setIsLoadingCuts(true);
+      console.log(`[UI] Set isLoadingCuts to true`);
+
+      const startLoadTime = Date.now();
+
+      listCuts(activeVideo.job.job_id)
+        .then((loadedCuts) => {
+          console.log(`[UI] Loaded ${loadedCuts.length} cuts for video ${activeVideo.job.job_id}`);
+          setCuts(loadedCuts);
+          setSuggestedCuts(loadedCuts);
+        })
+        .catch((error) => {
+          console.error("Failed to load cuts:", error);
+          setCuts([]);
+          setSuggestedCuts([]);
+        })
+        .finally(() => {
+          // Ensure spinner shows for at least 500ms
+          const elapsedTime = Date.now() - startLoadTime;
+          const remainingTime = Math.max(0, 500 - elapsedTime);
+
+          setTimeout(() => {
+            console.log(`[UI] Set isLoadingCuts to false after ${elapsedTime + remainingTime}ms`);
+            setIsLoadingCuts(false);
+          }, remainingTime);
+        });
+    }
+  }, [activeVideo?.job?.job_id]);
 
   function parseTimestampInput(input: string): number | null {
     const trimmed = input.trim();
@@ -595,6 +883,12 @@ export default function App() {
     if (showAiResponseOnAnalyze && rawResponse) {
       setShowAiResponseDialog(true);
     }
+    // Sync with backend immediately
+    if (activeVideo) {
+      void updateCuts(activeVideo.job.job_id, finalCuts).catch((error) => {
+        console.error("Failed to sync cuts:", error);
+      });
+    }
     refreshVideo(activeVideo!.job.job_id);
   }
 
@@ -639,7 +933,7 @@ export default function App() {
 
         // Auto-selecionar o primeiro vídeo (mais antigo) se nenhum estiver selecionado
         if (activeItems.length > 0 && !activeVideoId) {
-          const firstVideo = activeItems[activeItems.length - 1]; // Último do array = primeiro na exibição (devido ao reverse)
+          const firstVideo = activeItems[0]; // Primeiro do array = mais antigo (ordenado por created_at)
           setActiveVideoId(firstVideo.job.job_id);
         }
       },
@@ -695,6 +989,10 @@ export default function App() {
     setAiResponseRaw(null);
     setShowAiResponseDialog(false);
     setHoveredCutId(null);
+    setActiveTaskLogs([]);
+    setActiveTaskLogType(null);
+    setExpandTaskLogs(false);
+    stopLogsPolling();
     if (activeVideoId) {
       loadCutsForVideo(activeVideoId);
     } else {
@@ -767,15 +1065,33 @@ export default function App() {
     startUploadSelectedFiles();
   }
 
-  async function saveWhisperConfig() {
+  function applyToolConfigs(response: { active: ToolConfigs; source?: "default" | "custom" }) {
+    const active = response.active;
+    setWhisperConfig(active.whisper || {});
+    const device = active.whisper.device === "cpu" ? "cpu" : "cuda";
+    setWhisperDevice(device);
+    const formats = Array.isArray(active.whisper.output_format)
+      ? active.whisper.output_format
+      : ["json", "vtt", "txt"];
+    setWhisperFormats(formats);
+    setFfmpegConfig(active.ffmpeg || null);
+    setLlmSystemPrompt(active.llm.system_prompt || "");
+  }
+
+  async function saveWhisperConfig(config: Partial<WhisperConfig>) {
     try {
-      const updated = await saveSettings({
+      const outputFormats = (
+        Array.isArray(config.output_format) ? config.output_format : whisperFormats
+      ) as WhisperConfig["output_format"];
+      const device = config.device === "cpu" ? "cpu" : "cuda";
+      const response = await saveToolConfigs({
         whisper: {
-          device: whisperDevice,
-          formats: whisperFormats,
+          ...config,
+          device,
+          output_format: outputFormats,
         },
       });
-      setAppSettings(updated);
+      applyToolConfigs(response);
       console.log("[UI] ✓ Configurações do Whisper salvas");
       setShowWhisperConfigDialog(false);
     } catch (error) {
@@ -785,11 +1101,59 @@ export default function App() {
 
   async function saveLLMConfig() {
     try {
-      // TODO: Implement LLM system prompt persistence
-      console.log("[UI] Configurações do LLM salvas (sistema prompt localmente)");
+      const response = await saveToolConfigs({
+        llm: {
+          system_prompt: llmSystemPrompt,
+        },
+      });
+      applyToolConfigs(response);
+      console.log("[UI] ✓ Configurações do LLM salvas");
       setShowLLMConfigDialog(false);
     } catch (error) {
       console.error("[UI] ✗ Erro ao salvar configurações do LLM:", error);
+    }
+  }
+
+  async function saveFFmpegConfig(config: FFmpegConfig) {
+    try {
+      const response = await saveToolConfigs({ ffmpeg: config });
+      applyToolConfigs(response);
+      console.log("[UI] ✓ Configurações do FFmpeg salvas");
+      setShowFFmpegConfigDialog(false);
+    } catch (error) {
+      console.error("[UI] ✗ Erro ao salvar configurações do FFmpeg:", error);
+    }
+  }
+
+  async function resetAllConfigs() {
+    try {
+      const response = await resetAllToolConfigs();
+      applyToolConfigs(response);
+      console.log("[UI] ✓ Configurações resetadas");
+    } catch (error) {
+      console.error("[UI] ✗ Erro ao resetar configurações:", error);
+    }
+  }
+
+  async function resetConfigSection(section: "whisper" | "ffmpeg" | "llm") {
+    try {
+      const response = await resetToolConfigSection(section);
+      applyToolConfigs(response);
+      console.log(`[UI] ✓ Configuração resetada: ${section}`);
+    } catch (error) {
+      console.error(`[UI] ✗ Erro ao resetar ${section}:`, error);
+    }
+  }
+
+  async function handleImportToolConfigs(file: File) {
+    try {
+      const content = await file.text();
+      const parsed = JSON.parse(content) as ToolConfigs;
+      const response = await importToolConfigs(parsed);
+      applyToolConfigs(response);
+      console.log("[UI] ✓ Configurações importadas");
+    } catch (error) {
+      console.error("[UI] ✗ Erro ao importar configurações:", error);
     }
   }
 
@@ -800,22 +1164,13 @@ export default function App() {
     }
     loadVideos();
 
-    // Load LLM prompt and config
+    // Load tool configs
     (async () => {
       try {
-        const promptData = await getLLMPrompt();
-        setLlmSystemPrompt(promptData.prompt);
+        const toolConfigs = await getToolConfigs();
+        applyToolConfigs(toolConfigs);
       } catch (error) {
-        console.error("Failed to load LLM prompt:", error);
-      }
-
-      try {
-        const configData = await getConfig();
-        setWhisperDevice((configData.whisper.device || "cuda") as "cpu" | "cuda");
-        const formats = configData.whisper.formats || "json,vtt,txt";
-        setWhisperFormats(formats.split(",").map((f) => f.trim()));
-      } catch (error) {
-        console.error("Failed to load config:", error);
+        console.error("Failed to load tool configs:", error);
       }
 
       try {
@@ -829,6 +1184,7 @@ export default function App() {
         const settings = await getSettings();
         setAppSettings(settings);
         setConfigBaseDir(settings.media.base_dir);
+        setConfigDownloadResolution(settings.media.download_resolution || "1080p");
       } catch (error) {
         console.error("Failed to load app settings:", error);
       }
@@ -929,23 +1285,29 @@ export default function App() {
             <button
               onClick={async () => {
                 setShowDependenciesDialog(true);
-                // Inicializa dependências vazias com loading indicators
-                setDependencies({
-                  python: { installed: false, version: null },
-                  whisper: { installed: false, version: null },
-                  ffmpeg: { installed: false, version: null },
-                  cuda: { installed: false, version: null },
-                  pytorch: { installed: false, version: null },
-                  ollama: { installed: false, version: null },
-                });
+                // Deixa como null para mostrar spinner global enquanto carrega
+                setDependencies(null);
                 setLoadingDependencies(new Set());
 
                 // Carrega as dependências
                 try {
+                  console.log("[UI] Carregando dependências...");
                   const depsData = await getDependencies();
+                  console.log("[UI] Dependências carregadas:", depsData.dependencies);
                   setDependencies(depsData.dependencies);
+                  setLoadingDependencies(new Set());
                 } catch (error) {
                   console.error("Failed to load dependencies:", error);
+                  // Inicializa com empty state em caso de erro
+                  setDependencies({
+                    python: { installed: false, version: null },
+                    whisper: { installed: false, version: null },
+                    ffmpeg: { installed: false, version: null },
+                    cuda: { installed: false, version: null },
+                    pytorch: { installed: false, version: null },
+                    ollama: { installed: false, version: null },
+                  });
+                  setLoadingDependencies(new Set());
                 }
               }}
               style={{
@@ -1032,6 +1394,70 @@ export default function App() {
               Personaliza o dispositivo e formatos de transcrição.
             </p>
           </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              border: "1px solid #e5e5e5",
+              borderRadius: "10px",
+              padding: "12px",
+              background: "#fff",
+            }}
+          >
+            <button
+              onClick={() => setShowFFmpegConfigDialog(true)}
+              style={{
+                width: "100%",
+                borderRadius: "8px",
+                background: "#ec4899",
+                color: "white",
+                border: "none",
+                padding: "10px",
+                cursor: "pointer",
+                fontWeight: "600",
+              }}
+            >
+              🎬 Configurar FFmpeg
+            </button>
+            <p
+              className="muted"
+              style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
+            >
+              Personaliza o formato, codecs e filtros de vídeo.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ marginTop: "16px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button className="secondary" onClick={resetAllConfigs}>
+            ♻️ Resetar tudo
+          </button>
+          <button className="secondary" onClick={() => resetConfigSection("whisper")}>
+            Resetar Whisper
+          </button>
+          <button className="secondary" onClick={() => resetConfigSection("ffmpeg")}>
+            Resetar FFmpeg
+          </button>
+          <button className="secondary" onClick={() => resetConfigSection("llm")}>
+            Resetar LLM
+          </button>
+          <button className="secondary" onClick={() => toolConfigsInputRef.current?.click()}>
+            📥 Importar configurações
+          </button>
+          <input
+            ref={toolConfigsInputRef}
+            type="file"
+            accept="application/json"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                void handleImportToolConfigs(file);
+                event.currentTarget.value = "";
+              }
+            }}
+          />
         </div>
       </section>
 
@@ -1091,6 +1517,12 @@ export default function App() {
                       setVideos((current) => [newVideo, ...current]);
                       setActiveVideoId(jobResult.job_id);
                       setYoutubeUrl("");
+                      setIsIngesting(true);
+                      setIngestJobId(jobResult.job_id);
+                      setIngestLogs([]);
+                      setExpandIngestLogs(false);
+                      stopIngestLogsPolling();
+                      startIngestLogsPolling(jobResult.job_id);
 
                       // Auto-ingest
                       console.log(`[UI] Iniciando ingestão automática...`);
@@ -1100,6 +1532,8 @@ export default function App() {
                           console.log(
                             `[UI] Ingestão completada, vídeo: ${ingestResult.video_path}`,
                           );
+                          setIsIngesting(false);
+                          stopIngestLogsPolling();
                           updateVideo(jobResult.job_id, {
                             videoPath: ingestResult.video_path,
                           });
@@ -1113,6 +1547,61 @@ export default function App() {
               >
                 🎥 Fazer upload
               </button>
+              {(isIngesting || ingestLogs.length > 0) && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid #e5e7eb",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "8px",
+                      color: "#93c5fd",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>⬇️ Logs do download</span>
+                    <button
+                      className="secondary"
+                      onClick={() => setExpandIngestLogs((current) => !current)}
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: "11px",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      {expandIngestLogs ? "Mostrar menos" : "Mostrar mais"}
+                    </button>
+                  </div>
+                  <div
+                    ref={ingestLogsContainerRef}
+                    style={{
+                      height: expandIngestLogs ? "220px" : "52px",
+                      maxHeight: "320px",
+                      minHeight: "52px",
+                      overflowY: "auto",
+                      whiteSpace: "pre-wrap",
+                      resize: "vertical",
+                    }}
+                  >
+                    {(expandIngestLogs ? ingestLogs : ingestLogs.slice(-2)).length === 0
+                      ? "Aguardando logs..."
+                      : (expandIngestLogs ? ingestLogs : ingestLogs.slice(-2)).map(
+                          (line, index) => <div key={`${index}-${line}`}>{line}</div>,
+                        )}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -1344,122 +1833,126 @@ export default function App() {
           </p>
         ) : (
           <div className="video-list">
-            {(videoView === "active" ? videos : archivedVideos)
-              .slice()
-              .reverse()
-              .map((video, index) => (
-                <div key={video.job.job_id} className="video-item">
-                  <div
-                    className="video-row"
-                    onClick={() => {
-                      if (videoView === "active") {
-                        if (activeVideoId === video.job.job_id) {
-                          // Desmarcar se já estiver selecionado
-                          console.log(`[UI] ✗ Vídeo desmarcado`);
-                          setActiveVideoId(null);
-                        } else {
-                          // Marcar novo vídeo
-                          console.log(`\n[UI] ✓ Vídeo selecionado:`);
-                          console.log(`[UI]   Job ID: ${video.job.job_id}`);
-                          console.log(`[UI]   Video Path: ${video.videoPath}`);
-                          console.log(`[UI]   Status: ${video.job.status}`);
-                          console.log(`[UI]   URL completa: ${apiBaseUrl}${video.videoPath}`);
-                          setActiveVideoId(video.job.job_id);
+            {(videoView === "active" ? videos : archivedVideos).slice().map((video, index) => (
+              <div key={video.job.job_id} className="video-item">
+                <div
+                  className="video-row"
+                  onClick={() => {
+                    if (videoView === "active") {
+                      if (activeVideoId === video.job.job_id) {
+                        // Desmarcar se já estiver selecionado
+                        console.log(`[UI] ✗ Vídeo desmarcado`);
+                        setActiveVideoId(null);
+                      } else {
+                        // Check if can switch to another video
+                        const validation = canStartOperation(video.job.job_id);
+                        if (!validation.allowed) {
+                          console.warn(`[UI] ⚠️  ${validation.message}`);
+                          alert(`⚠️ ${validation.message}`);
+                          return;
                         }
+                        // Marcar novo vídeo
+                        console.log(`\n[UI] ✓ Vídeo selecionado:`);
+                        console.log(`[UI]   Job ID: ${video.job.job_id}`);
+                        console.log(`[UI]   Video Path: ${video.videoPath}`);
+                        console.log(`[UI]   Status: ${video.job.status}`);
+                        console.log(`[UI]   URL completa: ${apiBaseUrl}${video.videoPath}`);
+                        setActiveVideoId(video.job.job_id);
                       }
-                    }}
-                    style={{
-                      cursor: videoView === "active" ? "pointer" : "default",
-                    }}
-                  >
-                    {videoView === "active" ? (
-                      <label
-                        className="video-checkbox"
-                        style={{ cursor: "pointer", pointerEvents: "none" }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={activeVideoId === video.job.job_id}
-                          readOnly
-                          style={{ pointerEvents: "none" }}
-                        />
-                        <span>
-                          {index + 1} - {video.job.video_name || "Sem nome"}
-                        </span>
-                      </label>
-                    ) : (
-                      <div className="video-label">
-                        <span>
-                          {index + 1} - {video.job.video_name || "Sem nome"}
-                        </span>
-                      </div>
-                    )}
-
-                    <button
-                      className="menu-button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpenId((current) =>
-                          current === video.job.job_id ? null : video.job.job_id,
-                        );
-                      }}
+                    }
+                  }}
+                  style={{
+                    cursor: videoView === "active" ? "pointer" : "default",
+                  }}
+                >
+                  {videoView === "active" ? (
+                    <label
+                      className="video-checkbox"
+                      style={{ cursor: "pointer", pointerEvents: "none" }}
                     >
-                      ...
-                    </button>
-                  </div>
-
-                  {menuOpenId === video.job.job_id && (
-                    <div className="menu-popover">
-                      {videoView === "active" && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setRenameVideoId(video.job.job_id);
-                              setRenameVideoNewName(video.job.video_name || "");
-                              setMenuOpenId(null);
-                            }}
-                          >
-                            Renomear
-                          </button>
-                          <button
-                            onClick={() =>
-                              runAction(
-                                () => archiveVideo(video.job.job_id),
-                                () => {
-                                  if (activeVideoId === video.job.job_id) {
-                                    setActiveVideoId(null);
-                                  }
-                                  setMenuOpenId(null);
-                                  loadVideos();
-                                },
-                              )
-                            }
-                          >
-                            Arquivar
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="danger"
-                        onClick={() =>
-                          runAction(
-                            () => deleteVideo(video.job.job_id),
-                            () => {
-                              if (activeVideoId === video.job.job_id) {
-                                setActiveVideoId(null);
-                              }
-                              setMenuOpenId(null);
-                              loadVideos();
-                            },
-                          )
-                        }
-                      >
-                        Excluir
-                      </button>
+                      <input
+                        type="checkbox"
+                        checked={activeVideoId === video.job.job_id}
+                        readOnly
+                        style={{ pointerEvents: "none" }}
+                      />
+                      <span>
+                        {index + 1} - {video.job.video_name || "Sem nome"}
+                      </span>
+                    </label>
+                  ) : (
+                    <div className="video-label">
+                      <span>
+                        {index + 1} - {video.job.video_name || "Sem nome"}
+                      </span>
                     </div>
                   )}
+
+                  <button
+                    className="menu-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpenId((current) =>
+                        current === video.job.job_id ? null : video.job.job_id,
+                      );
+                    }}
+                  >
+                    ...
+                  </button>
                 </div>
-              ))}
+
+                {menuOpenId === video.job.job_id && (
+                  <div className="menu-popover">
+                    {videoView === "active" && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setRenameVideoId(video.job.job_id);
+                            setRenameVideoNewName(video.job.video_name || "");
+                            setMenuOpenId(null);
+                          }}
+                        >
+                          Renomear
+                        </button>
+                        <button
+                          onClick={() =>
+                            runAction(
+                              () => archiveVideo(video.job.job_id),
+                              () => {
+                                if (activeVideoId === video.job.job_id) {
+                                  setActiveVideoId(null);
+                                }
+                                setMenuOpenId(null);
+                                loadVideos();
+                              },
+                            )
+                          }
+                        >
+                          Arquivar
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="danger"
+                      onClick={() =>
+                        runAction(
+                          () => deleteVideo(video.job.job_id),
+                          () => {
+                            if (activeVideoId === video.job.job_id) {
+                              setActiveVideoId(null);
+                            }
+                            setMenuOpenId(null);
+                            loadVideos();
+                          },
+                        )
+                      }
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -1519,6 +2012,127 @@ export default function App() {
                     }}
                   />
                 </div>
+
+                {activeTaskLogType && (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      padding: "12px",
+                      borderRadius: "10px",
+                      border: "1px solid #e5e7eb",
+                      background: "#0f172a",
+                      color: "#e2e8f0",
+                      fontFamily: "monospace",
+                      fontSize: "12px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: "8px",
+                        color: "#93c5fd",
+                        fontWeight: 600,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>
+                          {activeTaskLogType === "transcription"
+                            ? "📝 Logs da transcrição"
+                            : "🎬 Logs da renderização"}
+                        </span>
+                        {activeTaskLogType === "transcription" && activeVideo?.isTranscribing && (
+                          <button
+                            style={{
+                              borderRadius: "6px",
+                              background: "#ef4444",
+                              color: "white",
+                              border: "none",
+                              padding: "4px 8px",
+                              cursor: "pointer",
+                              fontSize: "11px",
+                              fontWeight: "600",
+                              whiteSpace: "nowrap",
+                            }}
+                            onClick={async () => {
+                              console.log(`[UI] Cancelando transcrição: ${activeVideo.job.job_id}`);
+                              try {
+                                await cancelTranscription(activeVideo.job.job_id);
+                                updateVideo(activeVideo.job.job_id, { isTranscribing: false });
+                                stopLogsPolling();
+                                console.log(`[UI] Transcrição cancelada`);
+                              } catch (error) {
+                                console.error("[UI] Erro ao cancelar transcrição:", error);
+                              }
+                            }}
+                          >
+                            ⊗ Cancelar
+                          </button>
+                        )}
+                        {activeTaskLogType === "render" && isRendering && (
+                          <button
+                            style={{
+                              borderRadius: "6px",
+                              background: "#ef4444",
+                              color: "white",
+                              border: "none",
+                              padding: "4px 8px",
+                              cursor: "pointer",
+                              fontSize: "11px",
+                              fontWeight: "600",
+                              whiteSpace: "nowrap",
+                            }}
+                            onClick={async () => {
+                              console.log(
+                                `[UI] Cancelando renderização: ${activeVideo.job.job_id}`,
+                              );
+                              try {
+                                await cancelRendering(activeVideo.job.job_id);
+                                setIsRendering(false);
+                                stopRenderPolling();
+                                stopLogsPolling();
+                                console.log(`[UI] Renderização cancelada`);
+                              } catch (error) {
+                                console.error("[UI] Erro ao cancelar renderização:", error);
+                              }
+                            }}
+                          >
+                            ⊗ Cancelar
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        className="secondary"
+                        onClick={() => setExpandTaskLogs((current) => !current)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: "11px",
+                          borderRadius: "6px",
+                        }}
+                      >
+                        {expandTaskLogs ? "Mostrar menos" : "Mostrar mais"}
+                      </button>
+                    </div>
+                    <div
+                      ref={taskLogsContainerRef}
+                      style={{
+                        height: expandTaskLogs ? "220px" : "52px",
+                        maxHeight: "320px",
+                        minHeight: "52px",
+                        overflowY: "auto",
+                        whiteSpace: "pre-wrap",
+                        resize: "vertical",
+                      }}
+                    >
+                      {(expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).length === 0
+                        ? "Aguardando logs..."
+                        : (expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).map(
+                            (line, index) => <div key={`${index}-${line}`}>{line}</div>,
+                          )}
+                    </div>
+                  </div>
+                )}
                 <div
                   style={{
                     display: "grid",
@@ -1566,65 +2180,79 @@ export default function App() {
                       background: "#fff",
                     }}
                   >
-                    <button
-                      disabled={action.busy}
-                      style={{
-                        width: "100%",
-                        borderRadius: "8px",
-                        background: "#10b981",
-                        color: "white",
-                        border: "none",
-                        padding: "10px",
-                        cursor: action.busy ? "not-allowed" : "pointer",
-                        opacity: action.busy ? 0.5 : 1,
-                      }}
-                      onClick={() => {
-                        console.log(
-                          `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
-                        );
-                        setShowTranscriptionFormatListDialog(false);
-                        setShowTranscriptionContentDialog(false);
-                        setShowTranscriptionDeleteDialog(false);
-                        setShowBlocksDialog(false);
-                        setSelectedTranscriptionFormat(null);
-                        setPendingDeleteFormat(null);
-                        setSelectedSuggestedCutId(null);
-                        setBlocks([]);
-                        setSuggestedCuts([]);
-                        updateVideo(activeVideo.job.job_id, {
-                          isTranscribing: true,
-                          transcriptionLogs: [],
-                          transcription: "",
-                          transcriptionSegments: [],
-                          transcriptionFormats: undefined,
-                        });
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        disabled={action.busy}
+                        style={{
+                          flex: 1,
+                          borderRadius: "8px",
+                          background: "#10b981",
+                          color: "white",
+                          border: "none",
+                          padding: "10px",
+                          cursor: action.busy ? "not-allowed" : "pointer",
+                          opacity: action.busy ? 0.5 : 1,
+                        }}
+                        onClick={() => {
+                          // Check if another video is being transcribed/rendered
+                          const validation = canStartOperation(activeVideo.job.job_id);
+                          if (!validation.allowed) {
+                            console.warn(`[UI] ⚠️  ${validation.message}`);
+                            alert(`⚠️ ${validation.message}`);
+                            return;
+                          }
 
-                        return runAction(
-                          async () => {
-                            if (hasAnyTranscription) {
-                              await deleteTranscription(activeVideo.job.job_id, "all");
-                            }
-                            return transcribeJob(activeVideo.job.job_id);
-                          },
-                          (result: any) => {
-                            console.log(`[UI] Transcrição completada`);
-                            updateVideo(activeVideo.job.job_id, {
-                              transcription: result.transcription,
-                              transcriptionSegments: result.segments,
-                              transcriptionFormats: result.available_formats,
-                              isTranscribing: false,
-                            });
-                            refreshVideo(activeVideo.job.job_id);
-                          },
-                        );
-                      }}
-                    >
-                      {activeVideo.isTranscribing
-                        ? "⏳ Transcrevendo..."
-                        : hasAnyTranscription
-                          ? "Gerar nova transcrição"
-                          : "🎙️ Transcrever"}
-                    </button>
+                          console.log(
+                            `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
+                          );
+                          setShowTranscriptionFormatListDialog(false);
+                          setShowTranscriptionContentDialog(false);
+                          setShowTranscriptionDeleteDialog(false);
+                          setShowBlocksDialog(false);
+                          setSelectedTranscriptionFormat(null);
+                          setPendingDeleteFormat(null);
+                          setSelectedSuggestedCutId(null);
+                          setBlocks([]);
+                          setSuggestedCuts([]);
+                          setActiveTaskLogType("transcription");
+                          setActiveTaskLogs([]);
+                          setExpandTaskLogs(false);
+                          stopLogsPolling();
+                          updateVideo(activeVideo.job.job_id, {
+                            isTranscribing: true,
+                            transcriptionLogs: [],
+                            transcription: "",
+                            transcriptionSegments: [],
+                            transcriptionFormats: undefined,
+                          });
+
+                          return runAction(
+                            async () => {
+                              if (hasAnyTranscription) {
+                                await deleteTranscription(activeVideo.job.job_id, "all");
+                              }
+                              return transcribeJob(activeVideo.job.job_id);
+                            },
+                            (result: any) => {
+                              console.log(`[UI] Transcrição completada`);
+                              updateVideo(activeVideo.job.job_id, {
+                                transcription: result.transcription,
+                                transcriptionSegments: result.segments,
+                                transcriptionFormats: result.available_formats,
+                                isTranscribing: false,
+                              });
+                              refreshVideo(activeVideo.job.job_id);
+                            },
+                          );
+                        }}
+                      >
+                        {activeVideo.isTranscribing
+                          ? "⏳ Transcrevendo..."
+                          : hasAnyTranscription
+                            ? "Gerar nova transcrição"
+                            : "🎙️ Transcrever"}
+                      </button>
+                    </div>
                     <p
                       className="muted"
                       style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
@@ -1681,17 +2309,26 @@ export default function App() {
                     }}
                   >
                     <button
-                      disabled={!hasAnyBlocks && suggestedCuts.length === 0}
+                      disabled={
+                        isAnalyzing ||
+                        (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
+                      }
                       style={{
                         width: "100%",
                         borderRadius: "8px",
-                        background: "#f59e0b",
+                        background:
+                          isAnalyzing ||
+                          (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
+                            ? "#ccc"
+                            : "#f59e0b",
                         color: "white",
                         border: "none",
                         padding: "10px",
                         cursor:
-                          !hasAnyBlocks && suggestedCuts.length === 0 ? "not-allowed" : "pointer",
-                        opacity: !hasAnyBlocks && suggestedCuts.length === 0 ? 0.5 : 1,
+                          isAnalyzing ||
+                          (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
+                            ? "not-allowed"
+                            : "pointer",
                       }}
                       onClick={() => {
                         if (suggestedCuts.length > 0) {
@@ -1701,12 +2338,23 @@ export default function App() {
                         }
 
                         runAction(
-                          () => analyzeJob(activeVideo.job.job_id),
+                          async () => {
+                            setIsAnalyzing(true);
+                            try {
+                              return await analyzeJob(activeVideo.job.job_id);
+                            } finally {
+                              setIsAnalyzing(false);
+                            }
+                          },
                           (value) => handleAnalyzeResult(value),
                         );
                       }}
                     >
-                      {suggestedCuts.length > 0 ? "Gerar nova análise" : "🤖 Análise"}
+                      {isAnalyzing
+                        ? "⏳ Analisando..."
+                        : suggestedCuts.length > 0
+                          ? "Gerar nova análise"
+                          : "🤖 Análise"}
                     </button>
                     <p
                       className="muted"
@@ -1751,16 +2399,32 @@ export default function App() {
                         cursor: cuts.length === 0 || isRendering ? "not-allowed" : "pointer",
                         opacity: cuts.length === 0 || isRendering ? 0.5 : 1,
                       }}
-                      onClick={() =>
-                        runAction(
-                          () => renderJob(activeVideo.job.job_id),
+                      onClick={() => {
+                        // Check if another video is being transcribed/rendered
+                        const validation = canStartOperation(activeVideo.job.job_id);
+                        if (!validation.allowed) {
+                          console.warn(`[UI] ⚠️  ${validation.message}`);
+                          alert(`⚠️ ${validation.message}`);
+                          return;
+                        }
+
+                        return runAction(
+                          async () => {
+                            // Sync cuts with backend before rendering
+                            await updateCuts(activeVideo.job.job_id, cuts);
+                            return renderJob(activeVideo.job.job_id);
+                          },
                           () => {
                             console.log(`[UI] Renderização iniciada`);
+                            setActiveTaskLogType("render");
+                            setActiveTaskLogs([]);
+                            setExpandTaskLogs(false);
+                            stopLogsPolling();
                             setRenderOutputs([]);
                             startRenderPolling(activeVideo.job.job_id, suggestedCuts.length);
                           },
-                        )
-                      }
+                        );
+                      }}
                     >
                       {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
                     </button>
@@ -1779,7 +2443,59 @@ export default function App() {
                       Renderiza os cortes em vídeos verticals.
                     </p>
                   </div>
+                  <div
+                    style={{
+                      border: "1px solid #e5e5e5",
+                      borderRadius: "10px",
+                      padding: "12px",
+                      background: "#fff",
+                    }}
+                  >
+                    <button
+                      style={{
+                        width: "100%",
+                        borderRadius: "8px",
+                        background: "#10b981",
+                        color: "white",
+                        border: "none",
+                        padding: "10px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => {
+                        setNewCutStartMinutes("");
+                        setNewCutStartSeconds("");
+                        setNewCutEndMinutes("");
+                        setNewCutEndSeconds("");
+                        setShowAddManualCutDialog(true);
+                      }}
+                    >
+                      ➕ Adicionar Corte Manual
+                    </button>
+                    <p
+                      className="muted"
+                      style={{ marginTop: "10px", fontSize: "0.75rem", textAlign: "center" }}
+                    >
+                      Cria um corte com timestamps específicos.
+                    </p>
+                  </div>
                 </div>
+                {isLoadingCuts && (
+                  <div
+                    style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "8px" }}
+                  >
+                    <div
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        border: "2px solid #f0f0f0",
+                        borderTop: "2px solid #666",
+                        borderRadius: "50%",
+                        animation: "spin 1s linear infinite",
+                      }}
+                    />
+                    <span style={{ fontSize: "0.9rem" }}>Carregando cortes...</span>
+                  </div>
+                )}
                 {suggestedCuts.length > 0 && (
                   <div style={{ marginTop: "20px" }}>
                     <p style={{ marginBottom: "12px", fontWeight: "600" }}>
@@ -1790,8 +2506,6 @@ export default function App() {
                         <div
                           key={cut.cut_id}
                           style={{ position: "relative", display: "inline-flex" }}
-                          onMouseEnter={() => setHoveredCutId(cut.cut_id)}
-                          onMouseLeave={() => setHoveredCutId(null)}
                         >
                           <button
                             className="secondary"
@@ -1812,92 +2526,99 @@ export default function App() {
                               cursor: "pointer",
                               fontSize: "0.85em",
                               fontWeight: selectedSuggestedCutId === cut.cut_id ? "600" : "400",
-                              paddingRight: hoveredCutId === cut.cut_id ? "56px" : "12px",
-                              transition: "padding 0.2s ease",
+                              paddingRight: "56px",
                             }}
                           >
                             {formatTimestamp(cut.start)} - {formatTimestamp(cut.end)}
                           </button>
-                          {hoveredCutId === cut.cut_id && (
-                            <div
-                              style={{
-                                position: "absolute",
-                                right: "6px",
-                                top: "4px",
-                                display: "flex",
-                                gap: "4px",
-                              }}
-                            >
-                              <button
-                                className="icon-btn"
-                                onClick={() => {
-                                  const startMin = Math.floor(cut.start / 60);
-                                  const startSec = Math.round(cut.start % 60);
-                                  const endMin = Math.floor(cut.end / 60);
-                                  const endSec = Math.round(cut.end % 60);
+                          <div
+                            style={{
+                              position: "absolute",
+                              right: "6px",
+                              top: "4px",
+                              display: "flex",
+                              gap: "4px",
+                            }}
+                          >
+                            <button
+                              className="icon-btn"
+                              onClick={() => {
+                                const startMin = Math.floor(cut.start / 60);
+                                const startSec = Math.round(cut.start % 60);
+                                const endMin = Math.floor(cut.end / 60);
+                                const endSec = Math.round(cut.end % 60);
 
-                                  setEditingCutId(cut.cut_id);
-                                  setEditCutStart(formatTimestamp(cut.start));
-                                  setEditCutEnd(formatTimestamp(cut.end));
-                                  setEditCutStartMinutes(String(startMin).padStart(2, "0"));
-                                  setEditCutStartSeconds(String(startSec).padStart(2, "0"));
-                                  setEditCutEndMinutes(String(endMin).padStart(2, "0"));
-                                  setEditCutEndSeconds(String(endSec).padStart(2, "0"));
-                                  setShowCutEditDialog(true);
-                                }}
-                                onMouseEnter={() => setHoveredCutAction("edit")}
-                                onMouseLeave={() => setHoveredCutAction(null)}
-                                style={{
-                                  width: "16px",
-                                  height: "16px",
-                                  borderRadius: "4px",
-                                  background: "transparent",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  padding: 0,
-                                  fontSize: "12px",
-                                  lineHeight: "16px",
-                                  color: hoveredCutAction === "edit" ? "#1d4ed8" : "#666",
-                                }}
-                                aria-label="Editar timestamp"
-                              >
-                                ✎
-                              </button>
-                              <button
-                                className="icon-btn"
-                                onClick={() => {
-                                  setSuggestedCuts((current) =>
-                                    current.filter((item) => item.cut_id !== cut.cut_id),
-                                  );
-                                  setCuts((current) =>
-                                    current.filter((item) => item.cut_id !== cut.cut_id),
-                                  );
-                                  if (selectedSuggestedCutId === cut.cut_id) {
-                                    setSelectedSuggestedCutId(null);
-                                    videoRef.current?.pause();
+                                setEditingCutId(cut.cut_id);
+                                setEditCutStart(formatTimestamp(cut.start));
+                                setEditCutEnd(formatTimestamp(cut.end));
+                                setEditCutStartMinutes(String(startMin).padStart(2, "0"));
+                                setEditCutStartSeconds(String(startSec).padStart(2, "0"));
+                                setEditCutEndMinutes(String(endMin).padStart(2, "0"));
+                                setEditCutEndSeconds(String(endSec).padStart(2, "0"));
+                                setShowCutEditDialog(true);
+                              }}
+                              onMouseEnter={() => setHoveredCutAction("edit")}
+                              onMouseLeave={() => setHoveredCutAction(null)}
+                              style={{
+                                width: "16px",
+                                height: "16px",
+                                borderRadius: "4px",
+                                background: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: 0,
+                                fontSize: "12px",
+                                lineHeight: "16px",
+                                color: hoveredCutAction === "edit" ? "#1d4ed8" : "#666",
+                              }}
+                              aria-label="Editar timestamp"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              className="icon-btn"
+                              onClick={async () => {
+                                const newSuggestedCuts = suggestedCuts.filter(
+                                  (item) => item.cut_id !== cut.cut_id,
+                                );
+                                const newCuts = cuts.filter((item) => item.cut_id !== cut.cut_id);
+
+                                setSuggestedCuts(newSuggestedCuts);
+                                setCuts(newCuts);
+
+                                if (activeVideo) {
+                                  try {
+                                    await updateCuts(activeVideo.job.job_id, newCuts);
+                                  } catch (error) {
+                                    console.error("Failed to update cuts:", error);
                                   }
-                                  setHoveredCutId(null);
-                                }}
-                                onMouseEnter={() => setHoveredCutAction("delete")}
-                                onMouseLeave={() => setHoveredCutAction(null)}
-                                style={{
-                                  width: "16px",
-                                  height: "16px",
-                                  borderRadius: "4px",
-                                  background: "transparent",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  padding: 0,
-                                  fontSize: "12px",
-                                  lineHeight: "16px",
-                                  color: hoveredCutAction === "delete" ? "#dc2626" : "#666",
-                                }}
-                                aria-label="Deletar timestamp"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          )}
+                                }
+
+                                if (selectedSuggestedCutId === cut.cut_id) {
+                                  setSelectedSuggestedCutId(null);
+                                  videoRef.current?.pause();
+                                }
+                                setHoveredCutId(null);
+                              }}
+                              onMouseEnter={() => setHoveredCutAction("delete")}
+                              onMouseLeave={() => setHoveredCutAction(null)}
+                              style={{
+                                width: "16px",
+                                height: "16px",
+                                borderRadius: "4px",
+                                background: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: 0,
+                                fontSize: "12px",
+                                lineHeight: "16px",
+                                color: hoveredCutAction === "delete" ? "#dc2626" : "#666",
+                              }}
+                              aria-label="Deletar timestamp"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2204,31 +2925,46 @@ export default function App() {
               <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
                 <button
                   className="primary"
-                  disabled={keepCutIds.length === 0}
+                  disabled={keepCutIds.length === 0 || isAnalyzing}
                   onClick={() => {
                     const keptCuts = suggestedCuts.filter((cut) => keepCutIds.includes(cut.cut_id));
                     setShowRegenerateAnalyzeDialog(false);
                     setKeepCutIds([]);
                     runAction(
-                      () => analyzeJob(activeVideo.job.job_id),
+                      async () => {
+                        setIsAnalyzing(true);
+                        try {
+                          return await analyzeJob(activeVideo.job.job_id);
+                        } finally {
+                          setIsAnalyzing(false);
+                        }
+                      },
                       (value) => handleAnalyzeResult(value, keptCuts),
                     );
                   }}
                 >
-                  Manter os cortes selecionados e gerar novos
+                  {isAnalyzing ? "⏳ Analisando..." : "Manter os cortes selecionados e gerar novos"}
                 </button>
                 <button
                   className="secondary"
+                  disabled={isAnalyzing}
                   onClick={() => {
                     setShowRegenerateAnalyzeDialog(false);
                     setKeepCutIds([]);
                     runAction(
-                      () => analyzeJob(activeVideo.job.job_id),
+                      async () => {
+                        setIsAnalyzing(true);
+                        try {
+                          return await analyzeJob(activeVideo.job.job_id);
+                        } finally {
+                          setIsAnalyzing(false);
+                        }
+                      },
                       (value) => handleAnalyzeResult(value),
                     );
                   }}
                 >
-                  Apagar cortes e gerar novos cortes
+                  {isAnalyzing ? "⏳ Analisando..." : "Apagar cortes e gerar novos cortes"}
                 </button>
               </div>
             </div>
@@ -2330,7 +3066,7 @@ export default function App() {
               <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
                 <button
                   className="primary"
-                  onClick={() => {
+                  onClick={async () => {
                     const startMin = Number(editCutStartMinutes);
                     const startSec = Number(editCutStartSeconds);
                     const endMin = Number(editCutEndMinutes);
@@ -2366,20 +3102,28 @@ export default function App() {
                       return;
                     }
 
-                    setSuggestedCuts((current) =>
-                      current.map((item) =>
-                        item.cut_id === editingCutId
-                          ? { ...item, start: startValue, end: endValue }
-                          : item,
-                      ),
+                    const newSuggestedCuts = suggestedCuts.map((item) =>
+                      item.cut_id === editingCutId
+                        ? { ...item, start: startValue, end: endValue }
+                        : item,
                     );
-                    setCuts((current) =>
-                      current.map((item) =>
-                        item.cut_id === editingCutId
-                          ? { ...item, start: startValue, end: endValue }
-                          : item,
-                      ),
+                    const newCuts = cuts.map((item) =>
+                      item.cut_id === editingCutId
+                        ? { ...item, start: startValue, end: endValue }
+                        : item,
                     );
+
+                    setSuggestedCuts(newSuggestedCuts);
+                    setCuts(newCuts);
+
+                    if (activeVideo) {
+                      try {
+                        await updateCuts(activeVideo.job.job_id, newCuts);
+                      } catch (error) {
+                        console.error("Failed to update cuts:", error);
+                      }
+                    }
+
                     setSelectedSuggestedCutId(editingCutId);
                     if (videoRef.current) {
                       videoRef.current.currentTime = startValue;
@@ -2410,10 +3154,214 @@ export default function App() {
         </div>
       )}
 
+      {/* Add Manual Cut Dialog */}
+      {showAddManualCutDialog && (
+        <div
+          className="dialog-overlay"
+          onClick={() => {
+            setShowAddManualCutDialog(false);
+            setNewCutStartMinutes("");
+            setNewCutStartSeconds("");
+            setNewCutEndMinutes("");
+            setNewCutEndSeconds("");
+          }}
+        >
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h3>Adicionar Corte Manual</h3>
+              <div className="dialog-actions">
+                <button
+                  className="icon-btn close-btn"
+                  onClick={() => {
+                    setShowAddManualCutDialog(false);
+                    setNewCutStartMinutes("");
+                    setNewCutStartSeconds("");
+                    setNewCutEndMinutes("");
+                    setNewCutEndSeconds("");
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="dialog-content">
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "12px",
+                  marginBottom: "16px",
+                }}
+              >
+                <label className="field">
+                  Início - Minutos
+                  <input
+                    type="number"
+                    min="0"
+                    value={newCutStartMinutes}
+                    onChange={(event) => setNewCutStartMinutes(event.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+                <label className="field">
+                  Início - Segundos
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={newCutStartSeconds}
+                    onChange={(event) => setNewCutStartSeconds(event.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "12px",
+                  marginBottom: "16px",
+                }}
+              >
+                <label className="field">
+                  Fim - Minutos
+                  <input
+                    type="number"
+                    min="0"
+                    value={newCutEndMinutes}
+                    onChange={(event) => setNewCutEndMinutes(event.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+                <label className="field">
+                  Fim - Segundos
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={newCutEndSeconds}
+                    onChange={(event) => setNewCutEndSeconds(event.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+              </div>
+
+              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
+                <button
+                  className="primary"
+                  onClick={async () => {
+                    const startMin = Number(newCutStartMinutes) || 0;
+                    const startSec = Number(newCutStartSeconds) || 0;
+                    const endMin = Number(newCutEndMinutes) || 0;
+                    const endSec = Number(newCutEndSeconds) || 0;
+
+                    if (
+                      !Number.isFinite(startMin) ||
+                      !Number.isFinite(startSec) ||
+                      !Number.isFinite(endMin) ||
+                      !Number.isFinite(endSec)
+                    ) {
+                      setAction({ busy: false, error: "Todos os campos devem ser números." });
+                      return;
+                    }
+
+                    if (
+                      startMin < 0 ||
+                      startSec < 0 ||
+                      startSec > 59 ||
+                      endMin < 0 ||
+                      endSec < 0 ||
+                      endSec > 59
+                    ) {
+                      setAction({ busy: false, error: "Minutos devem ser >= 0, segundos 0-59." });
+                      return;
+                    }
+
+                    const startValue = startMin * 60 + startSec;
+                    const endValue = endMin * 60 + endSec;
+
+                    if (endValue <= startValue) {
+                      setAction({ busy: false, error: "O fim precisa ser maior que o início." });
+                      return;
+                    }
+
+                    // Create new cut
+                    const newCutId = `manual_${Date.now()}`;
+                    const newCut: Cut = {
+                      cut_id: newCutId,
+                      block_ids: [],
+                      start: startValue,
+                      end: endValue,
+                      status: "approved",
+                      hook_reason: "Corte adicionado manualmente",
+                      content_reason: "Corte adicionado manualmente",
+                    };
+
+                    const newSuggestedCuts = [...suggestedCuts, newCut];
+                    const newCuts = [...cuts, newCut];
+
+                    setSuggestedCuts(newSuggestedCuts);
+                    setCuts(newCuts);
+
+                    if (activeVideo) {
+                      try {
+                        await updateCuts(activeVideo.job.job_id, newCuts);
+                      } catch (error) {
+                        console.error("Failed to update cuts:", error);
+                      }
+                    }
+
+                    setSelectedSuggestedCutId(newCutId);
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = startValue;
+                      videoRef.current.play();
+                    }
+                    setShowAddManualCutDialog(false);
+                    setNewCutStartMinutes("");
+                    setNewCutStartSeconds("");
+                    setNewCutEndMinutes("");
+                    setNewCutEndSeconds("");
+                  }}
+                >
+                  Adicionar
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setShowAddManualCutDialog(false);
+                    setNewCutStartMinutes("");
+                    setNewCutStartSeconds("");
+                    setNewCutEndMinutes("");
+                    setNewCutEndSeconds("");
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 5. Curation */}
       <section className="panel">
         <h2>5. Curadoria</h2>
-        {cuts.length === 0 ? (
+        {isLoadingCuts ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              style={{
+                width: "20px",
+                height: "20px",
+                border: "3px solid #f0f0f0",
+                borderTop: "3px solid #666",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <span>Carregando cortes...</span>
+          </div>
+        ) : cuts.length === 0 ? (
           <p className="muted">Execute a análise para ver os cortes.</p>
         ) : (
           <div className="cuts">
@@ -2480,26 +3428,84 @@ export default function App() {
       {/* 6. Output */}
       <section className="panel">
         <h2>6. Saída final</h2>
-        {renderOutputs.length === 0 ? (
+        {isLoadingRenderOutputs ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              style={{
+                width: "20px",
+                height: "20px",
+                border: "3px solid #f0f0f0",
+                borderTop: "3px solid #666",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <span>Carregando renderizações...</span>
+          </div>
+        ) : renderOutputs.length === 0 ? (
           <p className="muted">{isRendering ? "Gerando cortes..." : "Nenhum render finalizado."}</p>
         ) : (
-          <ul className="render-list">
+          <div className="shorts-grid">
             {renderOutputs.map((path) => {
               const url = buildRenderUrl(path);
               const fileName = path.split("/").pop() || "render.mp4";
+              console.log(`[UI] Render output path: ${path}, URL: ${url}`);
               return (
-                <li key={path}>
-                  <video controls src={url} style={{ width: "100%", maxWidth: "360px" }} />
-                  <div className="muted" style={{ marginTop: "6px" }}>
-                    {fileName}
+                <article key={path} className="short-card">
+                  <header>
+                    <h3>{fileName}</h3>
+                  </header>
+                  <div style={{ overflow: "hidden", borderRadius: "12px", marginBottom: "12px" }}>
+                    <video
+                      controls
+                      preload="metadata"
+                      src={url}
+                      style={{
+                        width: "100%",
+                        height: "280px",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                      onError={(e) => {
+                        console.error(`[UI] Error loading video: ${url}`, e);
+                      }}
+                      onLoadedMetadata={() => {
+                        console.log(`[UI] Video metadata loaded: ${url}`);
+                      }}
+                    />
                   </div>
-                  <a href={url} target="_blank" rel="noreferrer">
-                    Abrir video
-                  </a>
-                </li>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      className="primary"
+                      style={{ flex: 1 }}
+                      onClick={() => {
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.target = "_blank";
+                        a.rel = "noreferrer";
+                        a.click();
+                      }}
+                    >
+                      👁️ Abrir vídeo
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={async () => {
+                        try {
+                          await deleteRenderOutput(activeVideo!.job.job_id, fileName);
+                          setRenderOutputs((current) => current.filter((item) => item !== path));
+                        } catch (error) {
+                          console.error("Failed to delete render:", error);
+                        }
+                      }}
+                    >
+                      🗑️ Deletar
+                    </button>
+                  </div>
+                </article>
               );
             })}
-          </ul>
+          </div>
         )}
       </section>
 
@@ -2577,154 +3583,25 @@ export default function App() {
           </div>
         </div>
       )}
-
       {/* Whisper Config Dialog */}
       {showWhisperConfigDialog && (
-        <div className="dialog-overlay" onClick={() => setShowWhisperConfigDialog(false)}>
-          <div
-            className="dialog"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-          >
-            <div className="dialog-header">
-              <h3>🎙️ Configurar Whisper</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowWhisperConfigDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content" style={{ padding: "20px" }}>
-              {/* Device Selection */}
-              <div style={{ marginBottom: "16px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "14px",
-                    fontWeight: "500",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Dispositivo de processamento
-                </label>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => setWhisperDevice("cpu")}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "8px",
-                      border: whisperDevice === "cpu" ? "2px solid #3b82f6" : "1px solid #ccc",
-                      background: whisperDevice === "cpu" ? "#e0e7ff" : "#fff",
-                      cursor: "pointer",
-                      fontWeight: whisperDevice === "cpu" ? "600" : "400",
-                      color: whisperDevice === "cpu" ? "#3b82f6" : "#666",
-                      fontSize: "14px",
-                    }}
-                  >
-                    💻 CPU
-                  </button>
-                  <button
-                    onClick={() => setWhisperDevice("cuda")}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "8px",
-                      border: whisperDevice === "cuda" ? "2px solid #3b82f6" : "1px solid #ccc",
-                      background: whisperDevice === "cuda" ? "#e0e7ff" : "#fff",
-                      cursor: "pointer",
-                      fontWeight: whisperDevice === "cuda" ? "600" : "400",
-                      color: whisperDevice === "cuda" ? "#3b82f6" : "#666",
-                      fontSize: "14px",
-                    }}
-                  >
-                    🚀 CUDA
-                  </button>
-                </div>
-              </div>
+        <WhisperConfigDialog
+          whisperDevice={whisperDevice}
+          whisperFormats={whisperFormats}
+          initialConfig={whisperConfig}
+          action={action}
+          onSave={saveWhisperConfig}
+          onCancel={() => setShowWhisperConfigDialog(false)}
+        />
+      )}
 
-              {/* Formats */}
-              <div style={{ marginBottom: "16px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "14px",
-                    fontWeight: "500",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Formatos de saída
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                  {WHISPER_FORMATS.map((format) => {
-                    const isSelected = whisperFormats.includes(format.id);
-                    return (
-                      <button
-                        key={format.id}
-                        onClick={() => {
-                          setWhisperFormats((prev) =>
-                            isSelected ? prev.filter((f) => f !== format.id) : [...prev, format.id],
-                          );
-                        }}
-                        title={format.description}
-                        style={{
-                          padding: "12px",
-                          borderRadius: "8px",
-                          border: isSelected ? "2px solid #10b981" : "1px solid #ccc",
-                          background: isSelected ? "#d1fae5" : "#fff",
-                          cursor: "pointer",
-                          fontWeight: isSelected ? "600" : "400",
-                          color: isSelected ? "#10b981" : "#666",
-                          fontSize: "14px",
-                          transition: "all 0.2s",
-                        }}
-                      >
-                        {isSelected ? "✓ " : ""}
-                        {format.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p
-                  style={{
-                    fontSize: "12px",
-                    color: "#666",
-                    margin: "8px 0 0 0",
-                    fontStyle: "italic",
-                  }}
-                >
-                  Passe o mouse sobre cada formato para ver a descrição
-                </p>
-              </div>
-
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button
-                  onClick={saveWhisperConfig}
-                  className="primary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  ✓ Salvar
-                </button>
-                <button
-                  onClick={() => setShowWhisperConfigDialog(false)}
-                  className="secondary"
-                  style={{
-                    padding: "10px 20px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {showFFmpegConfigDialog && (
+        <FFmpegConfigDialog
+          initialConfig={ffmpegConfig || undefined}
+          action={action}
+          onSave={saveFFmpegConfig}
+          onCancel={() => setShowFFmpegConfigDialog(false)}
+        />
       )}
 
       {/* Dependencies Dialog */}
@@ -2747,71 +3624,81 @@ export default function App() {
               </div>
             </div>
             <div className="dialog-content" style={{ padding: "20px" }}>
-              {!dependencies ? (
-                <div style={{ textAlign: "center", color: "#666" }}>
-                  <div style={{ marginBottom: "16px" }}>Carregando dependências...</div>
-                  <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {Object.entries(
+                  dependencies || {
+                    python: { installed: false, version: null },
+                    whisper: { installed: false, version: null },
+                    ffmpeg: { installed: false, version: null },
+                    cuda: { installed: false, version: null },
+                    pytorch: { installed: false, version: null },
+                    ollama: { installed: false, version: null },
+                  },
+                ).map(([name, status]) => {
+                  const isLoading = loadingDependencies.has(name);
+                  const isLoadingInitial = !dependencies;
+                  const displayName =
+                    name === "pytorch" ? "PyTorch" : name.charAt(0).toUpperCase() + name.slice(1);
+                  if (isLoading) {
+                    console.log(`[UI] ${displayName} está em loading`);
+                  }
+                  return (
                     <div
+                      key={name}
                       style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: "#3b82f6",
-                        animation: "pulse 1.5s ease-in-out infinite",
-                      }}
-                    ></div>
-                    <div
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: "#3b82f6",
-                        animation: "pulse 1.5s ease-in-out infinite 0.2s",
-                      }}
-                    ></div>
-                    <div
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: "#3b82f6",
-                        animation: "pulse 1.5s ease-in-out infinite 0.4s",
-                      }}
-                    ></div>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {Object.entries(dependencies).map(([name, status]) => {
-                    const isLoading = loadingDependencies.has(name);
-                    const displayName =
-                      name === "pytorch" ? "PyTorch" : name.charAt(0).toUpperCase() + name.slice(1);
-                    return (
-                      <div
-                        key={name}
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          padding: "14px 16px",
-                          borderRadius: "8px",
-                          border: "1px solid #e5e5e5",
-                          background: isLoading
+                        display: "flex",
+                        flexDirection: "column",
+                        padding: "14px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid #e5e5e5",
+                        background:
+                          isLoading || isLoadingInitial
                             ? "#f3f4f6"
                             : status.installed
                               ? "#f0fdf4"
                               : "#fef2f2",
-                          gap: "12px",
+                        gap: "12px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          width: "100%",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            width: "100%",
-                          }}
-                        >
-                          <div style={{ flex: 1 }}></div>
+                        <div style={{ flex: 1 }}></div>
+                        {isLoadingInitial ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "14px",
+                                height: "14px",
+                                border: "2px solid #e5e7eb",
+                                borderTop: "2px solid #3b82f6",
+                                borderRadius: "50%",
+                                animation: "spin 1s linear infinite",
+                              }}
+                            />
+                            <span
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "14px",
+                                color: "#9ca3af",
+                              }}
+                            >
+                              {displayName}
+                            </span>
+                          </div>
+                        ) : (
                           <span
                             style={{ fontWeight: "600", fontSize: "14px", textAlign: "center" }}
                           >
@@ -2824,157 +3711,191 @@ export default function App() {
                               </span>
                             )}
                           </span>
-                          <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
-                            {isLoading ? (
-                              <div style={{ display: "flex", gap: "4px" }}>
-                                <div
-                                  style={{
-                                    width: "6px",
-                                    height: "6px",
-                                    borderRadius: "50%",
-                                    background: "#6b7280",
-                                    animation: "pulse 1.5s ease-in-out infinite",
-                                  }}
-                                ></div>
-                                <div
-                                  style={{
-                                    width: "6px",
-                                    height: "6px",
-                                    borderRadius: "50%",
-                                    background: "#6b7280",
-                                    animation: "pulse 1.5s ease-in-out infinite 0.2s",
-                                  }}
-                                ></div>
-                                <div
-                                  style={{
-                                    width: "6px",
-                                    height: "6px",
-                                    borderRadius: "50%",
-                                    background: "#6b7280",
-                                    animation: "pulse 1.5s ease-in-out infinite 0.4s",
-                                  }}
-                                ></div>
-                              </div>
-                            ) : (
-                              <div
-                                style={{
-                                  width: "24px",
-                                  height: "24px",
-                                  borderRadius: "50%",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: "14px",
-                                  fontWeight: "bold",
-                                  background: status.installed ? "#10b981" : "#ef4444",
-                                  color: "white",
-                                }}
-                              >
-                                {status.installed ? "✓" : "✗"}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            justifyContent: "center",
-                            width: "100%",
-                          }}
-                        >
-                          <button
-                            onClick={() => {
-                              setSelectedDependencyForInstall(name);
-                              setShowInstallationDialog(true);
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: "4px 8px",
-                              background: "transparent",
-                              color: isLoading ? "#9ca3af" : "#3b82f6",
-                              border: "1px solid transparent",
-                              borderRadius: "4px",
-                              cursor: isLoading ? "not-allowed" : "pointer",
-                              fontSize: "12px",
-                              fontWeight: "700",
-                              opacity: isLoading ? 0.6 : 1,
-                              transition: "border-color 0.15s ease",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading) e.currentTarget.style.borderColor = "#3b82f6";
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading) e.currentTarget.style.borderColor = "transparent";
-                            }}
-                          >
-                            📋 Manual
-                          </button>
-                          {name !== "ollama" && (
-                            <button
-                              disabled={installingDependency === name || isLoading}
-                              onClick={async () => {
-                                setInstallingDependency(name);
-                                try {
-                                  const result = await installDependency(name);
-                                  if (result.success) {
-                                    alert(`${name} instalado com sucesso!`);
-                                    try {
-                                      const depsData = await getDependencies();
-                                      setDependencies(depsData.dependencies);
-                                    } catch (error) {
-                                      console.error("Failed to refresh dependencies:", error);
-                                    }
-                                  } else {
-                                    alert(
-                                      `Erro ao instalar ${name}: ${result.error || result.message}`,
-                                    );
-                                  }
-                                } catch (error) {
-                                  console.error(`Failed to install ${name}:`, error);
-                                  alert(`Erro ao instalar ${name}`);
-                                } finally {
-                                  setInstallingDependency(null);
-                                }
-                              }}
+                        )}
+                        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+                          {isLoading || isLoadingInitial ? (
+                            <div
                               style={{
-                                padding: "4px 8px",
-                                background: "transparent",
-                                color:
-                                  installingDependency === name || isLoading
-                                    ? "#9ca3af"
-                                    : "#10b981",
-                                border: "1px solid transparent",
-                                borderRadius: "4px",
-                                cursor:
-                                  installingDependency === name || isLoading
-                                    ? "not-allowed"
-                                    : "pointer",
-                                fontSize: "12px",
-                                fontWeight: "700",
-                                opacity: installingDependency === name || isLoading ? 0.6 : 1,
-                                transition: "border-color 0.15s ease",
+                                width: "16px",
+                                height: "16px",
+                                border: "2px solid #e5e7eb",
+                                borderTop: "2px solid #3b82f6",
+                                borderRadius: "50%",
+                                animation: "spin 1s linear infinite",
                               }}
-                              onMouseEnter={(e) => {
-                                if (installingDependency !== name && !isLoading) {
-                                  e.currentTarget.style.borderColor = "#10b981";
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (installingDependency !== name && !isLoading) {
-                                  e.currentTarget.style.borderColor = "transparent";
-                                }
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: "24px",
+                                height: "24px",
+                                borderRadius: "50%",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "14px",
+                                fontWeight: "bold",
+                                background: status.installed ? "#10b981" : "#ef4444",
+                                color: "white",
                               }}
                             >
-                              {installingDependency === name ? "⏳ Instalando..." : "⚡ Automático"}
-                            </button>
+                              {status.installed ? "✓" : "✗"}
+                            </div>
                           )}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          justifyContent: "center",
+                          width: "100%",
+                        }}
+                      >
+                        <button
+                          onClick={() => {
+                            setSelectedDependencyForInstall(name);
+                            setShowInstallationDialog(true);
+                          }}
+                          disabled={isLoading || isLoadingInitial}
+                          style={{
+                            padding: "4px 8px",
+                            background: "transparent",
+                            color: isLoading || isLoadingInitial ? "#9ca3af" : "#3b82f6",
+                            border: "1px solid transparent",
+                            borderRadius: "4px",
+                            cursor: isLoading || isLoadingInitial ? "not-allowed" : "pointer",
+                            fontSize: "12px",
+                            fontWeight: "700",
+                            opacity: isLoading || isLoadingInitial ? 0.6 : 1,
+                            transition: "border-color 0.15s ease",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isLoading && !isLoadingInitial)
+                              e.currentTarget.style.borderColor = "#3b82f6";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isLoading && !isLoadingInitial)
+                              e.currentTarget.style.borderColor = "transparent";
+                          }}
+                        >
+                          📋 Manual
+                        </button>
+                        {name !== "ollama" && (
+                          <button
+                            disabled={
+                              installingDependency === name || isLoading || isLoadingInitial
+                            }
+                            onClick={async () => {
+                              console.log(`[UI] Iniciando instalação de ${name}`);
+                              setInstallingDependency(name);
+                              // Adiciona ao set de loading
+                              setLoadingDependencies((prev) => {
+                                const next = new Set(prev);
+                                next.add(name);
+                                console.log(`[UI] Loading ${name} marcado como true:`, next);
+                                return next;
+                              });
+                              try {
+                                const result = await installDependency(name);
+                                if (result.success) {
+                                  alert(`${name} instalado com sucesso!`);
+                                  try {
+                                    // Marca como carregando enquanto atualiza
+                                    console.log(
+                                      `[UI] Atualizando lista de dependências para ${name}`,
+                                    );
+                                    const depsData = await getDependencies();
+                                    setDependencies(depsData.dependencies);
+                                    // Remove do loading após sucesso
+                                    setLoadingDependencies((prev) => {
+                                      const next = new Set(prev);
+                                      next.delete(name);
+                                      console.log(`[UI] Loading ${name} marcado como false:`, next);
+                                      return next;
+                                    });
+                                  } catch (error) {
+                                    console.error("Failed to refresh dependencies:", error);
+                                    // Remove do loading em caso de erro
+                                    setLoadingDependencies((prev) => {
+                                      const next = new Set(prev);
+                                      next.delete(name);
+                                      return next;
+                                    });
+                                  }
+                                } else {
+                                  alert(
+                                    `Erro ao instalar ${name}: ${result.error || result.message}`,
+                                  );
+                                  // Remove do loading em caso de erro
+                                  setLoadingDependencies((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(name);
+                                    return next;
+                                  });
+                                }
+                              } catch (error) {
+                                console.error(`Failed to install ${name}:`, error);
+                                alert(`Erro ao instalar ${name}`);
+                                // Remove do loading em caso de erro
+                                setLoadingDependencies((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(name);
+                                  return next;
+                                });
+                              } finally {
+                                console.log(`[UI] Finalizando instalação de ${name}`);
+                                setInstallingDependency(null);
+                              }
+                            }}
+                            style={{
+                              padding: "4px 8px",
+                              background: "transparent",
+                              color:
+                                installingDependency === name || isLoading || isLoadingInitial
+                                  ? "#9ca3af"
+                                  : "#10b981",
+                              border: "1px solid transparent",
+                              borderRadius: "4px",
+                              cursor:
+                                installingDependency === name || isLoading || isLoadingInitial
+                                  ? "not-allowed"
+                                  : "pointer",
+                              fontSize: "12px",
+                              fontWeight: "700",
+                              opacity:
+                                installingDependency === name || isLoading || isLoadingInitial
+                                  ? 0.6
+                                  : 1,
+                              transition: "border-color 0.15s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (
+                                installingDependency !== name &&
+                                !isLoading &&
+                                !isLoadingInitial
+                              ) {
+                                e.currentTarget.style.borderColor = "#10b981";
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (
+                                installingDependency !== name &&
+                                !isLoading &&
+                                !isLoadingInitial
+                              ) {
+                                e.currentTarget.style.borderColor = "transparent";
+                              }
+                            }}
+                          >
+                            {installingDependency === name ? "⏳ Instalando..." : "⚡ Automático"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
               <div
                 style={{
@@ -3192,6 +4113,33 @@ export default function App() {
               </p>
             </div>
 
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
+                🎞️ Resolução de download
+              </label>
+              <select
+                value={configDownloadResolution}
+                onChange={(e) =>
+                  setConfigDownloadResolution(e.target.value as "1080p" | "1440p" | "4k")
+                }
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  boxSizing: "border-box",
+                  fontSize: "0.9rem",
+                }}
+              >
+                <option value="1080p">1080p (padrao)</option>
+                <option value="1440p">1440p</option>
+                <option value="4k">4k</option>
+              </select>
+              <p style={{ color: "#999", fontSize: "0.8rem", marginTop: "6px" }}>
+                📍 Resolução atual: {appSettings?.media.download_resolution || "1080p"}
+              </p>
+            </div>
+
             {/* Structure Preview */}
             <div
               style={{
@@ -3233,6 +4181,7 @@ export default function App() {
                         saveSettings({
                           media: {
                             base_dir: configBaseDir,
+                            download_resolution: configDownloadResolution,
                           },
                         }),
                       () => {
@@ -3240,6 +4189,7 @@ export default function App() {
                         getSettings().then((s) => {
                           setAppSettings(s);
                           setConfigBaseDir(s.media.base_dir);
+                          setConfigDownloadResolution(s.media.download_resolution || "1080p");
                         });
                       },
                     );

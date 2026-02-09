@@ -13,6 +13,7 @@ import {
   loadSettings,
 } from "../core/settings";
 import type { Job } from "../models/job";
+import { JobStatus } from "../models/job";
 import * as metadata from "../storage/metadata";
 import * as files from "../storage/files";
 import { jobDir } from "../core/paths";
@@ -39,7 +40,7 @@ function collectVideoFiles(
   }
 
   const entries = fs.readdirSync(rootDir);
-  const results: Array<{ fileName: string; filePath: string }> = [];
+  const results: Array<{ fileName: string; filePath: string; videoName: string }> = [];
 
   for (const entry of entries) {
     if (!archived && entry === "_archived") continue;
@@ -92,7 +93,7 @@ function ensureJobForVideo(
   const job: Job = {
     job_id: jobId,
     youtube_url: `[Local Video] ${videoName}`,
-    status: "DOWNLOADED",
+    status: JobStatus.DOWNLOADED,
     created_at: new Date().toISOString(),
     source_video_path: filePath,
     source_file_name: fileName,
@@ -110,7 +111,6 @@ function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
   const items = collectVideoFiles(rootDir, archived);
   const records: VideoRecord[] = [];
 
-  // Cache mapping uma única vez ao invés de para cada vídeo
   const jobsByPath = mapJobsBySourcePath();
 
   for (const item of items) {
@@ -122,6 +122,13 @@ function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
       archived,
     });
   }
+
+  // Sort by created_at (oldest first - ascending order)
+  records.sort((a, b) => {
+    const dateA = new Date(a.job?.created_at || 0).getTime();
+    const dateB = new Date(b.job?.created_at || 0).getTime();
+    return dateA - dateB;
+  });
 
   console.log(`[videos]   Total de vídeos retornados: ${records.length}\n`);
   return records;
@@ -170,11 +177,23 @@ const videosRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const job = metadata.loadJob(job_id);
+      const videoName = job.video_name || job_id;
+      const activeDir = getVideoDir(job_id, videoName);
+      const archivedDir = getArchivedVideoDir(videoName);
+
       if (job.source_video_path) {
         const videoDir = path.dirname(job.source_video_path);
         if (fs.existsSync(videoDir)) {
           fs.rmSync(videoDir, { recursive: true, force: true });
         }
+      }
+
+      if (fs.existsSync(activeDir)) {
+        fs.rmSync(activeDir, { recursive: true, force: true });
+      }
+
+      if (fs.existsSync(archivedDir)) {
+        fs.rmSync(archivedDir, { recursive: true, force: true });
       }
     } catch (error) {
       return reply.code(404).send({ detail: "Video not found" });

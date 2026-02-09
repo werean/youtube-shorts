@@ -99,6 +99,23 @@ export function ensureTranscriptionsJobDir(jobId: string): string {
   }
 }
 
+export function removeTranscriptionsJobDir(jobId: string): string {
+  let dir: string;
+  try {
+    const job = metadata.loadJob(jobId);
+    const videoName = job.video_name || jobId;
+    dir = path.join(getVideoDir(jobId, videoName), "transcrições");
+  } catch (error) {
+    dir = path.join(getVideoDir(jobId), "transcrições");
+  }
+
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  return dir;
+}
+
 export function sourceVideoPathForJob(jobId: string, extension: string): string {
   const ext = extension.startsWith(".") ? extension : `.${extension}`;
   try {
@@ -221,6 +238,18 @@ export function renderOutputUrl(jobId: string, cutId: string): string {
   return `/media/shorts/${jobId}/${cutId}.mp4`;
 }
 
+function formatTimestampForFilename(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, "0")}_${String(secs).padStart(2, "0")}`;
+}
+
+export function buildCutFilename(start: number, end: number): string {
+  const startFormatted = formatTimestampForFilename(start);
+  const endFormatted = formatTimestampForFilename(end);
+  return `${startFormatted}-${endFormatted}.mp4`;
+}
+
 export function listRenderOutputUrls(jobId: string): string[] {
   const rendersPath = ensureShortsJobDir(jobId);
   if (!fs.existsSync(rendersPath)) {
@@ -280,7 +309,7 @@ export function renameVideo(jobId: string, newVideoName: string): boolean {
     // Update job metadata with new video name
     job.video_name = newVideoName;
     job.updated_at = new Date().toISOString();
-    metadata.saveJob(jobId, job);
+    metadata.saveJob(job);
 
     return true;
   } catch (error) {

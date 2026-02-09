@@ -10,6 +10,7 @@ import * as files from "../storage/files";
 import * as metadata from "../storage/metadata";
 import { OllamaClient } from "../llm/client";
 import { buildCutSelectionPrompt } from "../llm/prompts";
+import { loadActiveToolConfigs } from "../core/toolConfigs";
 
 function loadBlocks(jobId: string): SemanticBlock[] {
   const path = files.semanticBlocksPath(jobId);
@@ -65,9 +66,13 @@ export async function analyzeBlocks(jobId: string): Promise<{ cuts: Cut[]; raw_r
   }
 
   const prompt = buildCutSelectionPrompt(blocks);
-  const client = new OllamaClient();
+  const toolConfigs = loadActiveToolConfigs();
+  const model = toolConfigs.llm.model || undefined;
+  const client = new OllamaClient(undefined, model);
 
+  const systemPrompt = toolConfigs.llm.system_prompt || "You output JSON only.";
   const content = await client.chat([
+    { role: "system", content: systemPrompt },
     { role: "system", content: "You output JSON only." },
     { role: "user", content: prompt },
   ]);

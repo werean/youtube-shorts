@@ -16,6 +16,9 @@ export interface Job {
   status: JobStatus;
   created_at: string;
   updated_at?: string | null;
+  source_video_path?: string;
+  source_file_name?: string;
+  video_name?: string;
 }
 
 export interface Cut {

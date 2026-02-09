@@ -15,6 +15,7 @@ import { dataDir, jobsDir, projectRoot } from "./paths";
 export interface AppSettings {
   media: {
     base_dir: string;
+    download_resolution: "1080p" | "1440p" | "4k";
   };
   preferences: {
     ask_move_on_upload: boolean;
@@ -41,6 +42,7 @@ function defaultSettings(): AppSettings {
   return {
     media: {
       base_dir: baseDir,
+      download_resolution: "1080p",
     },
     preferences: {
       ask_move_on_upload: true,
@@ -79,10 +81,17 @@ export function loadSettings(): AppSettings {
     const defaults = defaultSettings();
 
     const baseDir = parsed.media?.base_dir || defaults.media.base_dir;
+    const downloadResolution =
+      parsed.media?.download_resolution === "4k" ||
+      parsed.media?.download_resolution === "1440p" ||
+      parsed.media?.download_resolution === "1080p"
+        ? parsed.media?.download_resolution
+        : defaults.media.download_resolution;
 
     const settings: AppSettings = {
       media: {
         base_dir: baseDir,
+        download_resolution: downloadResolution,
       },
       preferences: {
         ask_move_on_upload:
@@ -125,10 +134,17 @@ export function updateSettings(partial: Partial<AppSettings>): AppSettings {
   const current = loadSettings();
 
   const baseDir = partial.media?.base_dir || current.media.base_dir;
+  const downloadResolution =
+    partial.media?.download_resolution === "4k" ||
+    partial.media?.download_resolution === "1440p" ||
+    partial.media?.download_resolution === "1080p"
+      ? partial.media?.download_resolution
+      : current.media.download_resolution;
 
   const next: AppSettings = {
     media: {
       base_dir: baseDir,
+      download_resolution: downloadResolution,
     },
     preferences: {
       ask_move_on_upload:

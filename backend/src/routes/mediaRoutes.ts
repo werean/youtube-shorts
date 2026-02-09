@@ -38,7 +38,6 @@ async function sendVideoStream(
   const range = request.headers.range;
   const contentType = getMimeType(filePath);
 
-  // Headers comuns
   reply
     .header("Accept-Ranges", "bytes")
     .header("Cache-Control", "no-cache")
@@ -77,9 +76,8 @@ async function sendVideoStream(
   await reply.send(fs.createReadStream(filePath));
 }
 
-// Cache para evitar carregar o job repetidamente
 const jobCache = new Map<string, { job: any; timestamp: number }>();
-const CACHE_TTL = 60000; // 60 segundos
+const CACHE_TTL = 60000;
 
 function getCachedJob(jobId: string) {
   const cached = jobCache.get(jobId);
