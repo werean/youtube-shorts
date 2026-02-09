@@ -128,8 +128,9 @@ export function BatchPipelineDialog({
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: "500", fontSize: "14px" }}>
                         {video.job.video_name || video.job.job_id}
-                        {(video.hasTranscription && batchPipelineOptions.transcription) ||
-                        (video.hasAnalysis && batchPipelineOptions.analysis) ? (
+                        {selectedVideosForBatch.includes(video.job.job_id) &&
+                        ((video.hasTranscription && batchPipelineOptions.transcription) ||
+                          (video.hasAnalysis && batchPipelineOptions.analysis)) ? (
                           <span style={{ color: "#f59e0b", marginLeft: "8px" }}>
                             —{" "}
                             {video.hasTranscription &&
