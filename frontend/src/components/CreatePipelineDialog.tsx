@@ -35,7 +35,7 @@ export function CreatePipelineDialog({
 
   const handleVideoToggle = (videoId: string) => {
     setSelectedVideoIds((prev) =>
-      prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId]
+      prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId],
     );
   };
 
@@ -142,10 +142,10 @@ export function CreatePipelineDialog({
                           onChange={() => handleVideoToggle(video.id)}
                           style={{ marginTop: "2px", cursor: "pointer" }}
                         />
-                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2px" }}>
-                          <div style={{ fontWeight: "500", fontSize: "0.9rem" }}>
-                            {video.title}
-                          </div>
+                        <div
+                          style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2px" }}
+                        >
+                          <div style={{ fontWeight: "500", fontSize: "0.9rem" }}>{video.title}</div>
                           {hasWarning && (
                             <div
                               style={{
@@ -236,9 +236,7 @@ export function CreatePipelineDialog({
                     onChange={(e) => handleAnalyzeToggle(e.target.checked)}
                     style={{ cursor: "pointer" }}
                   />
-                  <span style={{ fontWeight: "500", fontSize: "0.85rem" }}>
-                    Gerar Análise
-                  </span>
+                  <span style={{ fontWeight: "500", fontSize: "0.85rem" }}>Gerar Análise</span>
                 </div>
                 <span style={{ fontSize: "0.7rem", color: "#666" }}>com IA</span>
               </label>
@@ -280,7 +278,10 @@ export function CreatePipelineDialog({
             className="secondary"
             onClick={onClose}
             disabled={isProcessing}
-            style={{ opacity: isProcessing ? 0.5 : 1, cursor: isProcessing ? "not-allowed" : "pointer" }}
+            style={{
+              opacity: isProcessing ? 0.5 : 1,
+              cursor: isProcessing ? "not-allowed" : "pointer",
+            }}
           >
             Cancelar
           </button>
