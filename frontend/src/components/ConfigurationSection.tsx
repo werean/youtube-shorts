@@ -4,7 +4,6 @@ interface ConfigurationSectionProps {
   onConfigureLLM: () => void;
   onConfigureWhisper: () => void;
   onConfigureFFmpeg: () => void;
-  onBatchPipeline: () => void;
 }
 
 export function ConfigurationSection({
@@ -13,7 +12,6 @@ export function ConfigurationSection({
   onConfigureLLM,
   onConfigureWhisper,
   onConfigureFFmpeg,
-  onBatchPipeline,
 }: ConfigurationSectionProps) {
   return (
     <section className="panel">
@@ -67,13 +65,6 @@ export function ConfigurationSection({
           <p className="config-card-description">Define parâmetros de renderização de vídeo.</p>
         </div>
 
-        {/* Card Batch Pipeline */}
-        <div className="config-card">
-          <button onClick={onBatchPipeline} className="config-card-button indigo">
-            ⚡ Pipeline em lote
-          </button>
-          <p className="config-card-description">Processa vários vídeos automaticamente.</p>
-        </div>
       </div>
     </section>
   );

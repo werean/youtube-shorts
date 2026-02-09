@@ -177,6 +177,11 @@ export default function App() {
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
   const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
   const [ffmpegConfig, setFfmpegConfig] = useState<FFmpegConfig | null>(null);
+  const [expandUploadSection, setExpandUploadSection] = useState(true);
+  const [expandVideoListSection, setExpandVideoListSection] = useState(true);
+  const [expandVideoPlayerSection, setExpandVideoPlayerSection] = useState(true);
+  const [expandCurationSection, setExpandCurationSection] = useState(false);
+  const [expandRenderingSection, setExpandRenderingSection] = useState(true);
   const [activeTaskLogs, setActiveTaskLogs] = useState<string[]>([]);
   const [activeTaskLogType, setActiveTaskLogType] = useState<"transcription" | "render" | null>(
     null,
@@ -1095,13 +1100,9 @@ export default function App() {
           setShowDependenciesDialog(true);
           setDependencies(null);
           setLoadingDependencies(new Set());
-
           try {
-            console.log("[UI] Carregando dependências...");
             const depsData = await getDependencies();
-            console.log("[UI] Dependências carregadas:", depsData.dependencies);
             setDependencies(depsData.dependencies);
-            setLoadingDependencies(new Set());
           } catch (error) {
             console.error("Failed to load dependencies:", error);
             setDependencies({
@@ -1112,25 +1113,16 @@ export default function App() {
               pytorch: { installed: false, version: null },
               ollama: { installed: false, version: null },
             });
+          } finally {
             setLoadingDependencies(new Set());
           }
         }}
         onConfigureLLM={() => setShowLLMConfigDialog(true)}
         onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
         onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
-        onBatchPipeline={() => {
-          setSelectedVideosForBatch([]);
-          setBatchPipelineOptions({
-            transcription: true,
-            analysis: false,
-            render: false,
-            preApprove: false,
-          });
-          setBatchProcessingLogs([]);
-          setShowBatchPipelineDialog(true);
-        }}
       />
 
+      {/* 1. Upload Section */}
       <UploadSection
         action={action}
         onVideoAdded={(video) => {
@@ -1143,6 +1135,8 @@ export default function App() {
           setDontAskMoveUpload(false);
           setShowMoveUploadDialog(true);
         }}
+        isExpanded={expandUploadSection}
+        onToggle={() => setExpandUploadSection((current) => !current)}
       />
 
       {/* 2. Video List */}
@@ -1179,555 +1173,609 @@ export default function App() {
           setRenameVideoNewName(currentName);
         }}
         onRunAction={runAction}
+        isExpanded={expandVideoListSection}
+        onToggle={() => setExpandVideoListSection((current) => !current)}
       />
       {/* 3. Video Player */}
       {activeVideo && (
-        <section className="panel">
-          <h2>3. Vídeo selecionado</h2>
-          <div className="video-player-container">
-            {activeVideo.videoPath ? (
-              <>
-                <div className="video-player-wrapper">
-                  <video
-                    key={`video-${activeVideo.job.job_id}`}
-                    ref={videoRef}
-                    controls
-                    width="100%"
-                    src={`${apiBaseUrl}${activeVideo.videoPath}`}
-                    className="video-player"
-                    onLoadStart={() => {
-                      console.log(`\n[video] 🎬 Iniciando carregamento do vídeo:`);
-                      console.log(`[video]   Job ID: ${activeVideo.job.job_id}`);
-                      console.log(`[video]   Video Path: ${activeVideo.videoPath}`);
-                      console.log(`[video]   URL completa: ${apiBaseUrl}${activeVideo.videoPath}`);
-                    }}
-                    onError={(e) => {
-                      console.error(`\n[video] ❌ ERRO ao carregar vídeo:`);
-                      console.error(`[video]   Job ID: ${activeVideo.job.job_id}`);
-                      console.error(`[video]   Video Path: ${activeVideo.videoPath}`);
-                      console.error(`[video]   URL tentada: ${apiBaseUrl}${activeVideo.videoPath}`);
-                      console.error(`[video]   Erro completo:`, e);
-                      console.error(`[video]   Event type: ${e.type}`);
-                      if (e.target instanceof HTMLVideoElement) {
-                        console.error(`[video]   Video networkState: ${e.target.networkState}`);
-                        console.error(`[video]   Video readyState: ${e.target.readyState}`);
-                        console.error(`[video]   Video error code: ${e.target.error?.code}`);
-                        console.error(`[video]   Video error message: ${e.target.error?.message}`);
-                      }
-                    }}
-                    onLoadedMetadata={() => {
-                      console.log(`[video] ✓ Metadados carregados com sucesso`);
-                    }}
-                    onCanPlay={() => {
-                      console.log(`[video] ✓ Vídeo pronto para reproduzir`);
-                    }}
-                  />
-                </div>
-
-                {/* Batch Processing Logs */}
-                {isBatchProcessing && batchProcessingLogs.length > 0 && (
-                  <div className="batch-logs">
-                    <h4 className="batch-logs-title">📋 Logs do Pipeline em Lote</h4>
-                    <div className="batch-logs-content">
-                      {batchProcessingLogs.map((log, idx) => (
-                        <div key={idx}>{log}</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeTaskLogType && (
-                  <div className="log-container">
-                    <div className="log-header">
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span>
-                          {activeTaskLogType === "transcription"
-                            ? "📝 Logs da transcrição"
-                            : "🎬 Logs da renderização"}
-                        </span>
-                        {activeTaskLogType === "transcription" && activeVideo?.isTranscribing && (
-                          <button
-                            className="cancel-button"
-                            onClick={async () => {
-                              console.log(`[UI] Cancelando transcrição: ${activeVideo.job.job_id}`);
-                              try {
-                                await cancelTranscription(activeVideo.job.job_id);
-                                updateVideo(activeVideo.job.job_id, { isTranscribing: false });
-                                stopLogsPolling();
-                                console.log(`[UI] Transcrição cancelada`);
-                              } catch (error) {
-                                console.error("[UI] Erro ao cancelar transcrição:", error);
-                              }
-                            }}
-                          >
-                            ⊗ Cancelar
-                          </button>
-                        )}
-                        {activeTaskLogType === "render" && isRendering && (
-                          <button
-                            className="cancel-button"
-                            onClick={async () => {
-                              console.log(
-                                `[UI] Cancelando renderização: ${activeVideo.job.job_id}`,
-                              );
-                              try {
-                                await cancelRendering(activeVideo.job.job_id);
-                                setIsRendering(false);
-                                stopRenderPolling();
-                                stopLogsPolling();
-                                console.log(`[UI] Renderização cancelada`);
-                              } catch (error) {
-                                console.error("[UI] Erro ao cancelar renderização:", error);
-                              }
-                            }}
-                          >
-                            ⊗ Cancelar
-                          </button>
-                        )}
-                      </div>
-                      <button
-                        className="secondary log-toggle-button"
-                        onClick={() => setExpandTaskLogs((current) => !current)}
-                      >
-                        {expandTaskLogs ? "Mostrar menos" : "Mostrar mais"}
-                      </button>
-                    </div>
-                    <div
-                      ref={taskLogsContainerRef}
-                      className={expandTaskLogs ? "log-content expanded" : "log-content"}
-                    >
-                      {(expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).length === 0
-                        ? "Aguardando logs..."
-                        : (expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).map(
-                            (line, index) => <div key={`${index}-${line}`}>{line}</div>,
-                          )}
-                    </div>
-                  </div>
-                )}
-                <div className="action-cards-grid">
-                  <ActionCard description="Abre a transcrição nos formatos disponíveis.">
-                    <button
-                      disabled={!hasAnyTranscription}
-                      onClick={() => setShowTranscriptionFormatListDialog(true)}
-                      className="config-card-button blue"
-                      style={{
-                        cursor: hasAnyTranscription ? "pointer" : "not-allowed",
-                        opacity: hasAnyTranscription ? 1 : 0.5,
-                      }}
-                    >
-                      📄 Visualizar transcrição
-                    </button>
-                  </ActionCard>
-                  <ActionCard description="Gera ou recria a transcrição do vídeo.">
-                    <button
-                      disabled={action.busy}
-                      className="config-card-button green"
-                      style={{
-                        cursor: action.busy ? "not-allowed" : "pointer",
-                        opacity: action.busy ? 0.5 : 1,
-                      }}
-                      onClick={() => {
-                        // Check if another video is being transcribed/rendered
-                        const validation = canStartOperation(activeVideo.job.job_id);
-                        if (!validation.allowed) {
-                          console.warn(`[UI] ⚠️  ${validation.message}`);
-                          alert(`⚠️ ${validation.message}`);
-                          return;
-                        }
-
-                        console.log(
-                          `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
-                        );
-                        setShowTranscriptionFormatListDialog(false);
-                        setShowTranscriptionContentDialog(false);
-                        setShowTranscriptionDeleteDialog(false);
-                        setShowBlocksDialog(false);
-                        setSelectedTranscriptionFormat(null);
-                        setPendingDeleteFormat(null);
-                        setSelectedSuggestedCutId(null);
-                        setBlocks([]);
-                        setSuggestedCuts([]);
-                        setActiveTaskLogType("transcription");
-                        setActiveTaskLogs([]);
-                        setExpandTaskLogs(false);
-                        stopLogsPolling();
-                        updateVideo(activeVideo.job.job_id, {
-                          isTranscribing: true,
-                          transcriptionLogs: [],
-                          transcription: "",
-                          transcriptionSegments: [],
-                          transcriptionFormats: undefined,
-                        });
-
-                        return runAction(
-                          async () => {
-                            if (hasAnyTranscription) {
-                              await deleteTranscription(activeVideo.job.job_id, "all");
-                            }
-                            return transcribeJob(activeVideo.job.job_id);
-                          },
-                          (result: any) => {
-                            console.log(`[UI] Transcrição completada`);
-                            updateVideo(activeVideo.job.job_id, {
-                              transcription: result.transcription,
-                              transcriptionSegments: result.segments,
-                              transcriptionFormats: result.available_formats,
-                              isTranscribing: false,
-                            });
-                            refreshVideo(activeVideo.job.job_id);
-                          },
-                        );
-                      }}
-                    >
-                      {activeVideo.isTranscribing
-                        ? "⏳ Transcrevendo..."
-                        : hasAnyTranscription
-                          ? "Gerar nova transcrição"
-                          : "🎙️ Transcrever"}
-                    </button>
-                  </ActionCard>
-                  <ActionCard description="Agrupa a transcrição em blocos semânticos.">
-                    <button
-                      disabled={!hasAnyTranscription}
-                      className="config-card-button purple"
-                      onClick={() =>
-                        runAction(
-                          () => buildBlocks(activeVideo.job.job_id),
-                          (value) => {
-                            setBlocks(value);
-                            setShowBlocksDialog(true);
-                            refreshVideo(activeVideo.job.job_id);
-                          },
-                        )
-                      }
-                    >
-                      🔗 Blocos
-                    </button>
-                  </ActionCard>
-                  <div className="action-card">
-                    <button
-                      disabled={
-                        isAnalyzing ||
-                        (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
-                      }
-                      className="config-card-button orange"
-                      onClick={() => {
-                        if (suggestedCuts.length > 0) {
-                          setKeepCutIds([]);
-                          setShowRegenerateAnalyzeDialog(true);
-                          return;
-                        }
-
-                        runAction(
-                          async () => {
-                            setIsAnalyzing(true);
-                            try {
-                              return await analyzeJob(activeVideo.job.job_id);
-                            } finally {
-                              setIsAnalyzing(false);
-                            }
-                          },
-                          (value) => handleAnalyzeResult(value),
-                        );
-                      }}
-                    >
-                      {isAnalyzing
-                        ? "⏳ Analisando..."
-                        : suggestedCuts.length > 0
-                          ? "Gerar nova análise"
-                          : "🤖 Análise"}
-                    </button>
-                    <p className="config-card-description">Analisa com IA para encontrar hooks.</p>
-                    <div className="checkbox-container">
-                      <input
-                        type="checkbox"
-                        checked={showAiResponseOnAnalyze}
-                        onChange={(event) => setShowAiResponseOnAnalyze(event.target.checked)}
+        <div className="panel" style={{ marginBottom: "24px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "16px",
+            }}
+          >
+            <h2 style={{ margin: 0, flex: 1 }}>3. Vídeo selecionado</h2>
+            <button
+              onClick={() => setExpandVideoPlayerSection(!expandVideoPlayerSection)}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#666",
+              }}
+              title={expandVideoPlayerSection ? "Recolher" : "Expandir"}
+            >
+              <i
+                className="material-icons"
+                style={{
+                  transform: expandVideoPlayerSection ? "rotate(0deg)" : "rotate(180deg)",
+                  transition: "transform 0.3s ease",
+                }}
+              >
+                keyboard_arrow_down
+              </i>
+            </button>
+          </div>
+          {expandVideoPlayerSection && (
+            <>
+              <div className="video-player-container">
+                {activeVideo.videoPath ? (
+                  <>
+                    <div className="video-player-wrapper">
+                      <video
+                        key={`video-${activeVideo.job.job_id}`}
+                        ref={videoRef}
+                        controls
+                        width="100%"
+                        src={`${apiBaseUrl}${activeVideo.videoPath}`}
+                        className="video-player"
+                        onLoadStart={() => {
+                          console.log(`\n[video] 🎬 Iniciando carregamento do vídeo:`);
+                          console.log(`[video]   Job ID: ${activeVideo.job.job_id}`);
+                          console.log(`[video]   Video Path: ${activeVideo.videoPath}`);
+                          console.log(
+                            `[video]   URL completa: ${apiBaseUrl}${activeVideo.videoPath}`,
+                          );
+                        }}
+                        onError={(e) => {
+                          console.error(`\n[video] ❌ ERRO ao carregar vídeo:`);
+                          console.error(`[video]   Job ID: ${activeVideo.job.job_id}`);
+                          console.error(`[video]   Video Path: ${activeVideo.videoPath}`);
+                          console.error(
+                            `[video]   URL tentada: ${apiBaseUrl}${activeVideo.videoPath}`,
+                          );
+                          console.error(`[video]   Erro completo:`, e);
+                          console.error(`[video]   Event type: ${e.type}`);
+                          if (e.target instanceof HTMLVideoElement) {
+                            console.error(`[video]   Video networkState: ${e.target.networkState}`);
+                            console.error(`[video]   Video readyState: ${e.target.readyState}`);
+                            console.error(`[video]   Video error code: ${e.target.error?.code}`);
+                            console.error(
+                              `[video]   Video error message: ${e.target.error?.message}`,
+                            );
+                          }
+                        }}
+                        onLoadedMetadata={() => {
+                          console.log(`[video] ✓ Metadados carregados com sucesso`);
+                        }}
+                        onCanPlay={() => {
+                          console.log(`[video] ✓ Vídeo pronto para reproduzir`);
+                        }}
                       />
-                      <span style={{ fontSize: "0.85rem" }}>exibir resultado da IA</span>
                     </div>
-                  </div>
-                  <div className="action-card">
-                    <button
-                      disabled={cuts.length === 0 || isRendering}
-                      className="config-card-button pink"
-                      onClick={() => {
-                        // Check if another video is being transcribed/rendered
-                        const validation = canStartOperation(activeVideo.job.job_id);
-                        if (!validation.allowed) {
-                          console.warn(`[UI] ⚠️  ${validation.message}`);
-                          alert(`⚠️ ${validation.message}`);
-                          return;
-                        }
 
-                        return runAction(
-                          async () => {
-                            // Sync cuts with backend before rendering
-                            await updateCuts(activeVideo.job.job_id, cuts);
-                            return renderJob(activeVideo.job.job_id);
-                          },
-                          () => {
-                            console.log(`[UI] Renderização iniciada`);
-                            setActiveTaskLogType("render");
+                    {/* Batch Processing Logs */}
+                    {isBatchProcessing && batchProcessingLogs.length > 0 && (
+                      <div className="batch-logs">
+                        <h4 className="batch-logs-title">📋 Logs do Pipeline em Lote</h4>
+                        <div className="batch-logs-content">
+                          {batchProcessingLogs.map((log, idx) => (
+                            <div key={idx}>{log}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTaskLogType && (
+                      <div className="log-container">
+                        <div className="log-header">
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span>
+                              {activeTaskLogType === "transcription"
+                                ? "📝 Logs da transcrição"
+                                : "🎬 Logs da renderização"}
+                            </span>
+                            {activeTaskLogType === "transcription" &&
+                              activeVideo?.isTranscribing && (
+                                <button
+                                  className="cancel-button"
+                                  onClick={async () => {
+                                    console.log(
+                                      `[UI] Cancelando transcrição: ${activeVideo.job.job_id}`,
+                                    );
+                                    try {
+                                      await cancelTranscription(activeVideo.job.job_id);
+                                      updateVideo(activeVideo.job.job_id, {
+                                        isTranscribing: false,
+                                      });
+                                      stopLogsPolling();
+                                      console.log(`[UI] Transcrição cancelada`);
+                                    } catch (error) {
+                                      console.error("[UI] Erro ao cancelar transcrição:", error);
+                                    }
+                                  }}
+                                >
+                                  ⊗ Cancelar
+                                </button>
+                              )}
+                            {activeTaskLogType === "render" && isRendering && (
+                              <button
+                                className="cancel-button"
+                                onClick={async () => {
+                                  console.log(
+                                    `[UI] Cancelando renderização: ${activeVideo.job.job_id}`,
+                                  );
+                                  try {
+                                    await cancelRendering(activeVideo.job.job_id);
+                                    setIsRendering(false);
+                                    stopRenderPolling();
+                                    stopLogsPolling();
+                                    console.log(`[UI] Renderização cancelada`);
+                                  } catch (error) {
+                                    console.error("[UI] Erro ao cancelar renderização:", error);
+                                  }
+                                }}
+                              >
+                                ⊗ Cancelar
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            className="secondary log-toggle-button"
+                            onClick={() => setExpandTaskLogs((current) => !current)}
+                          >
+                            {expandTaskLogs ? "Mostrar menos" : "Mostrar mais"}
+                          </button>
+                        </div>
+                        <div
+                          ref={taskLogsContainerRef}
+                          className={expandTaskLogs ? "log-content expanded" : "log-content"}
+                        >
+                          {(expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).length === 0
+                            ? "Aguardando logs..."
+                            : (expandTaskLogs ? activeTaskLogs : activeTaskLogs.slice(-2)).map(
+                                (line, index) => <div key={`${index}-${line}`}>{line}</div>,
+                              )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="action-cards-grid">
+                      <ActionCard description="Abre a transcrição nos formatos disponíveis.">
+                        <button
+                          disabled={!hasAnyTranscription}
+                          onClick={() => setShowTranscriptionFormatListDialog(true)}
+                          className="config-card-button blue"
+                          style={{
+                            cursor: hasAnyTranscription ? "pointer" : "not-allowed",
+                            opacity: hasAnyTranscription ? 1 : 0.5,
+                          }}
+                        >
+                          📄 Visualizar transcrição
+                        </button>
+                      </ActionCard>
+                      <ActionCard description="Gera ou recria a transcrição do vídeo.">
+                        <button
+                          disabled={action.busy}
+                          className="config-card-button green"
+                          style={{
+                            cursor: action.busy ? "not-allowed" : "pointer",
+                            opacity: action.busy ? 0.5 : 1,
+                          }}
+                          onClick={() => {
+                            // Check if another video is being transcribed/rendered
+                            const validation = canStartOperation(activeVideo.job.job_id);
+                            if (!validation.allowed) {
+                              console.warn(`[UI] ⚠️  ${validation.message}`);
+                              alert(`⚠️ ${validation.message}`);
+                              return;
+                            }
+
+                            console.log(
+                              `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
+                            );
+                            setShowTranscriptionFormatListDialog(false);
+                            setShowTranscriptionContentDialog(false);
+                            setShowTranscriptionDeleteDialog(false);
+                            setShowBlocksDialog(false);
+                            setSelectedTranscriptionFormat(null);
+                            setPendingDeleteFormat(null);
+                            setSelectedSuggestedCutId(null);
+                            setBlocks([]);
+                            setSuggestedCuts([]);
+                            setActiveTaskLogType("transcription");
                             setActiveTaskLogs([]);
                             setExpandTaskLogs(false);
                             stopLogsPolling();
-                            setRenderOutputs([]);
-                            startRenderPolling(activeVideo.job.job_id, suggestedCuts.length);
-                          },
-                        );
-                      }}
-                    >
-                      {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
-                    </button>
-                    {isRendering && (
-                      <p
-                        className="muted"
-                        style={{ marginTop: "8px", fontSize: "0.8rem", textAlign: "center" }}
-                      >
-                        Gerando cortes: {renderOutputs.length}/{expectedRenderCount || "?"}
-                      </p>
-                    )}
-                    <p className="config-card-description">
-                      Renderiza os cortes em vídeos verticals.
-                    </p>
-                  </div>
-                  <div className="action-card">
-                    <button
-                      className="config-card-button green"
-                      onClick={() => {
-                        setNewCutStartMinutes("");
-                        setNewCutStartSeconds("");
-                        setNewCutEndMinutes("");
-                        setNewCutEndSeconds("");
-                        setShowAddManualCutDialog(true);
-                      }}
-                    >
-                      ➕ Adicionar Corte Manual
-                    </button>
-                    <p className="config-card-description">
-                      Cria um corte com timestamps específicos.
-                    </p>
-                  </div>
-                  <div className="action-card">
-                    <button
-                      className="config-card-button indigo"
-                      onClick={() => {
-                        setSelectedVideosForBatch([]);
-                        setBatchPipelineOptions({
-                          transcription: true,
-                          analysis: false,
-                          render: false,
-                          preApprove: false,
-                        });
-                        setBatchProcessingLogs([]);
-                        setShowBatchPipelineDialog(true);
-                      }}
-                    >
-                      🚀 Pipeline em Lote
-                    </button>
-                    <p className="config-card-description">
-                      Processa múltiplos vídeos sequencialmente.
-                    </p>
-                  </div>
-                </div>
-                {isLoadingCuts && (
-                  <div className="loading-container">
-                    <div className="spinner" />
-                    <span style={{ fontSize: "0.9rem" }}>Carregando cortes...</span>
-                  </div>
-                )}
-                {suggestedCuts.length > 0 && (
-                  <div style={{ marginTop: "20px" }}>
-                    <p style={{ marginBottom: "12px", fontWeight: "600" }}>
-                      Cortes sugeridos ({suggestedCuts.length}):
-                    </p>
+                            updateVideo(activeVideo.job.job_id, {
+                              isTranscribing: true,
+                              transcriptionLogs: [],
+                              transcription: "",
+                              transcriptionSegments: [],
+                              transcriptionFormats: undefined,
+                            });
 
-                    {/* Botão Continuar Pipeline (aparece se estiver aguardando aprovação) */}
-                    {batchWaitingForApproval && activeBatchId && (
-                      <div style={{ marginBottom: "16px", textAlign: "center" }}>
-                        <button
-                          className="primary"
-                          onClick={async () => {
-                            try {
-                              await continueBatchPipeline(activeBatchId);
-                              setBatchWaitingForApproval(false);
-                              setBatchPendingCuts([]);
-                              setBatchProcessingLogs((prev) => [
-                                ...prev,
-                                "✅ Cortes aprovados, continuando pipeline...",
-                              ]);
-                            } catch (error: any) {
-                              console.error("[UI] Error continuing batch pipeline:", error);
-                              setBatchProcessingLogs((prev) => [
-                                ...prev,
-                                `❌ Erro ao continuar: ${error.message}`,
-                              ]);
-                            }
-                          }}
-                          style={{
-                            padding: "12px 24px",
-                            fontSize: "16px",
-                            fontWeight: "600",
-                            borderRadius: "8px",
-                            background: "#10b981",
+                            return runAction(
+                              async () => {
+                                if (hasAnyTranscription) {
+                                  await deleteTranscription(activeVideo.job.job_id, "all");
+                                }
+                                return transcribeJob(activeVideo.job.job_id);
+                              },
+                              (result: any) => {
+                                console.log(`[UI] Transcrição completada`);
+                                updateVideo(activeVideo.job.job_id, {
+                                  transcription: result.transcription,
+                                  transcriptionSegments: result.segments,
+                                  transcriptionFormats: result.available_formats,
+                                  isTranscribing: false,
+                                });
+                                refreshVideo(activeVideo.job.job_id);
+                              },
+                            );
                           }}
                         >
-                          ▶️ Continuar Pipeline
+                          {activeVideo.isTranscribing
+                            ? "⏳ Transcrevendo..."
+                            : hasAnyTranscription
+                              ? "Gerar nova transcrição"
+                              : "🎙️ Transcrever"}
                         </button>
+                      </ActionCard>
+                      <ActionCard description="Agrupa a transcrição em blocos semânticos.">
+                        <button
+                          disabled={!hasAnyTranscription}
+                          className="config-card-button purple"
+                          onClick={() =>
+                            runAction(
+                              () => buildBlocks(activeVideo.job.job_id),
+                              (value) => {
+                                setBlocks(value);
+                                setShowBlocksDialog(true);
+                                refreshVideo(activeVideo.job.job_id);
+                              },
+                            )
+                          }
+                        >
+                          🔗 Blocos
+                        </button>
+                      </ActionCard>
+                      <div className="action-card">
+                        <button
+                          disabled={
+                            isAnalyzing ||
+                            (!hasAnyTranscription && !hasAnyBlocks && suggestedCuts.length === 0)
+                          }
+                          className="config-card-button orange"
+                          onClick={() => {
+                            if (suggestedCuts.length > 0) {
+                              setKeepCutIds([]);
+                              setShowRegenerateAnalyzeDialog(true);
+                              return;
+                            }
+
+                            runAction(
+                              async () => {
+                                setIsAnalyzing(true);
+                                try {
+                                  return await analyzeJob(activeVideo.job.job_id);
+                                } finally {
+                                  setIsAnalyzing(false);
+                                }
+                              },
+                              (value) => handleAnalyzeResult(value),
+                            );
+                          }}
+                        >
+                          {isAnalyzing
+                            ? "⏳ Analisando..."
+                            : suggestedCuts.length > 0
+                              ? "Gerar nova análise"
+                              : "🤖 Análise"}
+                        </button>
+                        <p className="config-card-description">
+                          Analisa com IA para encontrar hooks.
+                        </p>
+                        <div className="checkbox-container">
+                          <input
+                            type="checkbox"
+                            checked={showAiResponseOnAnalyze}
+                            onChange={(event) => setShowAiResponseOnAnalyze(event.target.checked)}
+                          />
+                          <span style={{ fontSize: "0.85rem" }}>exibir resultado da IA</span>
+                        </div>
+                      </div>
+                      <div className="action-card">
+                        <button
+                          disabled={cuts.length === 0 || isRendering}
+                          className="config-card-button pink"
+                          onClick={() => {
+                            // Check if another video is being transcribed/rendered
+                            const validation = canStartOperation(activeVideo.job.job_id);
+                            if (!validation.allowed) {
+                              console.warn(`[UI] ⚠️  ${validation.message}`);
+                              alert(`⚠️ ${validation.message}`);
+                              return;
+                            }
+
+                            return runAction(
+                              async () => {
+                                // Sync cuts with backend before rendering
+                                await updateCuts(activeVideo.job.job_id, cuts);
+                                return renderJob(activeVideo.job.job_id);
+                              },
+                              () => {
+                                console.log(`[UI] Renderização iniciada`);
+                                setActiveTaskLogType("render");
+                                setActiveTaskLogs([]);
+                                setExpandTaskLogs(false);
+                                stopLogsPolling();
+                                setRenderOutputs([]);
+                                startRenderPolling(activeVideo.job.job_id, suggestedCuts.length);
+                              },
+                            );
+                          }}
+                        >
+                          {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
+                        </button>
+                        {isRendering && (
+                          <p
+                            className="muted"
+                            style={{ marginTop: "8px", fontSize: "0.8rem", textAlign: "center" }}
+                          >
+                            Gerando cortes: {renderOutputs.length}/{expectedRenderCount || "?"}
+                          </p>
+                        )}
+                        <p className="config-card-description">
+                          Renderiza os cortes em vídeos verticals.
+                        </p>
+                      </div>
+                      <div className="action-card">
+                        <button
+                          className="config-card-button green"
+                          onClick={() => {
+                            setNewCutStartMinutes("");
+                            setNewCutStartSeconds("");
+                            setNewCutEndMinutes("");
+                            setNewCutEndSeconds("");
+                            setShowAddManualCutDialog(true);
+                          }}
+                        >
+                          ➕ Adicionar Corte Manual
+                        </button>
+                        <p className="config-card-description">
+                          Cria um corte com timestamps específicos.
+                        </p>
+                      </div>
+                      <div className="action-card">
+                        <button
+                          className="config-card-button indigo"
+                          onClick={() => {
+                            setSelectedVideosForBatch([]);
+                            setBatchPipelineOptions({
+                              transcription: true,
+                              analysis: false,
+                              render: false,
+                              preApprove: false,
+                            });
+                            setBatchProcessingLogs([]);
+                            setShowBatchPipelineDialog(true);
+                          }}
+                        >
+                          🚀 Pipeline em Lote
+                        </button>
+                        <p className="config-card-description">
+                          Processa múltiplos vídeos sequencialmente.
+                        </p>
+                      </div>
+                    </div>
+                    {isLoadingCuts && (
+                      <div className="loading-container">
+                        <div className="spinner" />
+                        <span style={{ fontSize: "0.9rem" }}>Carregando cortes...</span>
                       </div>
                     )}
+                    {suggestedCuts.length > 0 && (
+                      <div style={{ marginTop: "20px" }}>
+                        <p style={{ marginBottom: "12px", fontWeight: "600" }}>
+                          Cortes sugeridos ({suggestedCuts.length}):
+                        </p>
 
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {suggestedCuts.map((cut) => (
-                        <div
-                          key={cut.cut_id}
-                          style={{ position: "relative", display: "inline-flex" }}
-                        >
-                          <button
-                            className="secondary"
-                            onClick={() => {
-                              setSelectedSuggestedCutId(cut.cut_id);
-                              if (videoRef.current) {
-                                videoRef.current.currentTime = cut.start;
-                                videoRef.current.play();
-                              }
-                            }}
-                            style={{
-                              padding: "8px 12px",
-                              backgroundColor:
-                                selectedSuggestedCutId === cut.cut_id ? "#0066cc" : "#e5e5e5",
-                              color: selectedSuggestedCutId === cut.cut_id ? "white" : "black",
-                              border: "none",
-                              borderRadius: "8px",
-                              cursor: "pointer",
-                              fontSize: "0.85em",
-                              fontWeight: selectedSuggestedCutId === cut.cut_id ? "600" : "400",
-                              paddingRight: "56px",
-                            }}
-                          >
-                            {formatTimestamp(cut.start)} - {formatTimestamp(cut.end)}
-                          </button>
-                          <div
-                            style={{
-                              position: "absolute",
-                              right: "6px",
-                              top: "4px",
-                              display: "flex",
-                              gap: "4px",
-                            }}
-                          >
+                        {/* Botão Continuar Pipeline (aparece se estiver aguardando aprovação) */}
+                        {batchWaitingForApproval && activeBatchId && (
+                          <div style={{ marginBottom: "16px", textAlign: "center" }}>
                             <button
-                              className="icon-btn"
-                              onClick={() => {
-                                const startMin = Math.floor(cut.start / 60);
-                                const startSec = Math.round(cut.start % 60);
-                                const endMin = Math.floor(cut.end / 60);
-                                const endSec = Math.round(cut.end % 60);
-
-                                setEditingCutId(cut.cut_id);
-                                setEditCutStart(formatTimestamp(cut.start));
-                                setEditCutEnd(formatTimestamp(cut.end));
-                                setEditCutStartMinutes(String(startMin).padStart(2, "0"));
-                                setEditCutStartSeconds(String(startSec).padStart(2, "0"));
-                                setEditCutEndMinutes(String(endMin).padStart(2, "0"));
-                                setEditCutEndSeconds(String(endSec).padStart(2, "0"));
-                                setShowCutEditDialog(true);
-                              }}
-                              onMouseEnter={() => {
-                                setHoveredCutId(cut.cut_id);
-                                setHoveredCutAction("edit");
-                              }}
-                              onMouseLeave={() => {
-                                setHoveredCutId(null);
-                                setHoveredCutAction(null);
-                              }}
-                              style={{
-                                width: "16px",
-                                height: "16px",
-                                borderRadius: "4px",
-                                background: "transparent",
-                                border: "none",
-                                cursor: "pointer",
-                                padding: 0,
-                                fontSize: "12px",
-                                lineHeight: "16px",
-                                color:
-                                  hoveredCutId === cut.cut_id && hoveredCutAction === "edit"
-                                    ? "#1d4ed8"
-                                    : "#666",
-                              }}
-                              aria-label="Editar timestamp"
-                            >
-                              ✎
-                            </button>
-                            <button
-                              className="icon-btn"
+                              className="primary"
                               onClick={async () => {
-                                const newSuggestedCuts = suggestedCuts.filter(
-                                  (item) => item.cut_id !== cut.cut_id,
-                                );
-                                const newCuts = cuts.filter((item) => item.cut_id !== cut.cut_id);
-
-                                setSuggestedCuts(newSuggestedCuts);
-                                setCuts(newCuts);
-
-                                if (activeVideo) {
-                                  try {
-                                    await updateCuts(activeVideo.job.job_id, newCuts);
-                                  } catch (error) {
-                                    console.error("Failed to update cuts:", error);
-                                  }
+                                try {
+                                  await continueBatchPipeline(activeBatchId);
+                                  setBatchWaitingForApproval(false);
+                                  setBatchPendingCuts([]);
+                                  setBatchProcessingLogs((prev) => [
+                                    ...prev,
+                                    "✅ Cortes aprovados, continuando pipeline...",
+                                  ]);
+                                } catch (error: any) {
+                                  console.error("[UI] Error continuing batch pipeline:", error);
+                                  setBatchProcessingLogs((prev) => [
+                                    ...prev,
+                                    `❌ Erro ao continuar: ${error.message}`,
+                                  ]);
                                 }
-
-                                if (selectedSuggestedCutId === cut.cut_id) {
-                                  setSelectedSuggestedCutId(null);
-                                  videoRef.current?.pause();
-                                }
-                                setHoveredCutId(null);
-                              }}
-                              onMouseEnter={() => {
-                                setHoveredCutId(cut.cut_id);
-                                setHoveredCutAction("delete");
-                              }}
-                              onMouseLeave={() => {
-                                setHoveredCutId(null);
-                                setHoveredCutAction(null);
                               }}
                               style={{
-                                width: "16px",
-                                height: "16px",
-                                borderRadius: "4px",
-                                background: "transparent",
-                                border: "none",
-                                cursor: "pointer",
-                                padding: 0,
-                                fontSize: "12px",
-                                lineHeight: "16px",
-                                color:
-                                  hoveredCutId === cut.cut_id && hoveredCutAction === "delete"
-                                    ? "#dc2626"
-                                    : "#666",
+                                padding: "12px 24px",
+                                fontSize: "16px",
+                                fontWeight: "600",
+                                borderRadius: "8px",
+                                background: "#10b981",
                               }}
-                              aria-label="Deletar timestamp"
                             >
-                              ✕
+                              ▶️ Continuar Pipeline
                             </button>
                           </div>
+                        )}
+
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          {suggestedCuts.map((cut) => (
+                            <div
+                              key={cut.cut_id}
+                              style={{ position: "relative", display: "inline-flex" }}
+                            >
+                              <button
+                                className="secondary"
+                                onClick={() => {
+                                  setSelectedSuggestedCutId(cut.cut_id);
+                                  if (videoRef.current) {
+                                    videoRef.current.currentTime = cut.start;
+                                    videoRef.current.play();
+                                  }
+                                }}
+                                style={{
+                                  padding: "8px 12px",
+                                  backgroundColor:
+                                    selectedSuggestedCutId === cut.cut_id ? "#0066cc" : "#e5e5e5",
+                                  color: selectedSuggestedCutId === cut.cut_id ? "white" : "black",
+                                  border: "none",
+                                  borderRadius: "8px",
+                                  cursor: "pointer",
+                                  fontSize: "0.85em",
+                                  fontWeight: selectedSuggestedCutId === cut.cut_id ? "600" : "400",
+                                  paddingRight: "56px",
+                                }}
+                              >
+                                {formatTimestamp(cut.start)} - {formatTimestamp(cut.end)}
+                              </button>
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  right: "6px",
+                                  top: "4px",
+                                  display: "flex",
+                                  gap: "4px",
+                                }}
+                              >
+                                <button
+                                  className="icon-btn"
+                                  onClick={() => {
+                                    const startMin = Math.floor(cut.start / 60);
+                                    const startSec = Math.round(cut.start % 60);
+                                    const endMin = Math.floor(cut.end / 60);
+                                    const endSec = Math.round(cut.end % 60);
+
+                                    setEditingCutId(cut.cut_id);
+                                    setEditCutStart(formatTimestamp(cut.start));
+                                    setEditCutEnd(formatTimestamp(cut.end));
+                                    setEditCutStartMinutes(String(startMin).padStart(2, "0"));
+                                    setEditCutStartSeconds(String(startSec).padStart(2, "0"));
+                                    setEditCutEndMinutes(String(endMin).padStart(2, "0"));
+                                    setEditCutEndSeconds(String(endSec).padStart(2, "0"));
+                                    setShowCutEditDialog(true);
+                                  }}
+                                  onMouseEnter={() => {
+                                    setHoveredCutId(cut.cut_id);
+                                    setHoveredCutAction("edit");
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredCutId(null);
+                                    setHoveredCutAction(null);
+                                  }}
+                                  style={{
+                                    width: "16px",
+                                    height: "16px",
+                                    borderRadius: "4px",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                    fontSize: "12px",
+                                    lineHeight: "16px",
+                                    color:
+                                      hoveredCutId === cut.cut_id && hoveredCutAction === "edit"
+                                        ? "#1d4ed8"
+                                        : "#666",
+                                  }}
+                                  aria-label="Editar timestamp"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  className="icon-btn"
+                                  onClick={async () => {
+                                    const newSuggestedCuts = suggestedCuts.filter(
+                                      (item) => item.cut_id !== cut.cut_id,
+                                    );
+                                    const newCuts = cuts.filter(
+                                      (item) => item.cut_id !== cut.cut_id,
+                                    );
+
+                                    setSuggestedCuts(newSuggestedCuts);
+                                    setCuts(newCuts);
+
+                                    if (activeVideo) {
+                                      try {
+                                        await updateCuts(activeVideo.job.job_id, newCuts);
+                                      } catch (error) {
+                                        console.error("Failed to update cuts:", error);
+                                      }
+                                    }
+
+                                    if (selectedSuggestedCutId === cut.cut_id) {
+                                      setSelectedSuggestedCutId(null);
+                                      videoRef.current?.pause();
+                                    }
+                                    setHoveredCutId(null);
+                                  }}
+                                  onMouseEnter={() => {
+                                    setHoveredCutId(cut.cut_id);
+                                    setHoveredCutAction("delete");
+                                  }}
+                                  onMouseLeave={() => {
+                                    setHoveredCutId(null);
+                                    setHoveredCutAction(null);
+                                  }}
+                                  style={{
+                                    width: "16px",
+                                    height: "16px",
+                                    borderRadius: "4px",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                    fontSize: "12px",
+                                    lineHeight: "16px",
+                                    color:
+                                      hoveredCutId === cut.cut_id && hoveredCutAction === "delete"
+                                        ? "#dc2626"
+                                        : "#666",
+                                  }}
+                                  aria-label="Deletar timestamp"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="loading-placeholder">
+                    <p>Aguardando download do vídeo...</p>
+                    <progress />
                   </div>
                 )}
-              </>
-            ) : (
-              <div className="loading-placeholder">
-                <p>Aguardando download do vídeo...</p>
-                <progress />
               </div>
-            )}
-          </div>
-        </section>
+            </>
+          )}
+        </div>
       )}
 
       {/* Transcription Format List */}
@@ -2167,8 +2215,16 @@ export default function App() {
           }}
         />
       )}
-      <CurationSection isLoadingCuts={isLoadingCuts} cuts={cuts} />
 
+      {/* 4. Curation Section */}
+      <CurationSection
+        isLoadingCuts={isLoadingCuts}
+        cuts={cuts}
+        isExpanded={expandCurationSection}
+        onToggle={() => setExpandCurationSection((current) => !current)}
+      />
+
+      {/* 5. Rendering Section */}
       <RenderingSection
         isLoadingRenderOutputs={isLoadingRenderOutputs}
         isRendering={isRendering}
@@ -2180,6 +2236,8 @@ export default function App() {
             setRenderOutputs((current) => current.filter((path) => !path.endsWith(fileName)));
           }
         }}
+        isExpanded={expandRenderingSection}
+        onToggle={() => setExpandRenderingSection((current) => !current)}
       />
 
       {/* LLM Config Dialog */}
