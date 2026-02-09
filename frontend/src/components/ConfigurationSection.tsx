@@ -64,7 +64,6 @@ export function ConfigurationSection({
           </button>
           <p className="config-card-description">Define parâmetros de renderização de vídeo.</p>
         </div>
-
       </div>
     </section>
   );
