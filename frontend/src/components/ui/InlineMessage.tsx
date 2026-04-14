@@ -1,0 +1,73 @@
+import type { HTMLAttributes, ReactNode } from "react";
+
+export type InlineMessageTone = "info" | "success" | "warning" | "error";
+
+export interface InlineMessageProps extends HTMLAttributes<HTMLDivElement> {
+  tone?: InlineMessageTone;
+  title?: ReactNode;
+  children: ReactNode;
+  action?: ReactNode;
+  dismissLabel?: string;
+  onDismiss?: () => void;
+}
+
+function toneIcon(tone: InlineMessageTone): string {
+  switch (tone) {
+    case "success":
+      return "✓";
+    case "warning":
+      return "!";
+    case "error":
+      return "⨯";
+    case "info":
+    default:
+      return "i";
+  }
+}
+
+function toneRole(tone: InlineMessageTone): "alert" | "status" {
+  return tone === "error" || tone === "warning" ? "alert" : "status";
+}
+
+export function InlineMessage({
+  tone = "info",
+  title,
+  children,
+  action,
+  dismissLabel = "Fechar mensagem",
+  onDismiss,
+  className = "",
+  ...rest
+}: InlineMessageProps) {
+  return (
+    <div
+      className={["ui-inline-message", `ui-inline-message--${tone}`, className]
+        .filter(Boolean)
+        .join(" ")}
+      role={toneRole(tone)}
+      aria-live={toneRole(tone) === "alert" ? "assertive" : "polite"}
+      {...rest}
+    >
+      <span className="ui-inline-message__icon" aria-hidden="true">
+        {toneIcon(tone)}
+      </span>
+
+      <div className="ui-inline-message__content">
+        {title ? <p className="ui-inline-message__title">{title}</p> : null}
+        <p className="ui-inline-message__text">{children}</p>
+        {action ? <div className="ui-inline-message__actions">{action}</div> : null}
+      </div>
+
+      {onDismiss ? (
+        <button
+          type="button"
+          className="ui-inline-message-dismiss"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
+  );
+}
