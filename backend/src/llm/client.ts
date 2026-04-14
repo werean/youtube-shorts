@@ -73,7 +73,7 @@ export class OllamaClient {
         throw new Error(`Ollama HTTP error: ${response.status} ${errorText}`);
       }
 
-      return await response.json();
+      return (await response.json()) as ChatResponse;
     } catch (error: any) {
       if (error.name === "AbortError") {
         throw new Error("Ollama request timed out");

@@ -15,26 +15,67 @@ import {
 } from "../core/settings";
 import * as metadata from "./metadata";
 
+type CachedSourceVideoEntry = {
+  path: string;
+  expiresAt: number;
+};
+
+const SOURCE_VIDEO_CACHE_TTL_MS = resolveCacheTtl("SOURCE_VIDEO_CACHE_TTL_MS", 5000);
+const sourceVideoCache = new Map<string, CachedSourceVideoEntry>();
+const ensuredDirs = new Set<string>();
+
+function resolveCacheTtl(envName: string, fallbackMs: number): number {
+  const raw = process.env[envName];
+  if (!raw) return fallbackMs;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
+  return parsed;
+}
+
+function ensureDir(dirPath: string): void {
+  if (ensuredDirs.has(dirPath)) {
+    return;
+  }
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+  ensuredDirs.add(dirPath);
+}
+
+function setCachedSourceVideo(jobId: string, filePath: string): void {
+  sourceVideoCache.set(jobId, {
+    path: filePath,
+    expiresAt: Date.now() + SOURCE_VIDEO_CACHE_TTL_MS,
+  });
+}
+
+export function invalidateSourceVideoCache(jobId?: string): void {
+  if (jobId) {
+    sourceVideoCache.delete(jobId);
+    return;
+  }
+  sourceVideoCache.clear();
+}
+
+function resolveVideoName(jobId: string): string {
+  try {
+    const job = metadata.loadJob(jobId);
+    return job.video_name || jobId;
+  } catch {
+    return jobId;
+  }
+}
+
 export function ensureJobDir(jobId: string): string {
   const dir = jobDir(jobId);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDir(dir);
   return dir;
 }
 
 export function sourceVideoOutputTemplate(jobId: string): string {
-  let videoName: string | undefined;
-  try {
-    const job = metadata.loadJob(jobId);
-    videoName = job.video_name || jobId;
-  } catch (error) {
-    videoName = jobId;
-  }
+  const videoName = resolveVideoName(jobId);
   const videoDir = getVideoDir(jobId, videoName);
-  if (!fs.existsSync(videoDir)) {
-    fs.mkdirSync(videoDir, { recursive: true });
-  }
+  ensureDir(videoDir);
   return path.join(videoDir, "video.%(ext)s");
 }
 
@@ -45,9 +86,7 @@ export function sourceVideoInfoPath(jobId: string): string {
 export function ensureVideosDir(): string {
   const settings = loadSettings();
   const dir = settings.media.base_dir;
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDir(dir);
   return dir;
 }
 
@@ -57,9 +96,7 @@ export function ensureVideosDir(): string {
  */
 export function ensureShortsVideoDir(videoName: string): string {
   const dir = path.join(getVideoDir(getVideoFolder(videoName), videoName), "shorts");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDir(dir);
   return dir;
 }
 
@@ -68,13 +105,8 @@ export function ensureShortsVideoDir(videoName: string): string {
  * This looks up the job to get its video_name
  */
 export function ensureShortsJobDir(jobId: string): string {
-  try {
-    const job = metadata.loadJob(jobId);
-    const videoName = job.video_name || jobId;
-    return getShortsDir(jobId, videoName);
-  } catch (error) {
-    return getShortsDir(jobId, jobId);
-  }
+  const videoName = resolveVideoName(jobId);
+  return getShortsDir(jobId, videoName);
 }
 
 /**
@@ -90,24 +122,13 @@ export function ensureTranscriptionsVideoDir(videoName: string): string {
  * This looks up the job to get its video_name
  */
 export function ensureTranscriptionsJobDir(jobId: string): string {
-  try {
-    const job = metadata.loadJob(jobId);
-    const videoName = job.video_name || jobId;
-    return getTranscriptionsDir(jobId, videoName);
-  } catch (error) {
-    return getTranscriptionsDir(jobId, jobId);
-  }
+  const videoName = resolveVideoName(jobId);
+  return getTranscriptionsDir(jobId, videoName);
 }
 
 export function removeTranscriptionsJobDir(jobId: string): string {
-  let dir: string;
-  try {
-    const job = metadata.loadJob(jobId);
-    const videoName = job.video_name || jobId;
-    dir = path.join(getVideoDir(jobId, videoName), "transcrições");
-  } catch (error) {
-    dir = path.join(getVideoDir(jobId), "transcrições");
-  }
+  const videoName = resolveVideoName(jobId);
+  const dir = path.join(getVideoDir(jobId, videoName), "transcrições");
 
   if (fs.existsSync(dir)) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -118,82 +139,78 @@ export function removeTranscriptionsJobDir(jobId: string): string {
 
 export function sourceVideoPathForJob(jobId: string, extension: string): string {
   const ext = extension.startsWith(".") ? extension : `.${extension}`;
-  try {
-    const job = metadata.loadJob(jobId);
-    const filePath = getVideoFilePath(jobId, job.video_name || jobId, ext);
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    return filePath;
-  } catch (error) {
-    const filePath = getVideoFilePath(jobId, jobId, ext);
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    return filePath;
-  }
+  const videoName = resolveVideoName(jobId);
+  const filePath = getVideoFilePath(jobId, videoName, ext);
+  ensureDir(path.dirname(filePath));
+  return filePath;
 }
 
 export function findSourceVideo(jobId: string): string | null {
-  console.log(`[files] 🔍 Procurando vídeo para job: ${jobId}`);
+  const cached = sourceVideoCache.get(jobId);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (fs.existsSync(cached.path)) {
+      return cached.path;
+    }
+    sourceVideoCache.delete(jobId);
+  }
+
+  let videoName = jobId;
 
   try {
     const job = metadata.loadJob(jobId);
+    videoName = job.video_name || jobId;
+
     if (job.source_video_path && fs.existsSync(job.source_video_path)) {
-      console.log(`[files]   ✓ Vídeo encontrado via metadata: ${job.source_video_path}`);
+      setCachedSourceVideo(jobId, job.source_video_path);
       return job.source_video_path;
     }
-  } catch (error) {
-    console.log(`[files]   ⚠️ Metadata não encontrada para job ${jobId}`);
+  } catch {
+    // Ignore missing metadata and continue with fallbacks.
   }
 
-  try {
-    const job = metadata.loadJob(jobId);
-    const videoDir = getVideoDir(jobId, job.video_name || jobId);
-    if (fs.existsSync(videoDir)) {
-      const filesInDir = fs.readdirSync(videoDir);
-      const videoFile = filesInDir.find((file) => file.startsWith("video."));
-      if (videoFile) {
-        const filePath = path.join(videoDir, videoFile);
-        console.log(`[files]   ✓ Vídeo encontrado na pasta do vídeo: ${filePath}`);
-        return filePath;
-      }
-    }
-  } catch (error) {
-    // ignore
-  }
-
-  const baseDir = ensureVideosDir();
-  const filesInBase = fs.existsSync(baseDir) ? fs.readdirSync(baseDir) : [];
-  for (const file of filesInBase) {
-    if (!file.startsWith(`${jobId}.`)) continue;
-    const filePath = path.join(baseDir, file);
-    if (fs.statSync(filePath).isFile()) {
-      console.log(`[files]   ✓ Vídeo encontrado em pasta configurada: ${filePath}`);
+  const videoDir = getVideoDir(jobId, videoName);
+  if (fs.existsSync(videoDir)) {
+    const filesInDir = fs.readdirSync(videoDir, { withFileTypes: true });
+    const videoFile = filesInDir.find((entry) => entry.isFile() && entry.name.startsWith("video."));
+    if (videoFile) {
+      const filePath = path.join(videoDir, videoFile.name);
+      setCachedSourceVideo(jobId, filePath);
       return filePath;
     }
   }
 
-  // Compatibilidade com estrutura antiga
+  const baseDir = ensureVideosDir();
+  if (fs.existsSync(baseDir)) {
+    const filesInBase = fs.readdirSync(baseDir, { withFileTypes: true });
+    for (const file of filesInBase) {
+      if (!file.isFile() || !file.name.startsWith(`${jobId}.`)) {
+        continue;
+      }
+      const filePath = path.join(baseDir, file.name);
+      setCachedSourceVideo(jobId, filePath);
+      return filePath;
+    }
+  }
+
+  // Compatibility with legacy structure.
   const legacyJobDir = jobDir(jobId);
   if (fs.existsSync(legacyJobDir)) {
-    const files = fs.readdirSync(legacyJobDir);
+    const files = fs.readdirSync(legacyJobDir, { withFileTypes: true });
     for (const file of files) {
-      const filePath = path.join(legacyJobDir, file);
-      if (fs.statSync(filePath).isFile()) {
-        const ext = path.extname(file);
-        const stem = path.basename(file, ext);
-        if (stem === "source" && ext !== ".json") {
-          console.log(`[files]   ✓ Vídeo encontrado em data/jobs: ${filePath}`);
-          return filePath;
-        }
+      if (!file.isFile()) {
+        continue;
+      }
+
+      const ext = path.extname(file.name);
+      const stem = path.basename(file.name, ext);
+      if (stem === "source" && ext !== ".json") {
+        const filePath = path.join(legacyJobDir, file.name);
+        setCachedSourceVideo(jobId, filePath);
+        return filePath;
       }
     }
   }
 
-  console.log(`[files]   ✗ Vídeo não encontrado em nenhum local`);
   return null;
 }
 
@@ -228,18 +245,16 @@ export function cutsPath(jobId: string): string {
 
 export function hasTranscription(jobId: string): boolean {
   try {
-    const segmentsPath = transcriptionPath(jobId);
-    return fs.existsSync(segmentsPath);
-  } catch (error) {
+    return fs.existsSync(transcriptionPath(jobId));
+  } catch {
     return false;
   }
 }
 
 export function hasAnalysis(jobId: string): boolean {
   try {
-    const cutsFilePath = cutsPath(jobId);
-    return fs.existsSync(cutsFilePath);
-  } catch (error) {
+    return fs.existsSync(cutsPath(jobId));
+  } catch {
     return false;
   }
 }
@@ -299,14 +314,14 @@ export function deleteRenderOutputs(jobId: string): void {
 
 /**
  * Rename a video and all associated folders (shorts, transcriptions)
- * This maintains the association between the video and its outputs
+ * This maintains the association between the video and its outputs.
  */
 export function renameVideo(jobId: string, newVideoName: string): boolean {
   try {
     const job = metadata.loadJob(jobId);
     const oldVideoName = job.video_name || jobId;
 
-    // If name is the same, no-op
+    // If name is the same, no-op.
     if (oldVideoName === newVideoName) {
       return true;
     }
@@ -324,10 +339,15 @@ export function renameVideo(jobId: string, newVideoName: string): boolean {
       job.source_video_path = getVideoFilePath(jobId, newVideoName, ext);
     }
 
-    // Update job metadata with new video name
     job.video_name = newVideoName;
     job.updated_at = new Date().toISOString();
     metadata.saveJob(job);
+
+    if (job.source_video_path) {
+      setCachedSourceVideo(jobId, job.source_video_path);
+    } else {
+      invalidateSourceVideoCache(jobId);
+    }
 
     return true;
   } catch (error) {

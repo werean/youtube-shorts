@@ -4,6 +4,7 @@
 
 import { config } from "../core/config";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
+import type { FFmpegToolConfig } from "../core/toolConfigs";
 
 export function buildVerticalFilter(width: number, height: number): string {
   return (
@@ -36,11 +37,11 @@ export function buildVerticalNvencCommand(params: {
   outputPath: string;
   start: number;
   end: number;
+  ffmpegConfig?: FFmpegToolConfig;
 }): string[] {
   const duration = Math.max(0, params.end - params.start);
   const filterGraph = buildVerticalFilter(config.RENDER_WIDTH, config.RENDER_HEIGHT);
-  const toolConfigs = loadActiveToolConfigs();
-  const ffmpeg = toolConfigs.ffmpeg;
+  const ffmpeg = params.ffmpegConfig || loadActiveToolConfigs().ffmpeg;
   const videoCodec = ffmpeg.video_codec || config.RENDER_VIDEO_CODEC;
   const audioCodec = ffmpeg.audio_codec || config.RENDER_AUDIO_CODEC;
   const videoPreset = ffmpeg.video_preset || config.RENDER_VIDEO_PRESET;

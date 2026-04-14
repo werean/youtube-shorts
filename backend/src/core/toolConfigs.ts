@@ -72,10 +72,82 @@ export interface ToolConfigs {
 const DEFAULT_CONFIGS_FILE = path.join(dataDir(), "default_configs.json");
 const CUSTOM_CONFIGS_FILE = path.join(dataDir(), "custom_settings.json");
 
+type CacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const TOOL_CONFIGS_CACHE_TTL_MS = resolveCacheTtl("TOOL_CONFIGS_CACHE_TTL_MS", 3000);
+const ensuredDirs = new Set<string>();
+
+let defaultConfigsCache: CacheEntry<ToolConfigs> | null = null;
+let customConfigsCache: CacheEntry<ToolConfigs | null> | null = null;
+let activeConfigsCache: CacheEntry<{ source: "default" | "custom"; configs: ToolConfigs }> | null =
+  null;
+
+function resolveCacheTtl(envName: string, fallbackMs: number): number {
+  const raw = process.env[envName];
+  if (!raw) return fallbackMs;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
+  return parsed;
+}
+
+function isCacheValid<T>(entry: CacheEntry<T> | null): entry is CacheEntry<T> {
+  return Boolean(entry && entry.expiresAt > Date.now());
+}
+
+function cloneToolConfigs(configs: ToolConfigs): ToolConfigs {
+  return {
+    whisper: {
+      ...configs.whisper,
+      output_format: Array.isArray(configs.whisper.output_format)
+        ? [...configs.whisper.output_format]
+        : configs.whisper.output_format,
+    },
+    ffmpeg: { ...configs.ffmpeg },
+    llm: { ...configs.llm },
+  };
+}
+
+function setDefaultConfigsCache(configs: ToolConfigs): void {
+  defaultConfigsCache = {
+    value: cloneToolConfigs(configs),
+    expiresAt: Date.now() + TOOL_CONFIGS_CACHE_TTL_MS,
+  };
+}
+
+function setCustomConfigsCache(configs: ToolConfigs | null): void {
+  customConfigsCache = {
+    value: configs ? cloneToolConfigs(configs) : null,
+    expiresAt: Date.now() + TOOL_CONFIGS_CACHE_TTL_MS,
+  };
+}
+
+function setActiveConfigsCache(source: "default" | "custom", configs: ToolConfigs): void {
+  activeConfigsCache = {
+    value: {
+      source,
+      configs: cloneToolConfigs(configs),
+    },
+    expiresAt: Date.now() + TOOL_CONFIGS_CACHE_TTL_MS,
+  };
+}
+
+export function invalidateToolConfigsCache(): void {
+  defaultConfigsCache = null;
+  customConfigsCache = null;
+  activeConfigsCache = null;
+}
+
 function ensureDir(dirPath: string): void {
+  if (ensuredDirs.has(dirPath)) {
+    return;
+  }
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
+  ensuredDirs.add(dirPath);
 }
 
 function stableSort(value: any): any {
@@ -257,29 +329,61 @@ function readJsonFile(filePath: string): ToolConfigs | null {
 }
 
 export function loadDefaultToolConfigs(): ToolConfigs {
+  if (isCacheValid(defaultConfigsCache)) {
+    return cloneToolConfigs(defaultConfigsCache.value);
+  }
+
   ensureDefaultConfigsFile();
   const parsed = readJsonFile(DEFAULT_CONFIGS_FILE);
   if (!parsed) {
     const defaults = defaultToolConfigs();
     fs.writeFileSync(DEFAULT_CONFIGS_FILE, JSON.stringify(defaults, null, 2), "utf-8");
-    return defaults;
+    setDefaultConfigsCache(defaults);
+    return cloneToolConfigs(defaults);
   }
-  return parsed;
+
+  setDefaultConfigsCache(parsed);
+  return cloneToolConfigs(parsed);
 }
 
 export function loadCustomToolConfigs(): ToolConfigs | null {
-  if (!fs.existsSync(CUSTOM_CONFIGS_FILE)) return null;
-  return readJsonFile(CUSTOM_CONFIGS_FILE);
+  if (isCacheValid(customConfigsCache)) {
+    return customConfigsCache.value ? cloneToolConfigs(customConfigsCache.value) : null;
+  }
+
+  if (!fs.existsSync(CUSTOM_CONFIGS_FILE)) {
+    setCustomConfigsCache(null);
+    return null;
+  }
+
+  const parsed = readJsonFile(CUSTOM_CONFIGS_FILE);
+  setCustomConfigsCache(parsed);
+  return parsed ? cloneToolConfigs(parsed) : null;
 }
 
 export function toolConfigsSource(): "default" | "custom" {
-  return fs.existsSync(CUSTOM_CONFIGS_FILE) ? "custom" : "default";
+  if (isCacheValid(activeConfigsCache)) {
+    return activeConfigsCache.value.source;
+  }
+
+  const custom = loadCustomToolConfigs();
+  return custom ? "custom" : "default";
 }
 
 export function loadActiveToolConfigs(): ToolConfigs {
+  if (isCacheValid(activeConfigsCache)) {
+    return cloneToolConfigs(activeConfigsCache.value.configs);
+  }
+
   const custom = loadCustomToolConfigs();
-  if (custom) return custom;
-  return loadDefaultToolConfigs();
+  if (custom) {
+    setActiveConfigsCache("custom", custom);
+    return cloneToolConfigs(custom);
+  }
+
+  const defaults = loadDefaultToolConfigs();
+  setActiveConfigsCache("default", defaults);
+  return cloneToolConfigs(defaults);
 }
 
 function mergeWithDefaults(partial: Partial<ToolConfigs>): ToolConfigs {
@@ -310,11 +414,18 @@ export function updateToolConfigs(partial: Partial<ToolConfigs>): ToolConfigs {
     if (fs.existsSync(CUSTOM_CONFIGS_FILE)) {
       fs.unlinkSync(CUSTOM_CONFIGS_FILE);
     }
-    return defaults;
+    invalidateToolConfigsCache();
+    setDefaultConfigsCache(defaults);
+    setCustomConfigsCache(null);
+    setActiveConfigsCache("default", defaults);
+    return cloneToolConfigs(defaults);
   }
 
   fs.writeFileSync(CUSTOM_CONFIGS_FILE, JSON.stringify(fullNext, null, 2), "utf-8");
-  return fullNext;
+  invalidateToolConfigsCache();
+  setCustomConfigsCache(fullNext);
+  setActiveConfigsCache("custom", fullNext);
+  return cloneToolConfigs(fullNext);
 }
 
 export function resetAllToolConfigs(): ToolConfigs {
@@ -322,7 +433,11 @@ export function resetAllToolConfigs(): ToolConfigs {
   if (fs.existsSync(CUSTOM_CONFIGS_FILE)) {
     fs.unlinkSync(CUSTOM_CONFIGS_FILE);
   }
-  return defaults;
+  invalidateToolConfigsCache();
+  setDefaultConfigsCache(defaults);
+  setCustomConfigsCache(null);
+  setActiveConfigsCache("default", defaults);
+  return cloneToolConfigs(defaults);
 }
 
 export function resetToolConfigSection(section: "whisper" | "ffmpeg" | "llm"): ToolConfigs {
@@ -339,16 +454,26 @@ export function resetToolConfigSection(section: "whisper" | "ffmpeg" | "llm"): T
     if (fs.existsSync(CUSTOM_CONFIGS_FILE)) {
       fs.unlinkSync(CUSTOM_CONFIGS_FILE);
     }
-    return defaults;
+    invalidateToolConfigsCache();
+    setDefaultConfigsCache(defaults);
+    setCustomConfigsCache(null);
+    setActiveConfigsCache("default", defaults);
+    return cloneToolConfigs(defaults);
   }
 
   const fullNext = mergeWithDefaults(next);
   fs.writeFileSync(CUSTOM_CONFIGS_FILE, JSON.stringify(fullNext, null, 2), "utf-8");
-  return fullNext;
+  invalidateToolConfigsCache();
+  setCustomConfigsCache(fullNext);
+  setActiveConfigsCache("custom", fullNext);
+  return cloneToolConfigs(fullNext);
 }
 
 export function importToolConfigs(input: Partial<ToolConfigs>): ToolConfigs {
   const normalized = mergeWithDefaults(input);
   fs.writeFileSync(CUSTOM_CONFIGS_FILE, JSON.stringify(normalized, null, 2), "utf-8");
-  return normalized;
+  invalidateToolConfigsCache();
+  setCustomConfigsCache(normalized);
+  setActiveConfigsCache("custom", normalized);
+  return cloneToolConfigs(normalized);
 }

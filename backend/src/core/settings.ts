@@ -31,6 +31,44 @@ export interface AppSettings {
 }
 
 const SETTINGS_FILE = path.join(dataDir(), "settings.json");
+const SETTINGS_CACHE_TTL_MS = resolveCacheTtl("SETTINGS_CACHE_TTL_MS", 3000);
+const ensuredDirs = new Set<string>();
+
+let cachedSettings: {
+  value: AppSettings;
+  expiresAt: number;
+} | null = null;
+
+function resolveCacheTtl(envName: string, fallbackMs: number): number {
+  const raw = process.env[envName];
+  if (!raw) return fallbackMs;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
+  return parsed;
+}
+
+function cloneSettings(settings: AppSettings): AppSettings {
+  return {
+    media: { ...settings.media },
+    preferences: { ...settings.preferences },
+    whisper: {
+      device: settings.whisper.device,
+      formats: [...settings.whisper.formats],
+    },
+    llm: { ...settings.llm },
+  };
+}
+
+function setCachedSettings(settings: AppSettings): void {
+  cachedSettings = {
+    value: cloneSettings(settings),
+    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+  };
+}
+
+export function invalidateSettingsCache(): void {
+  cachedSettings = null;
+}
 
 function getDefaultBaseDir(): string {
   const downloads = path.join(homedir(), "Downloads");
@@ -59,9 +97,13 @@ function defaultSettings(): AppSettings {
 }
 
 function ensureDir(dirPath: string): void {
+  if (ensuredDirs.has(dirPath)) {
+    return;
+  }
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
+  ensuredDirs.add(dirPath);
 }
 
 function ensureSettingsFile(): void {
@@ -74,6 +116,10 @@ function ensureSettingsFile(): void {
 }
 
 export function loadSettings(): AppSettings {
+  if (cachedSettings && cachedSettings.expiresAt > Date.now()) {
+    return cloneSettings(cachedSettings.value);
+  }
+
   ensureSettingsFile();
   const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
   try {
@@ -114,12 +160,14 @@ export function loadSettings(): AppSettings {
       },
     };
     ensureDir(settings.media.base_dir);
-    return settings;
+    setCachedSettings(settings);
+    return cloneSettings(settings);
   } catch (error) {
     const defaults = defaultSettings();
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(defaults, null, 2), "utf-8");
     ensureDir(defaults.media.base_dir);
-    return defaults;
+    setCachedSettings(defaults);
+    return cloneSettings(defaults);
   }
 }
 
@@ -127,7 +175,8 @@ export function saveSettings(next: AppSettings): AppSettings {
   ensureDir(path.dirname(SETTINGS_FILE));
   ensureDir(next.media.base_dir);
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2), "utf-8");
-  return next;
+  setCachedSettings(next);
+  return cloneSettings(next);
 }
 
 export function updateSettings(partial: Partial<AppSettings>): AppSettings {

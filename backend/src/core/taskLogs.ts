@@ -21,9 +21,16 @@ function getOrCreate(jobId: string): TaskLogStore {
   return created;
 }
 
-function trimLogs(lines: string[]): string[] {
-  if (lines.length <= MAX_LOG_LINES) return lines;
-  return lines.slice(lines.length - MAX_LOG_LINES);
+function appendAndTrim(target: string[], lines: string[]): void {
+  if (lines.length === 0) {
+    return;
+  }
+
+  target.push(...lines);
+  const overflow = target.length - MAX_LOG_LINES;
+  if (overflow > 0) {
+    target.splice(0, overflow);
+  }
 }
 
 export function clearTaskLogs(jobId: string, task: TaskName): void {
@@ -33,13 +40,12 @@ export function clearTaskLogs(jobId: string, task: TaskName): void {
 
 export function appendTaskLog(jobId: string, task: TaskName, line: string): void {
   const store = getOrCreate(jobId);
-  store[task] = trimLogs([...store[task], line]);
+  appendAndTrim(store[task], [line]);
 }
 
 export function appendTaskLogs(jobId: string, task: TaskName, lines: string[]): void {
-  if (lines.length === 0) return;
   const store = getOrCreate(jobId);
-  store[task] = trimLogs([...store[task], ...lines]);
+  appendAndTrim(store[task], lines);
 }
 
 export function getTaskLogs(jobId: string, task: TaskName): string[] {

@@ -210,6 +210,9 @@ const videosRoutes: FastifyPluginAsync = async (fastify) => {
       fs.rmSync(dataPath, { recursive: true, force: true });
     }
 
+    metadata.invalidateJobCache(job_id);
+    files.invalidateSourceVideoCache(job_id);
+
     return { ok: true, job_id };
   });
 };
