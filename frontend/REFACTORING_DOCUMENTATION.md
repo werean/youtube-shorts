@@ -15,6 +15,13 @@ O projeto já estava bem estruturado com:
 
 ## 🆕 O que foi adicionado na refatoração
 
+### 🧭 **Reconstrução arquitetural (atualização)**
+
+- O estado de interface foi consolidado em `useUIState` e passou a ser consumido diretamente em `App.tsx`.
+- O módulo de componentes `ui/` foi reorganizado em camadas por domínio (`foundation`, `forms`, `feedback`, `actions`, `surfaces`, `overlays`, `shared`).
+- Arquivos antigos no nível raiz de `ui/` foram mantidos como re-exports para preservar compatibilidade sem quebrar imports existentes.
+- Lógica de foco do modal foi extraída para utilitário dedicado (`overlays/Modal/focusManagement.ts`) para reduzir acoplamento.
+
 ### 📦 **Utilitários** (`/utils`)
 
 #### `formatters.ts`

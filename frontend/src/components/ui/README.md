@@ -4,6 +4,53 @@ This folder provides reusable, accessible React primitives for production UIs.
 
 ## Component Architecture
 
+Folder layout
+
+```text
+ui/
+	actions/
+		Button/
+			Button.tsx
+	feedback/
+		EmptyState/
+			EmptyState.tsx
+		InlineMessage/
+			InlineMessage.tsx
+	forms/
+		TextField/
+			TextField.tsx
+	foundation/
+		LoadingOverlay/
+			LoadingOverlay.tsx
+		Skeleton/
+			Skeleton.tsx
+		Spinner/
+			Spinner.tsx
+		VisuallyHidden/
+			VisuallyHidden.tsx
+	overlays/
+		Modal/
+			Modal.tsx
+			focusManagement.ts
+	shared/
+		classNames.ts
+	surfaces/
+		Card/
+			Card.tsx
+	Button.tsx            (compatibility re-export)
+	Card.tsx              (compatibility re-export)
+	EmptyState.tsx        (compatibility re-export)
+	InlineMessage.tsx     (compatibility re-export)
+	LoadingOverlay.tsx    (compatibility re-export)
+	Modal.tsx             (compatibility re-export)
+	Skeleton.tsx          (compatibility re-export)
+	Spinner.tsx           (compatibility re-export)
+	TextField.tsx         (compatibility re-export)
+	VisuallyHidden.tsx    (compatibility re-export)
+	ComponentShowcase.tsx
+	index.ts
+```
+
 Layer 1: Foundation
 
 - `VisuallyHidden`: screen-reader-only content.
@@ -25,6 +72,11 @@ Layer 4: Consumption
 
 - `index.ts`: single import surface with side-effect style import.
 - `ComponentShowcase.tsx`: practical examples and edge-case coverage.
+
+Compatibility contract
+
+- Existing imports from root files (for example, `./Button`) are preserved through thin re-export files.
+- Internal implementations are now isolated by domain folder, reducing coupling and making incremental refactors safer.
 
 ## Prop Design (summary)
 

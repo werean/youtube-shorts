@@ -43,6 +43,7 @@ export function useUIState() {
   // Config dialogs
   const [showLLMConfigDialog, setShowLLMConfigDialog] = useState(false);
   const [showWhisperConfigDialog, setShowWhisperConfigDialog] = useState(false);
+  const [showFFmpegConfigDialog, setShowFFmpegConfigDialog] = useState(false);
   const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
   const [showInstallationDialog, setShowInstallationDialog] = useState(false);
   const [showConfigureAppDialog, setShowConfigureAppDialog] = useState(false);
@@ -69,6 +70,7 @@ export function useUIState() {
     setShowCutEditDialog(false);
     setShowLLMConfigDialog(false);
     setShowWhisperConfigDialog(false);
+    setShowFFmpegConfigDialog(false);
     setShowDependenciesDialog(false);
     setShowInstallationDialog(false);
     setShowConfigureAppDialog(false);
@@ -140,11 +142,13 @@ export function useUIState() {
     // Config
     showLLMConfigDialog,
     showWhisperConfigDialog,
+    showFFmpegConfigDialog,
     showDependenciesDialog,
     showInstallationDialog,
     showConfigureAppDialog,
     setShowLLMConfigDialog,
     setShowWhisperConfigDialog,
+    setShowFFmpegConfigDialog,
     setShowDependenciesDialog,
     setShowInstallationDialog,
     setShowConfigureAppDialog,

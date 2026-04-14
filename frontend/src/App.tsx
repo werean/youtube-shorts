@@ -3,6 +3,7 @@ import type { Cut, Job, Segment, VideoRecord } from "./types";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
+import { useUIState } from "./hooks";
 import {
   analyzeJob,
   apiBaseUrl,
@@ -85,10 +86,82 @@ const initialAction: ActionState = { busy: false };
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const toolConfigsInputRef = useRef<HTMLInputElement>(null);
-  const [youtubeUrl, setYoutubeUrl] = useState("");
-  const [uploadMode, setUploadMode] = useState<"url" | "file">("url");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const {
+    uploadMode,
+    youtubeUrl,
+    selectedFiles,
+    isDraggingFile,
+    setUploadMode,
+    setYoutubeUrl,
+    setSelectedFiles,
+    setIsDraggingFile,
+    videoView,
+    menuOpenId,
+    setVideoView,
+    setMenuOpenId,
+    showTranscriptionFormatListDialog,
+    showTranscriptionContentDialog,
+    showTranscriptionDeleteDialog,
+    selectedTranscriptionFormat,
+    pendingDeleteFormat,
+    setShowTranscriptionFormatListDialog,
+    setShowTranscriptionContentDialog,
+    setShowTranscriptionDeleteDialog,
+    setSelectedTranscriptionFormat,
+    setPendingDeleteFormat,
+    showBlocksDialog,
+    showAiResponseDialog,
+    showAiResponseOnAnalyze,
+    showRegenerateAnalyzeDialog,
+    setShowBlocksDialog,
+    setShowAiResponseDialog,
+    setShowAiResponseOnAnalyze,
+    setShowRegenerateAnalyzeDialog,
+    showCutEditDialog,
+    editingCutId,
+    editCutStart,
+    editCutEnd,
+    editCutStartMinutes,
+    editCutStartSeconds,
+    editCutEndMinutes,
+    editCutEndSeconds,
+    hoveredCutId,
+    hoveredCutAction,
+    setShowCutEditDialog,
+    setEditingCutId,
+    setEditCutStart,
+    setEditCutEnd,
+    setEditCutStartMinutes,
+    setEditCutStartSeconds,
+    setEditCutEndMinutes,
+    setEditCutEndSeconds,
+    setHoveredCutId,
+    setHoveredCutAction,
+    showLLMConfigDialog,
+    showWhisperConfigDialog,
+    showFFmpegConfigDialog,
+    showDependenciesDialog,
+    showInstallationDialog,
+    showConfigureAppDialog,
+    setShowLLMConfigDialog,
+    setShowWhisperConfigDialog,
+    setShowFFmpegConfigDialog,
+    setShowDependenciesDialog,
+    setShowInstallationDialog,
+    setShowConfigureAppDialog,
+    renameVideoId,
+    renameVideoNewName,
+    showMoveUploadDialog,
+    dontAskMoveUpload,
+    setRenameVideoId,
+    setRenameVideoNewName,
+    setShowMoveUploadDialog,
+    setDontAskMoveUpload,
+    selectedDependencyForInstall,
+    installingDependency,
+    setSelectedDependencyForInstall,
+    setInstallingDependency,
+  } = useUIState();
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [archivedVideos, setArchivedVideos] = useState<VideoItem[]>([]);
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
@@ -110,46 +183,14 @@ export default function App() {
   const taskLogsContainerRef = useRef<HTMLDivElement>(null);
   const ingestLogsContainerRef = useRef<HTMLDivElement>(null);
   const [action, setAction] = useState<ActionState>(initialAction);
-  const [showTranscriptionFormatListDialog, setShowTranscriptionFormatListDialog] = useState(false);
-  const [showTranscriptionContentDialog, setShowTranscriptionContentDialog] = useState(false);
-  const [showTranscriptionDeleteDialog, setShowTranscriptionDeleteDialog] = useState(false);
-  const [selectedTranscriptionFormat, setSelectedTranscriptionFormat] = useState<
-    "text" | "vtt" | "segments" | null
-  >(null);
-  const [pendingDeleteFormat, setPendingDeleteFormat] = useState<
-    "text" | "vtt" | "segments" | null
-  >(null);
-  const [showBlocksDialog, setShowBlocksDialog] = useState(false);
   const [blocks, setBlocks] = useState<Record<string, unknown>[]>([]);
-  const [showAiResponseDialog, setShowAiResponseDialog] = useState(false);
-  const [showAiResponseOnAnalyze, setShowAiResponseOnAnalyze] = useState(false);
   const [aiResponseRaw, setAiResponseRaw] = useState<string | null>(null);
-  const [showRegenerateAnalyzeDialog, setShowRegenerateAnalyzeDialog] = useState(false);
   const [keepCutIds, setKeepCutIds] = useState<string[]>([]);
-  const [hoveredCutId, setHoveredCutId] = useState<string | null>(null);
-  const [hoveredCutAction, setHoveredCutAction] = useState<"edit" | "delete" | null>(null);
-  const [showCutEditDialog, setShowCutEditDialog] = useState(false);
-  const [editingCutId, setEditingCutId] = useState<string | null>(null);
-  const [editCutStart, setEditCutStart] = useState<string>("");
-  const [editCutEnd, setEditCutEnd] = useState<string>("");
-  const [editCutStartMinutes, setEditCutStartMinutes] = useState<string>("");
-  const [editCutStartSeconds, setEditCutStartSeconds] = useState<string>("");
-  const [editCutEndMinutes, setEditCutEndMinutes] = useState<string>("");
-  const [editCutEndSeconds, setEditCutEndSeconds] = useState<string>("");
   const [showAddManualCutDialog, setShowAddManualCutDialog] = useState(false);
   const [newCutStartMinutes, setNewCutStartMinutes] = useState<string>("");
   const [newCutStartSeconds, setNewCutStartSeconds] = useState<string>("");
   const [newCutEndMinutes, setNewCutEndMinutes] = useState<string>("");
   const [newCutEndSeconds, setNewCutEndSeconds] = useState<string>("");
-  const [videoView, setVideoView] = useState<"active" | "archived">("active");
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const [renameVideoId, setRenameVideoId] = useState<string | null>(null);
-  const [renameVideoNewName, setRenameVideoNewName] = useState<string>("");
-  const [showLLMConfigDialog, setShowLLMConfigDialog] = useState(false);
-  const [showWhisperConfigDialog, setShowWhisperConfigDialog] = useState(false);
-  const [showFFmpegConfigDialog, setShowFFmpegConfigDialog] = useState(false);
-  const [showDependenciesDialog, setShowDependenciesDialog] = useState(false);
-  const [showInstallationDialog, setShowInstallationDialog] = useState(false);
   const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
   const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
   const [batchPipelineOptions, setBatchPipelineOptions] = useState({
@@ -167,11 +208,6 @@ export default function App() {
   const [batchCompletionMessage, setBatchCompletionMessage] = useState("");
   const [batchWaitingForApproval, setBatchWaitingForApproval] = useState(false);
   const [batchPendingCuts, setBatchPendingCuts] = useState<any[]>([]);
-  const [showConfigureAppDialog, setShowConfigureAppDialog] = useState(false);
-  const [selectedDependencyForInstall, setSelectedDependencyForInstall] = useState<string | null>(
-    null,
-  );
-  const [installingDependency, setInstallingDependency] = useState<string | null>(null);
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
@@ -199,8 +235,6 @@ export default function App() {
   const [commonFolders, setCommonFolders] = useState<
     { name: string; path: string; exists: boolean }[]
   >([]);
-  const [showMoveUploadDialog, setShowMoveUploadDialog] = useState(false);
-  const [dontAskMoveUpload, setDontAskMoveUpload] = useState(false);
   const [dependencies, setDependencies] = useState<{
     python: { installed: boolean; version: string | null };
     whisper: { installed: boolean; version: string | null };
