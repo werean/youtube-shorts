@@ -8,14 +8,6 @@ Antes de começar, você precisará ter instalado:
   - Baixe em: https://bun.sh
   - Ou instale via `npm install -g bun`
 
-- **Python 3.10+**
-  - Baixe em: https://www.python.org/downloads/
-  - Marque a opção "Add Python to PATH"
-
-- **FFmpeg** (para processamento de vídeos)
-  - Windows: https://ffmpeg.org/download.html
-  - Ou use: `choco install ffmpeg` (com Chocolatey)
-
 ## 🚀 Primeiros Passos
 
 ### 1. Clone ou Extraia o Projeto
