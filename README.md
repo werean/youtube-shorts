@@ -177,10 +177,6 @@ Para contribuir ao projeto:
 3. Commit as mudanças
 4. Abra um Pull Request
 
-## 📝 Licença
-
-Este projeto é propriedade privada. Todos os direitos reservados.
-
 ---
 
 **Dúvidas?** Consulte a documentação ou abra uma issue no repositório.
