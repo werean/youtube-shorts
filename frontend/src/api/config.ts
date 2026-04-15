@@ -1,4 +1,4 @@
-import { request } from "./client";
+import { apiBaseUrl, request } from "./client";
 import type { ToolConfigs, ToolConfigsPatch, ToolConfigsResponse } from "../types/toolConfigs";
 
 export interface InstallationGuide {
@@ -13,6 +13,62 @@ export interface InstallationGuide {
     command: string;
     description: string;
   };
+}
+
+export interface DependencyStatusInfo {
+  installed: boolean;
+  version: string | null;
+}
+
+export interface DependenciesSnapshot {
+  python: DependencyStatusInfo;
+  whisper: DependencyStatusInfo;
+  ytdlp: DependencyStatusInfo;
+  ffmpeg: DependencyStatusInfo;
+  cuda: DependencyStatusInfo;
+  pytorch: DependencyStatusInfo;
+  ollama: DependencyStatusInfo;
+}
+
+export interface InstallDependencyResult {
+  success: boolean;
+  message: string;
+  output?: string;
+  error?: string;
+  failureCategory?: string;
+  installer?: string;
+  dependencies?: DependenciesSnapshot;
+  diagnostics?: string[];
+}
+
+export type DependencyOperationMode = "install" | "uninstall";
+
+export type PytorchGpuTier = "rtx_4000_or_lower" | "rtx_5000";
+
+export interface DependencyInstallOptions {
+  pytorchGpuTier?: PytorchGpuTier;
+}
+
+export type DependencyInstallSessionStatus = "running" | "success" | "failed" | "cancelled";
+
+export interface DependencyInstallSession {
+  sessionId: string;
+  operation: DependencyOperationMode;
+  dependencyName: string;
+  status: DependencyInstallSessionStatus;
+  cancelRequested?: boolean;
+  startedAt: string;
+  endedAt?: string;
+  logs: string[];
+  result?: InstallDependencyResult;
+}
+
+export interface StartDependencyInstallSessionResult {
+  sessionId: string;
+  operation: DependencyOperationMode;
+  dependencyName: string;
+  status: DependencyInstallSessionStatus;
+  startedAt: string;
 }
 
 export interface AppSettings {
@@ -33,6 +89,23 @@ export interface AppSettings {
   };
 }
 
+export interface OllamaModelsResponse {
+  catalog?: Array<{
+    name: string;
+    model: string;
+    source: "cloud" | "local";
+    installed: boolean;
+    running: boolean;
+    needsDownload: boolean;
+    size?: number;
+  }>;
+  models: string[];
+  configuredModel: string;
+  online: boolean;
+  localAvailable?: boolean;
+  remoteAvailable?: boolean;
+}
+
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
   return request("/config/llm-prompt");
 }
@@ -44,15 +117,13 @@ export async function getConfig(): Promise<{
   return request("/config");
 }
 
+export async function getOllamaModels(): Promise<OllamaModelsResponse> {
+  return request("/config/ollama-models");
+}
+
 export async function getDependencies(): Promise<{
-  dependencies: {
-    python: { installed: boolean; version: string | null };
-    whisper: { installed: boolean; version: string | null };
-    ffmpeg: { installed: boolean; version: string | null };
-    cuda: { installed: boolean; version: string | null };
-    pytorch: { installed: boolean; version: string | null };
-    ollama: { installed: boolean; version: string | null };
-  };
+  dependencies: DependenciesSnapshot;
+  diagnostics?: string[];
 }> {
   return request("/config/dependencies");
 }
@@ -61,14 +132,101 @@ export async function getInstallationGuide(name: string): Promise<InstallationGu
   return request(`/config/dependencies/${name}/instructions`);
 }
 
-export async function installDependency(name: string): Promise<{
+export async function installDependency(name: string): Promise<InstallDependencyResult> {
+  const response = await fetch(`${apiBaseUrl}/config/dependencies/${name}/install`, {
+    method: "POST",
+  });
+
+  let payload: Partial<InstallDependencyResult> = {};
+  try {
+    payload = (await response.json()) as Partial<InstallDependencyResult>;
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    const fallbackError =
+      payload.error || payload.output || payload.message
+        ? undefined
+        : `Request failed with status ${response.status}`;
+
+    return {
+      success: false,
+      message: payload.message || `Falha ao instalar ${name}`,
+      error: payload.error || fallbackError,
+      failureCategory: payload.failureCategory,
+      dependencies: payload.dependencies,
+      diagnostics: payload.diagnostics,
+      output: payload.output,
+      installer: payload.installer,
+    };
+  }
+
+  return {
+    success: true,
+    message: payload.message || `${name} instalado com sucesso`,
+    output: payload.output,
+    dependencies: payload.dependencies,
+    diagnostics: payload.diagnostics,
+    installer: payload.installer,
+  };
+}
+
+export async function startDependencyInstallSession(
+  name: string,
+  options?: DependencyInstallOptions,
+): Promise<StartDependencyInstallSessionResult> {
+  const payload = options?.pytorchGpuTier ? { pytorchGpuTier: options.pytorchGpuTier } : null;
+  return request(`/config/dependencies/${name}/install/start`, {
+    method: "POST",
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+}
+
+export async function startDependencyUninstallSession(
+  name: string,
+): Promise<StartDependencyInstallSessionResult> {
+  return request(`/config/dependencies/${name}/uninstall/start`, {
+    method: "POST",
+  });
+}
+
+export async function getDependencyInstallSession(
+  sessionId: string,
+): Promise<DependencyInstallSession> {
+  return request(`/config/dependencies/install-sessions/${sessionId}`);
+}
+
+export async function cancelDependencyInstallSession(sessionId: string): Promise<{
   success: boolean;
   message: string;
-  output?: string;
-  error?: string;
+  sessionId: string;
+  status: DependencyInstallSessionStatus;
 }> {
-  return request(`/config/dependencies/${name}/install`, {
+  return request(`/config/dependencies/install-sessions/${sessionId}/cancel`, {
     method: "POST",
+  });
+}
+
+export async function openDependencyInstallTerminal(
+  name: string,
+  mode: DependencyOperationMode = "install",
+  options?: DependencyInstallOptions,
+): Promise<{
+  success: boolean;
+  message: string;
+  command?: string;
+}> {
+  const payload = {
+    mode,
+    ...(options?.pytorchGpuTier ? { pytorchGpuTier: options.pytorchGpuTier } : {}),
+  };
+
+  return request(`/config/dependencies/${name}/open-terminal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }
 

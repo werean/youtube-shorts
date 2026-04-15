@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { selectFolder } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
+import { AppButton, AppInput, AppSelect } from "./shared";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;
@@ -24,6 +25,23 @@ export function ConfigureAppDialog({
     initialResolution as "1080p" | "1440p" | "4k",
   );
 
+  const handlePickFolder = async () => {
+    try {
+      const result = await selectFolder();
+      if (result.selected && result.path) {
+        setBaseDir(result.path);
+      }
+    } catch (error) {
+      console.error("Erro ao abrir seletor de pasta:", error);
+    }
+  };
+
+  const handleSave = () => {
+    if (baseDir.trim()) {
+      onSave(baseDir, resolution);
+    }
+  };
+
   return (
     <div className="dialog-overlay" onClick={onCancel}>
       <div
@@ -32,101 +50,79 @@ export function ConfigureAppDialog({
         style={{ maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", padding: "24px" }}
       >
         <h3>Configurar Aplicação</h3>
-        <p style={{ color: "#666", marginBottom: "20px" }}>
+        <p style={{ color: "var(--muted)", marginBottom: "20px" }}>
           Escolha onde os arquivos (vídeos, shorts e transcrições) serão armazenados no seu
           computador.
         </p>
 
         {/* Native Folder Picker */}
-        <button
-          onClick={async () => {
-            try {
-              const result = await selectFolder();
-              if (result.selected && result.path) {
-                setBaseDir(result.path);
-              }
-            } catch (error) {
-              console.error("Erro ao abrir seletor de pasta:", error);
-            }
-          }}
+        <AppButton
+          onClick={handlePickFolder}
+          variant="secondary"
+          fullWidth
           style={{
-            width: "100%",
             padding: "16px",
             marginBottom: "25px",
-            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            color: "white",
-            border: "none",
-            borderRadius: "10px",
-            cursor: "pointer",
             fontWeight: "700",
             fontSize: "1.1rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "10px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            transition: "all 0.3s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.boxShadow = "0 6px 12px rgba(0, 0, 0, 0.15)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.1)";
+            borderRadius: "10px",
           }}
         >
-          📂 Selecionar Pasta
-        </button>
+          Selecionar Pasta
+        </AppButton>
 
         {/* Manual Path Input */}
         <div style={{ marginBottom: "20px" }}>
           <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
-            📝 Ou digite o caminho manualmente
+            Ou digite o caminho manualmente
           </label>
-          <input
+          <AppInput
             type="text"
             value={baseDir}
             onChange={(e) => setBaseDir(e.target.value)}
             placeholder="Ex: C:\\Users\\seu_usuario\\Documents\\YouTubeShorts"
+            fullWidth
             style={{
-              width: "100%",
               padding: "10px",
-              border: "1px solid #ddd",
+              border: "1px solid var(--border)",
               borderRadius: "4px",
               boxSizing: "border-box",
               marginBottom: "8px",
               fontFamily: "monospace",
               fontSize: "0.9rem",
+              backgroundColor: "var(--bg-contrast)",
+              color: "var(--ink)",
             }}
           />
-          <p style={{ color: "#999", fontSize: "0.8rem" }}>
-            📍 Caminho atual: {appSettings?.media.base_dir}
+          <p style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+            Caminho atual: {appSettings?.media.base_dir}
           </p>
         </div>
 
         <div style={{ marginBottom: "20px" }}>
           <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>
-            🎞️ Resolução de download
+            Resolução de download
           </label>
-          <select
+          <AppSelect
             value={resolution}
             onChange={(e) => setResolution(e.target.value as "1080p" | "1440p" | "4k")}
+            fullWidth
             style={{
-              width: "100%",
               padding: "10px",
-              border: "1px solid #ddd",
+              border: "1px solid var(--border)",
               borderRadius: "4px",
               boxSizing: "border-box",
               fontSize: "0.9rem",
+              backgroundColor: "var(--bg-contrast)",
+              color: "var(--ink)",
             }}
           >
             <option value="1080p">1080p (padrao)</option>
             <option value="1440p">1440p</option>
             <option value="4k">4k</option>
-          </select>
-          <p style={{ color: "#999", fontSize: "0.8rem", marginTop: "6px" }}>
-            📍 Resolução atual: {appSettings?.media.download_resolution || "1080p"}
+          </AppSelect>
+          <p style={{ color: "var(--muted)", fontSize: "0.8rem", marginTop: "6px" }}>
+            Resolução atual: {appSettings?.media.download_resolution || "1080p"}
           </p>
         </div>
 
@@ -135,16 +131,17 @@ export function ConfigureAppDialog({
           style={{
             marginBottom: "20px",
             padding: "12px",
-            background: "#f0f4ff",
+            background: "var(--bg-contrast)",
             borderRadius: "6px",
+            border: "1px solid var(--border)",
           }}
         >
-          <p style={{ color: "#333", fontSize: "0.9rem", margin: "0 0 8px 0" }}>
-            <strong>📂 Estrutura que será criada:</strong>
+          <p style={{ color: "var(--ink)", fontSize: "0.9rem", margin: "0 0 8px 0" }}>
+            <strong>Estrutura que será criada:</strong>
           </p>
           <p
             style={{
-              color: "#666",
+              color: "var(--muted)",
               fontSize: "0.8rem",
               margin: "0",
               fontFamily: "monospace",
@@ -152,27 +149,26 @@ export function ConfigureAppDialog({
             }}
           >
             {baseDir || "pasta_base"}/<br />
-            ├── 🎬 videos/
+            ├── videos/
             <br />
-            ├── 🎞️ shorts/
+            ├── shorts/
             <br />
-            └── 📄 transcrições/
+            └── transcrições/
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-          <button onClick={onCancel}>Cancelar</button>
-          <button
-            className="primary"
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <AppButton variant="secondary" onClick={onCancel} style={{ padding: "10px 20px" }}>
+            Cancelar
+          </AppButton>
+          <AppButton
+            variant="primary"
             disabled={action.busy || !baseDir.trim()}
-            onClick={() => {
-              if (baseDir.trim()) {
-                onSave(baseDir, resolution);
-              }
-            }}
+            style={{ padding: "10px 20px", borderRadius: "8px" }}
+            onClick={handleSave}
           >
             Salvar Configurações
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>

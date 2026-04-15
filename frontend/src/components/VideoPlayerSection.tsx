@@ -82,7 +82,7 @@ export function VideoPlayerSection({
                 className="video-player-wrapper"
                 style={{
                   width: "100%",
-                  background: "#000",
+                  background: "var(--bg)",
                   borderRadius: "12px",
                   display: "flex",
                   alignItems: "center",
@@ -118,10 +118,10 @@ export function VideoPlayerSection({
               >
                 <div
                   style={{
-                    border: "1px solid #e5e5e5",
+                    border: "1px solid var(--border)",
                     borderRadius: "10px",
                     padding: "12px",
-                    background: "#fff",
+                    background: "var(--panel)",
                   }}
                 >
                   <button
@@ -130,8 +130,8 @@ export function VideoPlayerSection({
                     style={{
                       width: "100%",
                       borderRadius: "8px",
-                      background: "#3b82f6",
-                      color: "white",
+                      background: "var(--accent-2)",
+                      color: "var(--ink)",
                       border: "none",
                       padding: "10px",
                       cursor: hasAnyTranscription ? "pointer" : "not-allowed",
@@ -150,10 +150,10 @@ export function VideoPlayerSection({
 
                 <div
                   style={{
-                    border: "1px solid #e5e5e5",
+                    border: "1px solid var(--border)",
                     borderRadius: "10px",
                     padding: "12px",
-                    background: "#fff",
+                    background: "var(--panel)",
                   }}
                 >
                   <button
@@ -161,8 +161,8 @@ export function VideoPlayerSection({
                     style={{
                       width: "100%",
                       borderRadius: "8px",
-                      background: "#10b981",
-                      color: "white",
+                      background: "var(--success)",
+                      color: "var(--ink)",
                       border: "none",
                       padding: "10px",
                       cursor: action.busy ? "not-allowed" : "pointer",
@@ -186,10 +186,10 @@ export function VideoPlayerSection({
 
                 <div
                   style={{
-                    border: "1px solid #e5e5e5",
+                    border: "1px solid var(--border)",
                     borderRadius: "10px",
                     padding: "12px",
-                    background: "#fff",
+                    background: "var(--panel)",
                   }}
                 >
                   <button
@@ -197,8 +197,8 @@ export function VideoPlayerSection({
                     style={{
                       width: "100%",
                       borderRadius: "8px",
-                      background: "#8b5cf6",
-                      color: "white",
+                      background: "var(--bg-3)",
+                      color: "var(--ink)",
                       border: "none",
                       padding: "10px",
                       cursor: !hasAnyTranscription ? "not-allowed" : "pointer",
@@ -218,10 +218,10 @@ export function VideoPlayerSection({
 
                 <div
                   style={{
-                    border: "1px solid #e5e5e5",
+                    border: "1px solid var(--border)",
                     borderRadius: "10px",
                     padding: "12px",
-                    background: "#fff",
+                    background: "var(--panel)",
                   }}
                 >
                   <button
@@ -229,8 +229,8 @@ export function VideoPlayerSection({
                     style={{
                       width: "100%",
                       borderRadius: "8px",
-                      background: "#f59e0b",
-                      color: "white",
+                      background: "var(--bg-3)",
+                      color: "var(--ink)",
                       border: "none",
                       padding: "10px",
                       cursor:
@@ -273,10 +273,10 @@ export function VideoPlayerSection({
 
                 <div
                   style={{
-                    border: "1px solid #e5e5e5",
+                    border: "1px solid var(--border)",
                     borderRadius: "10px",
                     padding: "12px",
-                    background: "#fff",
+                    background: "var(--panel)",
                   }}
                 >
                   <button
@@ -284,8 +284,8 @@ export function VideoPlayerSection({
                     style={{
                       width: "100%",
                       borderRadius: "8px",
-                      background: "#ec4899",
-                      color: "white",
+                      background: "var(--bg-3)",
+                      color: "var(--ink)",
                       border: "none",
                       padding: "10px",
                       cursor: suggestedCuts.length === 0 || isRendering ? "not-allowed" : "pointer",
@@ -337,7 +337,9 @@ export function VideoPlayerSection({
                           style={{
                             padding: "8px 12px",
                             backgroundColor:
-                              selectedSuggestedCutId === cut.cut_id ? "#0066cc" : "#e5e5e5",
+                              selectedSuggestedCutId === cut.cut_id
+                                ? "var(--accent-2)"
+                                : "var(--border)",
                             color: selectedSuggestedCutId === cut.cut_id ? "white" : "black",
                             border: "none",
                             borderRadius: "8px",
@@ -373,7 +375,8 @@ export function VideoPlayerSection({
                                 padding: 0,
                                 fontSize: "12px",
                                 lineHeight: "16px",
-                                color: hoveredCutAction === "edit" ? "#1d4ed8" : "#666",
+                                color:
+                                  hoveredCutAction === "edit" ? "var(--accent-2)" : "var(--muted)",
                               }}
                               onMouseEnter={() => setHoveredCutAction("edit")}
                               onMouseLeave={() => setHoveredCutAction(null)}
@@ -394,7 +397,8 @@ export function VideoPlayerSection({
                                 padding: 0,
                                 fontSize: "12px",
                                 lineHeight: "16px",
-                                color: hoveredCutAction === "delete" ? "#dc2626" : "#666",
+                                color:
+                                  hoveredCutAction === "delete" ? "var(--danger)" : "var(--muted)",
                               }}
                               onMouseEnter={() => setHoveredCutAction("delete")}
                               onMouseLeave={() => setHoveredCutAction(null)}

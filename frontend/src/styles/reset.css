@@ -4,13 +4,14 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #fff4e3 0%, var(--bg) 45%, #f0e2cf 100%);
+  background: radial-gradient(circle at top, #18181b 0%, var(--bg) 45%, #09090b 100%);
   color: var(--ink);
 }
 
 h1 {
-  font-family: "Fraunces", serif;
+  font-family: inherit;
   font-size: clamp(2rem, 4vw, 3.4rem);
+  font-weight: 600;
   margin: 0 0 8px;
 }
 

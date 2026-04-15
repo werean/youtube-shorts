@@ -67,7 +67,7 @@ export function VideoListSection({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#666",
+              color: "var(--muted)",
             }}
             title={isExpanded ? "Recolher" : "Expandir"}
           >
@@ -205,3 +205,5 @@ export function VideoListSection({
     </section>
   );
 }
+
+

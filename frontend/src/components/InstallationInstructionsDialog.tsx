@@ -33,7 +33,7 @@ export function InstallationInstructionsDialog({
         onClick={(e) => e.stopPropagation()}
         style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
       >
-        <p style={{ textAlign: "center", color: "#666" }}>Carregando instruções...</p>
+        <p style={{ textAlign: "center", color: "var(--muted)" }}>Carregando instruções...</p>
       </div>
     );
   }
@@ -45,7 +45,7 @@ export function InstallationInstructionsDialog({
         onClick={(e) => e.stopPropagation()}
         style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
       >
-        <p style={{ textAlign: "center", color: "#666" }}>Erro ao carregar instruções</p>
+        <p style={{ textAlign: "center", color: "var(--muted)" }}>Erro ao carregar instruções</p>
       </div>
     );
   }
@@ -65,11 +65,13 @@ export function InstallationInstructionsDialog({
         </div>
       </div>
       <div className="dialog-content" style={{ padding: "20px" }}>
-        <p style={{ marginBottom: "16px", color: "#666" }}>{guide.manual.description}</p>
+        <p style={{ marginBottom: "16px", color: "var(--muted)" }}>{guide.manual.description}</p>
 
         <div style={{ marginBottom: "20px" }}>
           <h4 style={{ marginBottom: "12px", fontSize: "14px", fontWeight: "600" }}>Passos:</h4>
-          <ol style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px", color: "#333" }}>
+          <ol
+            style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px", color: "var(--ink)" }}
+          >
             {guide.manual.steps.map((step, idx) => (
               <li key={idx} style={{ marginBottom: "8px" }}>
                 {step}
@@ -83,7 +85,7 @@ export function InstallationInstructionsDialog({
             style={{
               marginBottom: "20px",
               padding: "12px",
-              background: "#f9fafb",
+              background: "var(--bg-contrast)",
               borderRadius: "8px",
             }}
           >
@@ -97,7 +99,7 @@ export function InstallationInstructionsDialog({
                     href={link.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ color: "#3b82f6" }}
+                    style={{ color: "var(--accent-2)" }}
                   >
                     {link.text}
                   </a>
@@ -112,22 +114,22 @@ export function InstallationInstructionsDialog({
             style={{
               marginBottom: "20px",
               padding: "12px",
-              background: "#f0fdf4",
+              background: "var(--bg-3)",
               borderRadius: "8px",
-              borderLeft: "4px solid #10b981",
+              borderLeft: "4px solid var(--success)",
             }}
           >
             <h4 style={{ marginBottom: "8px", fontSize: "14px", fontWeight: "600" }}>
               Instalação Automática:
             </h4>
-            <p style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
+            <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>
               {guide.automatic.description}
             </p>
             <code
               style={{
                 display: "block",
                 padding: "8px",
-                background: "#f5f5f5",
+                background: "var(--bg-contrast)",
                 borderRadius: "4px",
                 fontSize: "11px",
                 wordBreak: "break-all",

@@ -1,146 +1,38 @@
-# Production-Ready UI Components
+# Monochromatic Design System
 
-This folder provides reusable, accessible React primitives for production UIs.
+This folder contains a zinc-based design system focused on workflow clarity for video clip generation.
 
-## Component Architecture
+## Core primitives
 
-Folder layout
+- `Button.tsx`: `primary | ghost | destructive`, fixed heights (`h-7`, `h-8`, `h-9`), leading icon slot, loading state.
+- `Card.tsx`: `default | flat`, 10px radius, 0.5px border, slot props (`header`, `body`, `footer`).
+- `Badge.tsx`: `default | success | warning | danger | outline`, caption-scale labels.
+- `Progress.tsx`: 4px track, 2px radius, 400ms fill transition, mandatory label and percentage row.
+- `StatusRow.tsx`: status dot + message + right-aligned tag.
+- `Tabs.tsx`: compact pill tabs for category switching.
+- `UploadZone.tsx`: drag/drop with visible idle, drag-over, uploading, success, error states.
+- `ClipCard.tsx`: horizontal clip row with score badge, metadata, and icon actions.
+- `AIBubble.tsx`: model metadata chip and highlighted analysis terms.
+- `TranscriptViewer.tsx`: timestamp-seekable transcript list with empty state CTA.
 
-```text
-ui/
-	actions/
-		Button/
-			Button.tsx
-	feedback/
-		EmptyState/
-			EmptyState.tsx
-		InlineMessage/
-			InlineMessage.tsx
-	forms/
-		TextField/
-			TextField.tsx
-	foundation/
-		LoadingOverlay/
-			LoadingOverlay.tsx
-		Skeleton/
-			Skeleton.tsx
-		Spinner/
-			Spinner.tsx
-		VisuallyHidden/
-			VisuallyHidden.tsx
-	overlays/
-		Modal/
-			Modal.tsx
-			focusManagement.ts
-	shared/
-		classNames.ts
-	surfaces/
-		Card/
-			Card.tsx
-	Button.tsx            (compatibility re-export)
-	Card.tsx              (compatibility re-export)
-	EmptyState.tsx        (compatibility re-export)
-	InlineMessage.tsx     (compatibility re-export)
-	LoadingOverlay.tsx    (compatibility re-export)
-	Modal.tsx             (compatibility re-export)
-	Skeleton.tsx          (compatibility re-export)
-	Spinner.tsx           (compatibility re-export)
-	TextField.tsx         (compatibility re-export)
-	VisuallyHidden.tsx    (compatibility re-export)
-	ComponentShowcase.tsx
-	index.ts
-```
+## Style system
 
-Layer 1: Foundation
+- Token source: `src/lib/tokens.css`
+- Utility helper: `src/lib/utils.ts` (`cn` = `clsx` + `tailwind-merge`)
+- Tailwind extension: `tailwind.config.ts` with zinc token mapping and typography scale.
 
-- `VisuallyHidden`: screen-reader-only content.
-- `Spinner`, `Skeleton`, `LoadingOverlay`: loading primitives.
+## Rules baked into components
 
-Layer 2: Inputs and feedback
+- Visible workflow states (`idle`, `loading`, `success`, `error`) in upload and async hooks.
+- Score explanation on clip cards through `title` tooltip text.
+- Sort controls in clip list (`score`, `duration`, `timestamp`).
+- Confirmation step for destructive actions (`delete clip`, `clear session`).
+- Sidebar stage indicators to reflect workflow progression.
 
-- `TextField`: label, hint, validation, counter, loading.
-- `InlineMessage`: info/success/warning/error feedback.
-
-Layer 3: Composition
-
-- `Button`: variants, loading states, icon slots.
-- `Card`: content container with header/footer/loading.
-- `EmptyState`: resilient blank-state messaging and call-to-action.
-- `Modal`: accessible dialog with focus trap and keyboard support.
-
-Layer 4: Consumption
-
-- `index.ts`: single import surface with side-effect style import.
-- `ComponentShowcase.tsx`: practical examples and edge-case coverage.
-
-Compatibility contract
-
-- Existing imports from root files (for example, `./Button`) are preserved through thin re-export files.
-- Internal implementations are now isolated by domain folder, reducing coupling and making incremental refactors safer.
-
-## Prop Design (summary)
-
-### `Button`
-
-- `variant`: `primary | secondary | ghost | danger`
-- `size`: `sm | md | lg`
-- `loading`: disables interaction and shows spinner
-- `leftIcon`, `rightIcon`, `fullWidth`
-- Native button props supported (`onClick`, `type`, `disabled`, etc.)
-
-### `Card`
-
-- `as`: polymorphic element (`section`, `article`, etc.)
-- `title`, `description`, `actions`, `footer`
-- `loading` + `loadingLabel`
-- `compact` for denser layouts
-
-### `TextField`
-
-- `label`, `hint`, `error`
-- `startAdornment`, `endAdornment`
-- `showCounter` + `maxLength`
-- `loading` state for async validation/fetch
-- Native input props supported
-
-### `InlineMessage`
-
-- `tone`: `info | success | warning | error`
-- `title`, `children`, `action`
-- `onDismiss` + `dismissLabel`
-
-### `Modal`
-
-- `open`, `onClose`, `title`, `description`, `footer`
-- `size`: `sm | md | lg | xl`
-- `closeOnEscape`, `closeOnOverlayClick`
-- `initialFocusRef` for deterministic focus placement
-
-### `EmptyState`
-
-- `title`, `description`, `icon`, `action`, `compact`
-
-### `Spinner` / `Skeleton` / `LoadingOverlay`
-
-- Fine-grained loading rendering with accessibility labels
-
-## Accessibility guarantees
-
-- Focus-visible styles on interactive elements.
-- `Modal` uses `role="dialog"`, `aria-modal`, focus trap and Escape handling.
-- `InlineMessage` maps severity to `status` or `alert` roles.
-- `TextField` wires `label`, `aria-invalid`, and `aria-describedby` for hint/error/counter.
-- Loading components expose polite status announcements.
-
-## Responsive behavior
-
-- Components rely on fluid spacing and typography.
-- `ui.css` includes media query adjustments for tighter mobile density.
-
-## How to use
+## Consumption
 
 ```tsx
-import { Button, Card, TextField, InlineMessage, Modal } from "./components/ui";
+import { Button, Card, UploadZone, ClipCard, AIBubble, TranscriptViewer } from "./components/ui";
 ```
 
-Styles are loaded automatically via `components/ui/index.ts`.
+Feature wrappers live under `src/components/features/*` and layout shell components under `src/components/layout/*`.

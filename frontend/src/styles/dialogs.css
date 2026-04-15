@@ -88,12 +88,12 @@
 }
 
 .info-box.light {
-  background: #f9fafb;
+  background: var(--bg-contrast);
 }
 
 .info-box.success {
-  background: #f0fdf4;
-  border-left: 4px solid #10b981;
+  background: var(--bg-contrast);
+  border-left: 4px solid var(--success);
 }
 
 .info-box-title {
@@ -111,7 +111,7 @@
 .info-box code {
   display: block;
   padding: 8px;
-  background: #f5f5f5;
+  background: var(--bg);
   border-radius: 4px;
   font-size: 11px;
   word-break: break-all;
@@ -130,7 +130,7 @@
 }
 
 .dialog-link {
-  color: #3b82f6;
+  color: var(--accent-2);
   text-decoration: none;
 }
 

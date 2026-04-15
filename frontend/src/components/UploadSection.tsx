@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { VideoItem } from "../hooks";
-import { createJob, ingestJob, uploadVideoFile, apiBaseUrl } from "../api";
+import { createJob, ingestJob, uploadVideoFile } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
+import { AppButton } from "./shared";
 
 interface UploadSectionProps {
   action: ActionState;
@@ -72,14 +73,7 @@ export function UploadSection({
   return (
     <section className="grid" style={{ marginBottom: "24px" }}>
       <div className="panel">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-          }}
-        >
+        <div className="panel-header">
           <h2 style={{ margin: 0, flex: 1 }}>1. Faça upload de um vídeo</h2>
           <button
             onClick={onToggle}
@@ -91,7 +85,7 @@ export function UploadSection({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#666",
+              color: "var(--muted)",
             }}
             title={isExpanded ? "Recolher" : "Expandir"}
           >
@@ -109,26 +103,34 @@ export function UploadSection({
 
         {isExpanded && (
           <>
-            <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+            <div className="view-tabs" style={{ marginBottom: "12px" }}>
               <button
-                className={uploadMode === "url" ? "primary" : "secondary"}
+                className={`tab ${uploadMode === "url" ? "active" : ""}`}
                 onClick={() => {
                   setUploadMode("url");
                   setSelectedFiles([]);
                 }}
-                style={{ borderRadius: "8px" }}
               >
-                📎 URL do YouTube
+                <span className="button-with-icon">
+                  <span className="material-icons" aria-hidden="true">
+                    link
+                  </span>
+                  <span>URL do YouTube</span>
+                </span>
               </button>
               <button
-                className={uploadMode === "file" ? "primary" : "secondary"}
+                className={`tab ${uploadMode === "file" ? "active" : ""}`}
                 onClick={() => {
                   setUploadMode("file");
                   setYoutubeUrl("");
                 }}
-                style={{ borderRadius: "8px" }}
               >
-                📁 Arquivo local
+                <span className="button-with-icon">
+                  <span className="material-icons" aria-hidden="true">
+                    folder
+                  </span>
+                  <span>Arquivo local</span>
+                </span>
               </button>
             </div>
 
@@ -137,15 +139,17 @@ export function UploadSection({
                 <label className="field">
                   Link do YouTube
                   <input
+                    className="youtube-url-input"
                     value={youtubeUrl}
                     onChange={(event) => setYoutubeUrl(event.target.value)}
                     placeholder="https://www.youtube.com/watch?v=..."
                   />
                 </label>
-                <button
-                  className="primary"
+                <AppButton
+                  variant="primary"
                   disabled={action.busy || youtubeUrl.length === 0}
-                  style={{ borderRadius: "8px" }}
+                  fullWidth
+                  style={{ padding: "14px 16px", marginTop: "8px" }}
                   onClick={() => {
                     runAction(
                       () => createJob(youtubeUrl),
@@ -174,27 +178,18 @@ export function UploadSection({
                     );
                   }}
                 >
-                  🎥 Fazer upload
-                </button>
+                  <span className="button-with-icon">
+                    <span className="material-icons" aria-hidden="true">
+                      upload
+                    </span>
+                    <span>Fazer upload</span>
+                  </span>
+                </AppButton>
               </>
             ) : (
               <>
                 <div
-                  style={{
-                    background: selectedFiles.length > 0 ? "var(--panel)" : "var(--bg-contrast)",
-                    border:
-                      selectedFiles.length > 0
-                        ? "1px solid var(--border)"
-                        : "2px dashed var(--border)",
-                    borderRadius: "8px",
-                    padding: "32px 24px",
-                    marginBottom: "12px",
-                    textAlign: "center",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
-                    opacity: isDraggingFile ? 0.7 : 1,
-                    transform: isDraggingFile ? "scale(1.02)" : "scale(1)",
-                  }}
+                  className={`upload-dropzone ${selectedFiles.length > 0 ? "active" : ""} ${isDraggingFile ? "dragging" : ""}`}
                   onClick={() => {
                     const fileInput = document.getElementById(
                       "video-file-input",
@@ -231,7 +226,15 @@ export function UploadSection({
                 >
                   {selectedFiles.length > 0 ? (
                     <div>
-                      <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>🎬</div>
+                      <div style={{ marginBottom: "12px" }}>
+                        <span
+                          className="material-icons"
+                          aria-hidden="true"
+                          style={{ fontSize: "2.5rem", color: "var(--ink)" }}
+                        >
+                          video_file
+                        </span>
+                      </div>
                       <div style={{ fontWeight: 600, marginBottom: "16px", color: "var(--ink)" }}>
                         {selectedFiles.length} arquivo(s) selecionado(s)
                       </div>
@@ -245,28 +248,10 @@ export function UploadSection({
                         }}
                       >
                         {selectedFiles.map((file, index) => (
-                          <div
-                            key={index}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              padding: "8px",
-                              background: "var(--bg-contrast)",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            <div style={{ flex: 1, textAlign: "left" }}>
-                              <div
-                                style={{
-                                  fontSize: "0.85rem",
-                                  fontWeight: 600,
-                                  marginBottom: "2px",
-                                }}
-                              >
-                                {file.name}
-                              </div>
-                              <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+                          <div key={index} className="upload-file-item">
+                            <div className="upload-file-info">
+                              <div className="upload-file-name">{file.name}</div>
+                              <div className="upload-file-size">
                                 {(file.size / 1024 / 1024).toFixed(2)} MB
                               </div>
                             </div>
@@ -280,20 +265,22 @@ export function UploadSection({
                               style={{
                                 background: "transparent",
                                 border: "none",
-                                color: "#dc2626",
+                                color: "var(--danger)",
                                 cursor: "pointer",
                                 fontSize: "1rem",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
                               }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.background = "#fee";
+                                e.currentTarget.style.background = "rgba(239, 68, 68, 0.14)";
                               }}
                               onMouseLeave={(e) => {
                                 e.currentTarget.style.background = "transparent";
                               }}
                             >
-                              ✕
+                              <span className="material-icons" aria-hidden="true">
+                                close
+                              </span>
                             </button>
                           </div>
                         ))}
@@ -308,9 +295,9 @@ export function UploadSection({
                           if (fileInput) fileInput.value = "";
                         }}
                         style={{
-                          background: "#fee",
-                          border: "1px solid #fcc",
-                          color: "#dc2626",
+                          background: "rgba(239, 68, 68, 0.14)",
+                          border: "1px solid rgba(239, 68, 68, 0.35)",
+                          color: "var(--danger)",
                           padding: "6px 12px",
                           borderRadius: "4px",
                           cursor: "pointer",
@@ -318,20 +305,28 @@ export function UploadSection({
                           fontWeight: 600,
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = "#fdd";
-                          e.currentTarget.style.borderColor = "#f99";
+                          e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
+                          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.5)";
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = "#fee";
-                          e.currentTarget.style.borderColor = "#fcc";
+                          e.currentTarget.style.background = "rgba(239, 68, 68, 0.14)";
+                          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.35)";
                         }}
                       >
-                        ✕ Remover todos
+                        Remover todos
                       </button>
                     </div>
                   ) : (
                     <div>
-                      <div style={{ fontSize: "2.5rem", marginBottom: "12px" }}>📹</div>
+                      <div style={{ marginBottom: "12px" }}>
+                        <span
+                          className="material-icons"
+                          aria-hidden="true"
+                          style={{ fontSize: "2.5rem", color: "var(--ink)" }}
+                        >
+                          upload_file
+                        </span>
+                      </div>
                       <div style={{ fontWeight: 600, marginBottom: "4px", color: "var(--ink)" }}>
                         Nenhum arquivo selecionado
                       </div>
@@ -363,14 +358,20 @@ export function UploadSection({
                   }}
                 />
 
-                <button
-                  className="primary"
+                <AppButton
+                  variant="primary"
                   disabled={action.busy || selectedFiles.length === 0}
-                  style={{ borderRadius: "8px", width: "100%" }}
+                  fullWidth
+                  style={{ padding: "14px 16px", marginTop: "8px" }}
                   onClick={handleFileUpload}
                 >
-                  🎥 Fazer upload ({selectedFiles.length})
-                </button>
+                  <span className="button-with-icon">
+                    <span className="material-icons" aria-hidden="true">
+                      upload
+                    </span>
+                    <span>Fazer upload</span>
+                  </span>
+                </AppButton>
               </>
             )}
           </>

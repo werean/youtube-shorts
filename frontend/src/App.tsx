@@ -31,10 +31,15 @@ import {
   uploadVideoFile,
   getDependencies,
   getInstallationGuide,
-  installDependency,
+  startDependencyInstallSession,
+  startDependencyUninstallSession,
+  getDependencyInstallSession,
+  cancelDependencyInstallSession,
+  openDependencyInstallTerminal,
   getSettings,
   saveSettings,
   getToolConfigs,
+  getOllamaModels,
   saveToolConfigs,
   resetAllToolConfigs,
   resetToolConfigSection,
@@ -47,6 +52,9 @@ import {
   continueBatchPipeline,
   type AppSettings,
   type BatchPipelineProgress,
+  type DependencyInstallOptions,
+  type DependencyInstallSessionStatus,
+  type DependencyOperationMode,
 } from "./api";
 import { getJobLogs } from "./api/logs";
 import { WhisperConfigDialog } from "./components/WhisperConfigDialog";
@@ -82,6 +90,15 @@ interface ActionState {
 }
 
 const initialAction: ActionState = { busy: false };
+
+interface OllamaModelCatalogItem {
+  name: string;
+  source: "cloud" | "local";
+  installed: boolean;
+  running: boolean;
+  needsDownload: boolean;
+  size?: number;
+}
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -208,6 +225,11 @@ export default function App() {
   const [batchCompletionMessage, setBatchCompletionMessage] = useState("");
   const [batchWaitingForApproval, setBatchWaitingForApproval] = useState(false);
   const [batchPendingCuts, setBatchPendingCuts] = useState<any[]>([]);
+  const [llmModel, setLlmModel] = useState<string>("");
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaModelCatalog, setOllamaModelCatalog] = useState<OllamaModelCatalogItem[]>([]);
+  const [ollamaLocalAvailable, setOllamaLocalAvailable] = useState(false);
+  const [ollamaRemoteAvailable, setOllamaRemoteAvailable] = useState(false);
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
@@ -243,7 +265,25 @@ export default function App() {
     pytorch: { installed: boolean; version: string | null };
     ollama: { installed: boolean; version: string | null };
   } | null>(null);
+  const [refreshingDependencies, setRefreshingDependencies] = useState(false);
   const [loadingDependencies, setLoadingDependencies] = useState<Set<string>>(new Set());
+  const [uninstallingDependency, setUninstallingDependency] = useState<string | null>(null);
+  const [dependencyOperationFeedback, setDependencyOperationFeedback] = useState<{
+    kind: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+  const dependencyInstallPollRef = useRef<number | null>(null);
+  const [dependencyInstallSessionId, setDependencyInstallSessionId] = useState<string | null>(null);
+  const [dependencyInstallLogs, setDependencyInstallLogs] = useState<string[]>([]);
+  const [dependencyInstallLogDependency, setDependencyInstallLogDependency] = useState<
+    string | null
+  >(null);
+  const [dependencyLogOperation, setDependencyLogOperation] =
+    useState<DependencyOperationMode | null>(null);
+  const [dependencyInstallLogStatus, setDependencyInstallLogStatus] = useState<
+    DependencyInstallSessionStatus | "idle"
+  >("idle");
+  const [showDependencyInstallLogs, setShowDependencyInstallLogs] = useState(false);
 
   const statusLabel = useMemo(
     () => videos.find((v) => v.job.job_id === activeVideoId)?.job.status ?? "NENHUM VÍDEO",
@@ -271,6 +311,35 @@ export default function App() {
   }, [blocks, activeVideo]);
 
   useEffect(() => {
+    return () => {
+      stopDependencyInstallPolling();
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateBodyScrollLock = () => {
+      const hasDialog = document.querySelectorAll(".dialog-overlay").length > 0;
+      document.body.classList.toggle("modal-open", hasDialog);
+    };
+
+    updateBodyScrollLock();
+
+    const observer = new MutationObserver(() => {
+      updateBodyScrollLock();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      observer.disconnect();
+      document.body.classList.remove("modal-open");
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeVideo) {
       stopRenderPolling();
       return;
@@ -293,6 +362,460 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
       console.error(`[App] ✗ Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
+    }
+  }
+
+  function stopDependencyInstallPolling() {
+    if (dependencyInstallPollRef.current !== null) {
+      window.clearInterval(dependencyInstallPollRef.current);
+      dependencyInstallPollRef.current = null;
+    }
+  }
+
+  function clearDependencyLoading(name: string) {
+    setLoadingDependencies((prev) => {
+      const next = new Set(prev);
+      next.delete(name);
+      return next;
+    });
+  }
+
+  function normalizeDependencySnapshot(snapshot: {
+    python: { installed: boolean; version: string | null };
+    whisper: { installed: boolean; version: string | null };
+    ffmpeg: { installed: boolean; version: string | null };
+    cuda: { installed: boolean; version: string | null };
+    pytorch: { installed: boolean; version: string | null };
+    ollama: { installed: boolean; version: string | null };
+  }) {
+    return {
+      python: { ...snapshot.python },
+      whisper: { ...snapshot.whisper },
+      ffmpeg: { ...snapshot.ffmpeg },
+      cuda: { ...snapshot.cuda },
+      pytorch: { ...snapshot.pytorch },
+      ollama: { ...snapshot.ollama },
+    };
+  }
+
+  function mergeModelOptions(...modelLists: Array<Array<string | null | undefined>>): string[] {
+    const merged = new Set<string>();
+
+    for (const modelList of modelLists) {
+      for (const candidate of modelList) {
+        const model = String(candidate || "").trim();
+        if (model) {
+          merged.add(model);
+        }
+      }
+    }
+
+    return Array.from(merged);
+  }
+
+  function mergeOllamaCatalog(
+    ...catalogLists: Array<Array<OllamaModelCatalogItem | null | undefined>>
+  ): OllamaModelCatalogItem[] {
+    const merged = new Map<string, OllamaModelCatalogItem>();
+
+    for (const catalogList of catalogLists) {
+      for (const candidate of catalogList) {
+        if (!candidate) {
+          continue;
+        }
+
+        const name = String(candidate.name || "").trim();
+        if (!name) {
+          continue;
+        }
+
+        const existing = merged.get(name);
+        if (!existing) {
+          merged.set(name, {
+            ...candidate,
+            name,
+          });
+          continue;
+        }
+
+        merged.set(name, {
+          ...existing,
+          ...candidate,
+          name,
+          installed: existing.installed || candidate.installed,
+          running: existing.running || candidate.running,
+          needsDownload: !(
+            existing.installed ||
+            candidate.installed ||
+            existing.running ||
+            candidate.running
+          ),
+          source:
+            existing.installed || candidate.installed || existing.running || candidate.running
+              ? "local"
+              : "cloud",
+          size: existing.size || candidate.size,
+        });
+      }
+    }
+
+    return Array.from(merged.values());
+  }
+
+  async function refreshOllamaModelOptions(
+    fallbackModel?: string,
+    showAlertOnError = false,
+  ): Promise<void> {
+    try {
+      const result = await getOllamaModels();
+
+      const fallbackCatalog = mergeModelOptions(
+        [result.configuredModel],
+        [fallbackModel],
+        [llmModel],
+      ).map((name) => ({
+        name,
+        source: "local" as const,
+        installed: true,
+        running: false,
+        needsDownload: false,
+      }));
+
+      const mergedCatalog = mergeOllamaCatalog(
+        ollamaModelCatalog,
+        result.catalog || [],
+        fallbackCatalog,
+      );
+
+      setOllamaModelCatalog(mergedCatalog);
+      setOllamaModels((prev) =>
+        mergeModelOptions(
+          prev,
+          result.models,
+          mergedCatalog.map((entry) => entry.name),
+          [result.configuredModel],
+          [fallbackModel],
+          [llmModel],
+        ),
+      );
+      setOllamaLocalAvailable(Boolean(result.localAvailable));
+      setOllamaRemoteAvailable(Boolean(result.remoteAvailable));
+    } catch (error) {
+      console.error("Failed to load Ollama models:", error);
+      const fallbackCatalog = mergeModelOptions([fallbackModel], [llmModel]).map((name) => ({
+        name,
+        source: "local" as const,
+        installed: true,
+        running: false,
+        needsDownload: false,
+      }));
+
+      setOllamaModelCatalog((prev) => mergeOllamaCatalog(prev, fallbackCatalog));
+      setOllamaModels((prev) => mergeModelOptions(prev, [fallbackModel], [llmModel]));
+      setOllamaLocalAvailable(false);
+      setOllamaRemoteAvailable(false);
+      if (showAlertOnError) {
+        alert("Não foi possível carregar a lista de modelos do Ollama.");
+      }
+    }
+  }
+
+  async function refreshDependencies(showAlertOnError = false): Promise<boolean> {
+    setRefreshingDependencies(true);
+    try {
+      const depsData = await getDependencies();
+      setDependencies(normalizeDependencySnapshot(depsData.dependencies));
+      if (!installingDependency && !uninstallingDependency) {
+        setLoadingDependencies(new Set());
+      }
+      return true;
+    } catch (error) {
+      console.error("Failed to refresh dependencies:", error);
+      if (showAlertOnError) {
+        alert("Não foi possível atualizar as dependências no momento.");
+      }
+      return false;
+    } finally {
+      setRefreshingDependencies(false);
+    }
+  }
+
+  async function openSystemTerminalForDependency(
+    name: string,
+    mode: DependencyOperationMode,
+    showFeedback = false,
+    options?: DependencyInstallOptions,
+  ): Promise<boolean> {
+    try {
+      const result = await openDependencyInstallTerminal(name, mode, options);
+      if (showFeedback) {
+        const commandInfo = result.command ? `\n\nComando:\n${result.command}` : "";
+        alert(`${result.message}${commandInfo}`);
+      }
+      return true;
+    } catch (error) {
+      console.error(`Failed to open terminal for ${name}:`, error);
+      if (showFeedback) {
+        alert(`Não foi possível abrir o terminal para ${name}.`);
+      }
+      return false;
+    }
+  }
+
+  async function finalizeDependencyOperation(
+    operation: DependencyOperationMode,
+    name: string,
+    status: "success" | "failed" | "cancelled",
+    result?: any,
+  ) {
+    try {
+      if (result?.dependencies) {
+        setDependencies(result.dependencies);
+      } else {
+        const depsData = await getDependencies();
+        setDependencies(depsData.dependencies);
+      }
+    } catch (refreshError) {
+      console.error("Failed to refresh dependencies after install session:", refreshError);
+    }
+
+    const operationVerb = operation === "uninstall" ? "desinstalação" : "instalação";
+
+    if (status === "cancelled") {
+      setDependencyOperationFeedback({
+        kind: "warning",
+        message: `A ${operationVerb} de ${name} foi cancelada.`,
+      });
+    } else if (status === "success" && result?.success) {
+      const installerInfo = result.installer ? ` (Instalador: ${result.installer})` : "";
+      setDependencyOperationFeedback({
+        kind: "success",
+        message: `${result.message}${installerInfo}`,
+      });
+    } else if (result) {
+      const categoryInfo = result.failureCategory ? `\nCategoria: ${result.failureCategory}` : "";
+      const details = result.error || result.output;
+      const diagnosticsInfo = result.diagnostics?.length
+        ? `\n\nDiagnóstico:\n${result.diagnostics.join("\n")}`
+        : "";
+      const detailsInfo = details ? `\n\n${details}` : "\n\nSem detalhes adicionais";
+      setDependencyOperationFeedback({
+        kind: "error",
+        message: result.message || `Falha na ${operationVerb} de ${name}.`,
+      });
+      alert(`${result.message}${categoryInfo}${detailsInfo}${diagnosticsInfo}`);
+    } else {
+      setDependencyOperationFeedback({
+        kind: "warning",
+        message: `A ${operationVerb} de ${name} terminou sem retornar um resultado válido.`,
+      });
+      alert(`A ${operationVerb} de ${name} terminou sem retornar um resultado válido.`);
+    }
+
+    clearDependencyLoading(name);
+    if (operation === "install") {
+      setInstallingDependency(null);
+    } else {
+      setUninstallingDependency(null);
+    }
+    setDependencyInstallSessionId(null);
+    setDependencyLogOperation(null);
+  }
+
+  async function pollDependencyInstallSession(
+    sessionId: string,
+    name: string,
+    operation: DependencyOperationMode,
+  ): Promise<boolean> {
+    const session = await getDependencyInstallSession(sessionId);
+    setDependencyInstallLogs(session.logs || []);
+    setDependencyInstallLogStatus(session.status);
+    setDependencyLogOperation(session.operation || operation);
+
+    if (session.status === "running") {
+      return true;
+    }
+
+    stopDependencyInstallPolling();
+    await finalizeDependencyOperation(
+      session.operation || operation,
+      name,
+      session.status,
+      session.result,
+    );
+    return false;
+  }
+
+  async function cancelActiveDependencyInstallSession(): Promise<void> {
+    if (!dependencyInstallSessionId) {
+      return;
+    }
+
+    try {
+      const result = await cancelDependencyInstallSession(dependencyInstallSessionId);
+      setDependencyInstallLogs((prev) => [...prev, `[local] ${result.message}`]);
+    } catch (error) {
+      console.error("Failed to request install session cancellation:", error);
+      alert("Não foi possível cancelar a execução no momento.");
+    }
+  }
+
+  function downloadDependencyLogsAsTxt() {
+    if (dependencyInstallLogs.length === 0) {
+      alert("Não há logs disponíveis para download.");
+      return;
+    }
+
+    const dependency = dependencyInstallLogDependency || "dependencia";
+    const operation = dependencyLogOperation || "install";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const safeDependency = dependency.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filename = `${safeDependency}-${operation}-${timestamp}.txt`;
+
+    const payload = [
+      `Dependência: ${dependency}`,
+      `Operação: ${operation}`,
+      `Status: ${dependencyInstallLogStatus}`,
+      `Gerado em: ${new Date().toLocaleString("pt-BR")}`,
+      "",
+      ...dependencyInstallLogs,
+    ].join("\n");
+
+    const blob = new Blob([payload], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  async function startDependencyOperationSession(
+    name: string,
+    operation: DependencyOperationMode,
+    viewMode: "terminal" | "logs",
+    options?: DependencyInstallOptions,
+  ): Promise<void> {
+    const operationLabel = operation === "uninstall" ? "desinstalação" : "instalação";
+    setDependencyOperationFeedback(null);
+
+    if (operation === "install") {
+      setInstallingDependency(name);
+      setUninstallingDependency(null);
+    } else {
+      setUninstallingDependency(name);
+      setInstallingDependency(null);
+    }
+
+    setDependencyInstallLogDependency(name);
+    setDependencyLogOperation(operation);
+    setDependencyInstallLogStatus("running");
+    setDependencyInstallLogs([`[local] Iniciando sessão de ${operationLabel} para ${name}...`]);
+    setShowDependencyInstallLogs(viewMode === "logs");
+
+    setLoadingDependencies((prev) => {
+      const next = new Set(prev);
+      next.add(name);
+      return next;
+    });
+
+    try {
+      stopDependencyInstallPolling();
+
+      if (viewMode === "terminal") {
+        const terminalOpened = await openSystemTerminalForDependency(
+          name,
+          operation,
+          false,
+          options,
+        );
+
+        if (terminalOpened) {
+          setDependencyInstallSessionId(null);
+          setDependencyInstallLogStatus("idle");
+          setDependencyInstallLogs([]);
+          setShowDependencyInstallLogs(false);
+          setDependencyOperationFeedback({
+            kind: "success",
+            message: `Comando de ${operationLabel} de ${name} enviado para o terminal externo.`,
+          });
+          clearDependencyLoading(name);
+          if (operation === "install") {
+            setInstallingDependency(null);
+          } else {
+            setUninstallingDependency(null);
+          }
+          void refreshDependencies(false);
+          return;
+        }
+
+        setShowDependencyInstallLogs(true);
+        setDependencyInstallLogs((prev) => [
+          ...prev,
+          "[local] Falha ao abrir terminal. Exibindo logs integrados.",
+        ]);
+      }
+
+      const sessionStart =
+        operation === "install"
+          ? await startDependencyInstallSession(name, options)
+          : await startDependencyUninstallSession(name);
+
+      setDependencyInstallSessionId(sessionStart.sessionId);
+      setDependencyInstallLogs((prev) => [
+        ...prev,
+        `[local] Sessão criada (${operation}): ${sessionStart.sessionId}`,
+      ]);
+
+      const shouldContinuePolling = await pollDependencyInstallSession(
+        sessionStart.sessionId,
+        name,
+        operation,
+      );
+
+      if (shouldContinuePolling) {
+        dependencyInstallPollRef.current = window.setInterval(() => {
+          void pollDependencyInstallSession(sessionStart.sessionId, name, operation).catch(
+            (pollError) => {
+              console.error(
+                `Failed to poll dependency ${operation} session for ${name}:`,
+                pollError,
+              );
+              stopDependencyInstallPolling();
+              setDependencyInstallLogStatus("failed");
+              setDependencyInstallLogs((prev) => [
+                ...prev,
+                `[local] Falha ao consultar logs da sessão ${sessionStart.sessionId}.`,
+              ]);
+              void finalizeDependencyOperation(operation, name, "failed", {
+                success: false,
+                message: `Erro ao acompanhar ${operationLabel} de ${name}`,
+                error: pollError instanceof Error ? pollError.message : String(pollError),
+              });
+            },
+          );
+        }, 1200);
+      }
+    } catch (error) {
+      console.error(`Failed to start dependency ${operation} session for ${name}:`, error);
+      stopDependencyInstallPolling();
+      setDependencyInstallSessionId(null);
+      setDependencyInstallLogStatus("failed");
+      setDependencyInstallLogs((prev) => [
+        ...prev,
+        `[local] Não foi possível iniciar a sessão de ${operationLabel} de ${name}.`,
+      ]);
+      clearDependencyLoading(name);
+      if (operation === "install") {
+        setInstallingDependency(null);
+      } else {
+        setUninstallingDependency(null);
+      }
+      alert(
+        `Erro ao iniciar ${operationLabel} de ${name}. Verifique permissões, PATH e conflitos de versão.`,
+      );
     }
   }
 
@@ -965,6 +1488,22 @@ export default function App() {
       : ["json", "vtt", "txt"];
     setWhisperFormats(formats);
     setFfmpegConfig(active.ffmpeg || null);
+    const configuredModel = String(active.llm.model || "").trim();
+    setLlmModel(configuredModel);
+    setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
+    if (configuredModel) {
+      setOllamaModelCatalog((prev) =>
+        mergeOllamaCatalog(prev, [
+          {
+            name: configuredModel,
+            source: "local",
+            installed: true,
+            running: false,
+            needsDownload: false,
+          },
+        ]),
+      );
+    }
     setLlmSystemPrompt(active.llm.system_prompt || "");
   }
 
@@ -989,11 +1528,12 @@ export default function App() {
     }
   }
 
-  async function saveLLMConfig() {
+  async function saveLLMConfig(model: string, prompt: string) {
     try {
       const response = await saveToolConfigs({
         llm: {
-          system_prompt: llmSystemPrompt,
+          model,
+          system_prompt: prompt,
         },
       });
       applyToolConfigs(response);
@@ -1059,6 +1599,7 @@ export default function App() {
       try {
         const toolConfigs = await getToolConfigs();
         applyToolConfigs(toolConfigs);
+        await refreshOllamaModelOptions(toolConfigs.active.llm.model, false);
       } catch (error) {
         console.error("Failed to load tool configs:", error);
       }
@@ -1132,13 +1673,22 @@ export default function App() {
         onConfigureApp={() => setShowConfigureAppDialog(true)}
         onManageDependencies={async () => {
           setShowDependenciesDialog(true);
+          setDependencyOperationFeedback(null);
           setDependencies(null);
+          setRefreshingDependencies(false);
           setLoadingDependencies(new Set());
-          try {
-            const depsData = await getDependencies();
-            setDependencies(depsData.dependencies);
-          } catch (error) {
-            console.error("Failed to load dependencies:", error);
+          stopDependencyInstallPolling();
+          setDependencyInstallSessionId(null);
+          setDependencyInstallLogs([]);
+          setDependencyInstallLogDependency(null);
+          setDependencyLogOperation(null);
+          setDependencyInstallLogStatus("idle");
+          setShowDependencyInstallLogs(false);
+          setInstallingDependency(null);
+          setUninstallingDependency(null);
+          const loaded = await refreshDependencies(false);
+
+          if (!loaded) {
             setDependencies({
               python: { installed: false, version: null },
               whisper: { installed: false, version: null },
@@ -1147,11 +1697,14 @@ export default function App() {
               pytorch: { installed: false, version: null },
               ollama: { installed: false, version: null },
             });
-          } finally {
-            setLoadingDependencies(new Set());
           }
+
+          setLoadingDependencies(new Set());
         }}
-        onConfigureLLM={() => setShowLLMConfigDialog(true)}
+        onConfigureLLM={() => {
+          setShowLLMConfigDialog(true);
+          void refreshOllamaModelOptions(llmModel, false);
+        }}
         onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
         onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
       />
@@ -1232,7 +1785,7 @@ export default function App() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#666",
+                color: "var(--muted)",
               }}
               title={expandVideoPlayerSection ? "Recolher" : "Expandir"}
             >
@@ -1648,7 +2201,8 @@ export default function App() {
                                 fontSize: "16px",
                                 fontWeight: "600",
                                 borderRadius: "8px",
-                                background: "#10b981",
+                                background: "var(--bg-3)",
+                                color: "var(--ink)",
                               }}
                             >
                               ▶️ Continuar Pipeline
@@ -1674,8 +2228,13 @@ export default function App() {
                                 style={{
                                   padding: "8px 12px",
                                   backgroundColor:
-                                    selectedSuggestedCutId === cut.cut_id ? "#0066cc" : "#e5e5e5",
-                                  color: selectedSuggestedCutId === cut.cut_id ? "white" : "black",
+                                    selectedSuggestedCutId === cut.cut_id
+                                      ? "var(--bg-3)"
+                                      : "var(--bg-contrast)",
+                                  color:
+                                    selectedSuggestedCutId === cut.cut_id
+                                      ? "var(--ink)"
+                                      : "var(--muted)",
                                   border: "none",
                                   borderRadius: "8px",
                                   cursor: "pointer",
@@ -1732,8 +2291,8 @@ export default function App() {
                                     lineHeight: "16px",
                                     color:
                                       hoveredCutId === cut.cut_id && hoveredCutAction === "edit"
-                                        ? "#1d4ed8"
-                                        : "#666",
+                                        ? "var(--accent-2)"
+                                        : "var(--muted)",
                                   }}
                                   aria-label="Editar timestamp"
                                 >
@@ -1786,8 +2345,8 @@ export default function App() {
                                     lineHeight: "16px",
                                     color:
                                       hoveredCutId === cut.cut_id && hoveredCutAction === "delete"
-                                        ? "#dc2626"
-                                        : "#666",
+                                        ? "var(--danger)"
+                                        : "var(--muted)",
                                   }}
                                   aria-label="Deletar timestamp"
                                 >
@@ -2007,16 +2566,16 @@ export default function App() {
                     style={{
                       marginBottom: "16px",
                       padding: "12px",
-                      backgroundColor: "#f5f5f5",
+                      backgroundColor: "var(--bg-contrast)",
                       borderRadius: "8px",
-                      borderLeft: "4px solid #0066cc",
+                      borderLeft: "4px solid var(--accent-2)",
                     }}
                   >
                     <div style={{ marginBottom: "8px" }}>
                       <strong>Bloco {index + 1}</strong>
                       {block.block_id && <span> ({block.block_id})</span>}
                     </div>
-                    <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "#666" }}>
+                    <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "var(--muted)" }}>
                       {block.start?.toFixed(2)}s - {block.end?.toFixed(2)}s
                     </div>
                     <div style={{ lineHeight: "1.6" }}>{block.text}</div>
@@ -2277,11 +2836,17 @@ export default function App() {
       {/* LLM Config Dialog */}
       {showLLMConfigDialog && (
         <LLMConfigDialog
+          llmModel={llmModel}
+          availableModels={ollamaModels}
+          modelCatalog={ollamaModelCatalog}
+          localAvailable={ollamaLocalAvailable}
+          remoteAvailable={ollamaRemoteAvailable}
           llmSystemPrompt={llmSystemPrompt}
           action={action}
-          onSave={(prompt) => {
+          onSave={(model, prompt) => {
+            setLlmModel(model);
             setLlmSystemPrompt(prompt);
-            saveLLMConfig();
+            void saveLLMConfig(model, prompt);
           }}
           onCancel={() => setShowLLMConfigDialog(false)}
         />
@@ -2313,71 +2878,32 @@ export default function App() {
           dependencies={dependencies}
           loadingDependencies={loadingDependencies}
           installingDependency={installingDependency}
+          uninstallingDependency={uninstallingDependency}
+          operationResultMessage={dependencyOperationFeedback?.message || null}
+          operationResultTone={dependencyOperationFeedback?.kind || "success"}
+          installSessionId={dependencyInstallSessionId}
+          installLogOperation={dependencyLogOperation}
+          installLogDependency={dependencyInstallLogDependency}
+          installLogStatus={dependencyInstallLogStatus}
+          installLogs={dependencyInstallLogs}
+          showInstallLogs={showDependencyInstallLogs}
+          refreshingDependencies={refreshingDependencies}
           onClose={() => setShowDependenciesDialog(false)}
           onRefresh={async () => {
-            try {
-              const depsData = await getDependencies();
-              setDependencies(depsData.dependencies);
-            } catch (error) {
-              console.error("Failed to refresh dependencies:", error);
-            }
+            await refreshDependencies(true);
           }}
           onShowInstallInstructions={(name) => {
             setSelectedDependencyForInstall(name);
             setShowInstallationDialog(true);
           }}
-          onInstallDependency={async (name) => {
-            console.log(`[UI] Iniciando instalação de ${name}`);
-            setInstallingDependency(name);
-            setLoadingDependencies((prev) => {
-              const next = new Set(prev);
-              next.add(name);
-              console.log(`[UI] Loading ${name} marcado como true:`, next);
-              return next;
-            });
-            try {
-              const result = await installDependency(name);
-              if (result.success) {
-                alert(`${name} instalado com sucesso!`);
-                try {
-                  console.log(`[UI] Atualizando lista de dependências para ${name}`);
-                  const depsData = await getDependencies();
-                  setDependencies(depsData.dependencies);
-                  setLoadingDependencies((prev) => {
-                    const next = new Set(prev);
-                    next.delete(name);
-                    console.log(`[UI] Loading ${name} marcado como false:`, next);
-                    return next;
-                  });
-                } catch (error) {
-                  console.error("Failed to refresh dependencies:", error);
-                  setLoadingDependencies((prev) => {
-                    const next = new Set(prev);
-                    next.delete(name);
-                    return next;
-                  });
-                }
-              } else {
-                alert(`Erro ao instalar ${name}: ${result.error || result.message}`);
-                setLoadingDependencies((prev) => {
-                  const next = new Set(prev);
-                  next.delete(name);
-                  return next;
-                });
-              }
-            } catch (error) {
-              console.error(`Failed to install ${name}:`, error);
-              alert(`Erro ao instalar ${name}`);
-              setLoadingDependencies((prev) => {
-                const next = new Set(prev);
-                next.delete(name);
-                return next;
-              });
-            } finally {
-              console.log(`[UI] Finalizando instalação de ${name}`);
-              setInstallingDependency(null);
-            }
-          }}
+          onInstallDependency={(name, viewMode, options) =>
+            startDependencyOperationSession(name, "install", viewMode, options)
+          }
+          onUninstallDependency={(name, viewMode) =>
+            startDependencyOperationSession(name, "uninstall", viewMode)
+          }
+          onCancelInstallSession={cancelActiveDependencyInstallSession}
+          onDownloadInstallLogs={downloadDependencyLogsAsTxt}
         />
       )}
 

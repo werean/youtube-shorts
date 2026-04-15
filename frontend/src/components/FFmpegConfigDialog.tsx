@@ -15,6 +15,7 @@ import {
   Toggle,
   ConfigSection,
 } from "./WhisperConfigComponents";
+import { AppButton } from "./shared";
 
 interface FFmpegConfigDialogProps {
   action: ActionState;
@@ -129,16 +130,16 @@ export function FFmpegConfigDialog({
         style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "1100px", width: "95vw" }}
       >
         <div className="dialog-header">
-          <h3>🎬 Configurar FFmpeg</h3>
+          <h3>Configurar FFmpeg</h3>
           <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onCancel}>
-              ✕
-            </button>
+            <AppButton variant="secondary" onClick={onCancel} style={{ padding: "8px 12px" }}>
+              Fechar
+            </AppButton>
           </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
-          <ConfigSection title="Opções Básicas" icon="⚡">
+          <ConfigSection title="Opções Básicas">
             <ConfigField
               label="Formato"
               description="Tipo de arquivo de saída"
@@ -184,28 +185,28 @@ export function FFmpegConfigDialog({
             style={{
               marginTop: "24px",
               paddingTop: "16px",
-              borderTop: "1px solid #e5e7eb",
+              borderTop: "1px solid var(--border)",
             }}
           >
-            <button
+            <AppButton
               onClick={() => setShowAdvanced(!showAdvanced)}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
                 padding: "12px 16px",
-                backgroundColor: "#f9fafb",
-                border: "1px solid #e5e7eb",
+                backgroundColor: "var(--bg-contrast)",
+                border: "1px solid var(--border)",
                 borderRadius: "8px",
                 cursor: "pointer",
                 fontWeight: "600",
                 fontSize: "14px",
-                color: "#1f2937",
+                color: "var(--ink)",
                 width: "100%",
                 justifyContent: "space-between",
               }}
             >
-              <span>⚙️ Configurações Avançadas</span>
+              <span>Configurações Avançadas</span>
               <span
                 style={{
                   transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
@@ -214,14 +215,14 @@ export function FFmpegConfigDialog({
               >
                 ▼
               </span>
-            </button>
+            </AppButton>
           </div>
 
           {/* Advanced Sections */}
           {showAdvanced && (
             <>
               {/* Quality Options */}
-              <ConfigSection title="Qualidade e Taxa de Bits" icon="📊">
+              <ConfigSection title="Qualidade e Taxa de Bits">
                 <ConfigField
                   label="Taxa de bits de vídeo"
                   description="Quanto dados o vídeo ocupa (qualidade)"
@@ -248,7 +249,7 @@ export function FFmpegConfigDialog({
               </ConfigSection>
 
               {/* Video Advanced */}
-              <ConfigSection title="Opções de Vídeo" icon="🎥">
+              <ConfigSection title="Opções de Vídeo">
                 <ConfigField
                   label="Taxa de quadros"
                   description="Quantas imagens por segundo"
@@ -291,7 +292,7 @@ export function FFmpegConfigDialog({
               </ConfigSection>
 
               {/* Audio Advanced */}
-              <ConfigSection title="Opções de Áudio" icon="🔊">
+              <ConfigSection title="Opções de Áudio">
                 <ConfigField
                   label="Taxa de amostragem"
                   description="Frequência do som (som é medido em amostras)"
@@ -338,7 +339,7 @@ export function FFmpegConfigDialog({
               </ConfigSection>
 
               {/* Metadata & Other */}
-              <ConfigSection title="Outros" icon="📝">
+              <ConfigSection title="Outros">
                 <ConfigField
                   label="Remover legendas"
                   description="Não incluir legendas no arquivo"
@@ -367,25 +368,25 @@ export function FFmpegConfigDialog({
             style={{
               marginTop: "32px",
               padding: "16px",
-              backgroundColor: "#f3f4f6",
+              backgroundColor: "var(--bg-contrast)",
               borderRadius: "8px",
-              border: "1px solid #e5e7eb",
+              border: "1px solid var(--border)",
             }}
           >
             <div
               style={{
                 fontSize: "12px",
                 fontWeight: "600",
-                color: "#666",
+                color: "var(--muted)",
                 marginBottom: "8px",
               }}
             >
-              📋 Comando FFmpeg (Prévia)
+              Comando FFmpeg (Prévia)
             </div>
             <div
               style={{
-                backgroundColor: "#1f2937",
-                color: "#10b981",
+                backgroundColor: "var(--bg)",
+                color: "var(--ink)",
                 padding: "12px",
                 borderRadius: "6px",
                 fontFamily: "monospace",
@@ -400,7 +401,7 @@ export function FFmpegConfigDialog({
             <div
               style={{
                 fontSize: "11px",
-                color: "#999",
+                color: "var(--muted)",
                 marginTop: "8px",
                 fontStyle: "italic",
               }}
@@ -413,27 +414,27 @@ export function FFmpegConfigDialog({
           <div
             style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "24px" }}
           >
-            <button
-              onClick={handleSave}
-              disabled={action.busy}
-              className="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
-            >
-              ✓ Salvar Configurações
-            </button>
-            <button
+            <AppButton
               onClick={onCancel}
-              className="secondary"
+              variant="secondary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
               }}
             >
               Cancelar
-            </button>
+            </AppButton>
+            <AppButton
+              onClick={handleSave}
+              disabled={action.busy}
+              variant="primary"
+              style={{
+                padding: "10px 20px",
+                borderRadius: "8px",
+              }}
+            >
+              Salvar Configurações
+            </AppButton>
           </div>
         </div>
       </div>

@@ -87,7 +87,7 @@ export function CreatePipelineDialog({
             <p
               style={{
                 fontSize: "0.8rem",
-                color: "#666",
+                color: "var(--muted)",
                 marginBottom: "12px",
                 fontStyle: "italic",
                 margin: "0 0 12px 0",
@@ -98,16 +98,16 @@ export function CreatePipelineDialog({
 
             <div
               style={{
-                border: "1px solid #ddd",
+                border: "1px solid var(--border)",
                 borderRadius: "6px",
                 padding: "10px",
-                backgroundColor: "#fafafa",
+                backgroundColor: "var(--bg-contrast)",
                 maxHeight: "280px",
                 overflowY: "auto",
               }}
             >
               {videos.length === 0 ? (
-                <p style={{ textAlign: "center", color: "#999", padding: "20px" }}>
+                <p style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>
                   Nenhum vídeo disponível
                 </p>
               ) : (
@@ -128,11 +128,11 @@ export function CreatePipelineDialog({
                           padding: "8px",
                           borderRadius: "4px",
                           backgroundColor: selectedVideoIds.includes(video.id)
-                            ? "#e3f2fd"
-                            : "white",
+                            ? "var(--bg-3)"
+                            : "var(--panel)",
                           cursor: "pointer",
                           border: selectedVideoIds.includes(video.id)
-                            ? "1px solid #90caf9"
+                            ? "1px solid var(--accent-2)"
                             : "1px solid transparent",
                         }}
                       >
@@ -150,7 +150,7 @@ export function CreatePipelineDialog({
                             <div
                               style={{
                                 fontSize: "0.75rem",
-                                color: "#d97706",
+                                color: "var(--warning)",
                                 lineHeight: "1.3",
                               }}
                             >
@@ -174,7 +174,7 @@ export function CreatePipelineDialog({
             <p
               style={{
                 fontSize: "0.8rem",
-                color: "#666",
+                color: "var(--muted)",
                 marginBottom: "12px",
                 fontStyle: "italic",
                 margin: "0 0 12px 0",
@@ -198,8 +198,8 @@ export function CreatePipelineDialog({
                   gap: "6px",
                   padding: "10px",
                   borderRadius: "6px",
-                  backgroundColor: "#e8f5e9",
-                  border: "1px solid #a5d6a7",
+                  backgroundColor: "var(--bg-contrast)",
+                  border: "1px solid var(--border)",
                   cursor: "not-allowed",
                   opacity: 0.7,
                 }}
@@ -213,7 +213,7 @@ export function CreatePipelineDialog({
                   />
                   <span style={{ fontWeight: "500", fontSize: "0.85rem" }}>Transcrever</span>
                 </div>
-                <span style={{ fontSize: "0.7rem", color: "#555" }}>(obrigatório)</span>
+                <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>(obrigatório)</span>
               </label>
 
               {/* Gerar Análise */}
@@ -224,8 +224,8 @@ export function CreatePipelineDialog({
                   gap: "6px",
                   padding: "10px",
                   borderRadius: "6px",
-                  backgroundColor: options.analyze ? "#fff3e0" : "#f5f5f5",
-                  border: options.analyze ? "1px solid #ffb74d" : "1px solid #e0e0e0",
+                  backgroundColor: options.analyze ? "var(--bg-3)" : "var(--bg-contrast)",
+                  border: options.analyze ? "1px solid var(--accent-2)" : "1px solid var(--border)",
                   cursor: "pointer",
                 }}
               >
@@ -238,7 +238,7 @@ export function CreatePipelineDialog({
                   />
                   <span style={{ fontWeight: "500", fontSize: "0.85rem" }}>Gerar Análise</span>
                 </div>
-                <span style={{ fontSize: "0.7rem", color: "#666" }}>com IA</span>
+                <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>com IA</span>
               </label>
 
               {/* Renderizar */}
@@ -249,8 +249,8 @@ export function CreatePipelineDialog({
                   gap: "6px",
                   padding: "10px",
                   borderRadius: "6px",
-                  backgroundColor: options.analyze ? "#f3e5f5" : "#f5f5f5",
-                  border: options.analyze ? "1px solid #ce93d8" : "1px solid #e0e0e0",
+                  backgroundColor: options.analyze ? "var(--bg-3)" : "var(--bg-contrast)",
+                  border: options.analyze ? "1px solid var(--accent-2)" : "1px solid var(--border)",
                   cursor: options.analyze ? "pointer" : "not-allowed",
                   opacity: options.analyze ? 1 : 0.6,
                 }}
@@ -265,7 +265,7 @@ export function CreatePipelineDialog({
                   />
                   <span style={{ fontWeight: "500", fontSize: "0.85rem" }}>Renderizar</span>
                 </div>
-                <span style={{ fontSize: "0.7rem", color: "#666" }}>
+                <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                   {options.analyze ? "vídeos" : "(requer análise)"}
                 </span>
               </label>

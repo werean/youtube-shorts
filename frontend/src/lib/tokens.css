@@ -1,0 +1,125 @@
+:root {
+  --bg-0: #09090b;
+  --bg-1: #111113;
+  --bg-2: #18181b;
+  --bg-3: #27272a;
+  --bg-4: #3f3f46;
+
+  --border-1: rgba(255, 255, 255, 0.06);
+  --border-2: rgba(255, 255, 255, 0.1);
+  --border-3: rgba(255, 255, 255, 0.18);
+
+  --text-1: #fafafa;
+  --text-2: #a1a1aa;
+  --text-3: #52525b;
+
+  --accent: #ffffff;
+  --accent-fg: #09090b;
+
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.08);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.08);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.08);
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-0: #fafafa;
+  --bg-1: #f4f4f5;
+  --bg-2: #e4e4e7;
+  --bg-3: #d4d4d8;
+  --bg-4: #a1a1aa;
+
+  --border-1: rgba(9, 9, 11, 0.08);
+  --border-2: rgba(9, 9, 11, 0.14);
+  --border-3: rgba(9, 9, 11, 0.24);
+
+  --text-1: #09090b;
+  --text-2: #52525b;
+  --text-3: #a1a1aa;
+
+  --accent: #09090b;
+  --accent-fg: #fafafa;
+
+  --success: #15803d;
+  --success-bg: rgba(21, 128, 61, 0.08);
+  --warning: #b45309;
+  --warning-bg: rgba(180, 83, 9, 0.08);
+  --danger: #b91c1c;
+  --danger-bg: rgba(185, 28, 28, 0.08);
+
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: var(--border-1);
+  }
+
+  body {
+    font-family: Geist, system-ui, sans-serif;
+    background-color: var(--bg-0);
+    color: var(--text-1);
+    font-size: 14px;
+    line-height: 1.6;
+    font-weight: 400;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    line-height: 1.2;
+    font-weight: 500;
+    color: var(--text-1);
+  }
+
+  label,
+  .ds-label,
+  .ds-caption {
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .ds-label {
+    font-size: 10px;
+  }
+
+  .ds-caption {
+    font-size: 11px;
+  }
+}
+
+@layer utilities {
+  .ds-transition-color {
+    transition:
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .ds-transition-layout {
+    transition:
+      width 300ms ease,
+      height 300ms ease,
+      transform 300ms ease,
+      opacity 300ms ease;
+  }
+
+  .ds-border {
+    border-width: 0.5px;
+    border-style: solid;
+    border-color: var(--border-1);
+  }
+
+  .ds-border-strong {
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--border-3);
+  }
+}

@@ -23,16 +23,16 @@ export function BlocksDialog({ blocks, onClose }: BlocksDialogProps) {
                 style={{
                   marginBottom: "16px",
                   padding: "12px",
-                  backgroundColor: "#f5f5f5",
+                  backgroundColor: "var(--bg-contrast)",
                   borderRadius: "8px",
-                  borderLeft: "4px solid #0066cc",
+                  borderLeft: "4px solid var(--accent-2)",
                 }}
               >
                 <div style={{ marginBottom: "8px" }}>
                   <strong>Bloco {index + 1}</strong>
                   {block.block_id && <span> ({block.block_id})</span>}
                 </div>
-                <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "#666" }}>
+                <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "var(--muted)" }}>
                   {block.start?.toFixed(2)}s - {block.end?.toFixed(2)}s
                 </div>
                 <div style={{ lineHeight: "1.6" }}>{block.text}</div>

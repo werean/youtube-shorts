@@ -6,6 +6,7 @@ export { useSettings } from "./useSettings";
 export { useAppAction, type ActionState } from "./useAppAction";
 export { useUIState } from "./useUIState";
 export { useUpload } from "./useUpload";
+export { useAIAnalysis } from "./useAIAnalysis";
 export { useAnalysis } from "./useAnalysis";
 
 // New utility hooks

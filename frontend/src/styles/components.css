@@ -69,7 +69,7 @@ button {
 
 button.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--bg);
 }
 
 button.primary:hover:not(:disabled) {
@@ -88,7 +88,7 @@ button.secondary:hover:not(:disabled) {
 
 button.accent {
   background: var(--accent-2);
-  color: #fff;
+  color: var(--bg);
 }
 
 button.ghost {
@@ -99,6 +99,18 @@ button.ghost {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.button-with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.button-with-icon .material-icons {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .icon-btn {
@@ -137,7 +149,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 16px;
-  background: #fffdf8;
+  background: var(--bg-contrast);
 }
 
 .cut-card header {
@@ -177,7 +189,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 16px;
-  background: #fffdf8;
+  background: var(--bg-contrast);
 }
 
 .short-card header {
@@ -208,15 +220,15 @@ button:disabled {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  background: #1f1a14;
-  color: #fff;
+  background: var(--bg-4);
+  color: var(--ink);
   padding: 14px 18px;
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
 
 .toast.error {
-  background: #c75555;
+  background: var(--danger);
 }
 
 /* Video List */
@@ -226,7 +238,7 @@ button:disabled {
 }
 
 .video-item {
-  background: #fffdf8;
+  background: var(--bg-contrast);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
@@ -285,7 +297,7 @@ button:disabled {
 
 .tab.active {
   background: var(--accent-2);
-  color: #fff;
+  color: var(--bg);
   border-color: transparent;
 }
 
@@ -293,7 +305,7 @@ button:disabled {
 .menu-button {
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--bg-contrast);
   padding: 6px 12px;
   font-weight: 700;
   line-height: 1;
@@ -304,7 +316,7 @@ button:disabled {
   right: 12px;
   bottom: -8px;
   transform: translateY(100%);
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 8px;
@@ -323,9 +335,9 @@ button:disabled {
 }
 
 .menu-popover button.danger {
-  background: #f6dada;
-  border-color: #e6b5b5;
-  color: #7a1d1d;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--danger);
 }
 
 /* Video Player */
@@ -337,7 +349,7 @@ button:disabled {
 
 .video-player {
   border-radius: 12px;
-  background: #000;
+  background: var(--bg);
 }
 
 .loading-placeholder {
@@ -367,7 +379,7 @@ button:disabled {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: #fffdf8;
+  background: var(--bg-contrast);
   border: 1px solid var(--border);
   border-radius: 12px;
   text-align: center;
@@ -446,7 +458,7 @@ button:disabled {
 .config-card-button {
   width: 100%;
   border-radius: 8px;
-  color: white;
+  color: var(--ink);
   border: none;
   padding: 10px;
   cursor: pointer;
@@ -455,59 +467,59 @@ button:disabled {
 }
 
 .config-card-button.purple {
-  background: #8b5cf6;
+  background: var(--bg-3);
 }
 
 .config-card-button.purple:hover:not(:disabled) {
-  background: #7c3aed;
+  background: var(--bg-4);
 }
 
 .config-card-button.cyan {
-  background: #06b6d4;
+  background: var(--bg-3);
 }
 
 .config-card-button.cyan:hover:not(:disabled) {
-  background: #0891b2;
+  background: var(--bg-4);
 }
 
 .config-card-button.orange {
-  background: #f59e0b;
+  background: var(--bg-3);
 }
 
 .config-card-button.orange:hover:not(:disabled) {
-  background: #d97706;
+  background: var(--bg-4);
 }
 
 .config-card-button.pink {
-  background: #ec4899;
+  background: var(--bg-3);
 }
 
 .config-card-button.pink:hover:not(:disabled) {
-  background: #db2777;
+  background: var(--bg-4);
 }
 
 .config-card-button.green {
-  background: #10b981;
+  background: var(--bg-3);
 }
 
 .config-card-button.green:hover:not(:disabled) {
-  background: #059669;
+  background: var(--bg-4);
 }
 
 .config-card-button.indigo {
-  background: #6366f1;
+  background: var(--bg-3);
 }
 
 .config-card-button.indigo:hover:not(:disabled) {
-  background: #4f46e5;
+  background: var(--bg-4);
 }
 
 .config-card-button.blue {
-  background: #3b82f6;
+  background: var(--bg-3);
 }
 
 .config-card-button.blue:hover:not(:disabled) {
-  background: #2563eb;
+  background: var(--bg-4);
 }
 
 .config-card-description {
@@ -530,9 +542,9 @@ button:disabled {
   margin-top: 12px;
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid #e5e7eb;
-  background: #0f172a;
-  color: #e2e8f0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--ink);
   font-family: monospace;
   font-size: 12px;
 }
@@ -542,7 +554,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
-  color: #93c5fd;
+  color: var(--accent-2);
   font-weight: 600;
 }
 
@@ -609,7 +621,7 @@ button:disabled {
 /* Video Player */
 .video-player-wrapper {
   width: 100%;
-  background: #000;
+  background: var(--bg);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -626,7 +638,7 @@ button:disabled {
 .batch-logs {
   margin-top: 16px;
   padding: 16px;
-  background: #f9fafb;
+  background: var(--bg-contrast);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -640,8 +652,8 @@ button:disabled {
 .batch-logs-content {
   max-height: 200px;
   overflow-y: auto;
-  background: #1f2937;
-  color: #f3f4f6;
+  background: var(--bg);
+  color: var(--ink);
   padding: 12px;
   border-radius: 6px;
   font-family: monospace;
@@ -660,8 +672,8 @@ button:disabled {
 /* Cancel Button */
 .cancel-button {
   border-radius: 6px;
-  background: #ef4444;
-  color: white;
+  background: var(--danger);
+  color: var(--ink);
   border: none;
   padding: 4px 8px;
   cursor: pointer;
@@ -671,7 +683,7 @@ button:disabled {
 }
 
 .cancel-button:hover:not(:disabled) {
-  background: #dc2626;
+  background: var(--danger);
 }
 
 /* Action Card */
@@ -679,7 +691,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: #fff;
+  background: var(--panel);
 }
 
 /* Checkbox Container */
@@ -702,8 +714,8 @@ button:disabled {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #f0f0f0;
-  border-top: 2px solid #666;
+  border: 2px solid var(--border);
+  border-top: 2px solid var(--muted);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }

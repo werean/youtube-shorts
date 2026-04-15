@@ -35,7 +35,7 @@ export function CurationSection({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#666",
+            color: "var(--muted)",
           }}
           title={isExpanded ? "Recolher" : "Expandir"}
         >
@@ -57,8 +57,8 @@ export function CurationSection({
               style={{
                 width: "20px",
                 height: "20px",
-                border: "3px solid #f0f0f0",
-                borderTop: "3px solid #666",
+                border: "3px solid var(--border)",
+                borderTop: "3px solid var(--muted)",
                 borderRadius: "50%",
                 animation: "spin 1s linear infinite",
               }}

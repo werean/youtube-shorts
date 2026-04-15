@@ -42,3 +42,5 @@ export function RenderingPanel({ renderOutputs, isRendering }: RenderingPanelPro
     </section>
   );
 }
+
+

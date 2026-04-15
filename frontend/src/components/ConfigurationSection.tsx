@@ -1,3 +1,5 @@
+import { AppButton } from "./shared";
+
 interface ConfigurationSectionProps {
   onConfigureApp: () => void;
   onManageDependencies: () => void;
@@ -13,57 +15,51 @@ export function ConfigurationSection({
   onConfigureWhisper,
   onConfigureFFmpeg,
 }: ConfigurationSectionProps) {
+  const cards = [
+    {
+      title: "Configurar aplicação",
+      description: "Define onde os vídeos, shorts e transcrições serão armazenados.",
+      className: "purple",
+      onClick: onConfigureApp,
+    },
+    {
+      title: "Gerenciar dependências",
+      description: "Verifica se as ferramentas necessárias estão instaladas.",
+      className: "cyan",
+      onClick: onManageDependencies,
+    },
+    {
+      title: "Configurar LLM",
+      description: "Configura o modelo de IA para análise de vídeos.",
+      className: "orange",
+      onClick: onConfigureLLM,
+    },
+    {
+      title: "Configurar Whisper",
+      description: "Define o modelo Whisper e parâmetros de transcrição.",
+      className: "green",
+      onClick: onConfigureWhisper,
+    },
+    {
+      title: "Configurar FFmpeg",
+      description: "Define parâmetros de renderização de vídeo.",
+      className: "pink",
+      onClick: onConfigureFFmpeg,
+    },
+  ];
+
   return (
     <section className="panel">
-      <h2>Configurações</h2>
+      <h2 style={{ marginBottom: "12px" }}>Configurações</h2>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-        {/* Card Configurar Aplicação */}
-        <div className="config-card">
-          <button onClick={onConfigureApp} className="config-card-button purple">
-            ⚙️ Configurar aplicação
-          </button>
-          <p className="config-card-description">
-            Define onde os vídeos, shorts e transcrições serão armazenados.
-          </p>
-        </div>
-
-        {/* Card Dependências */}
-        <div className="config-card">
-          <button onClick={onManageDependencies} className="config-card-button cyan">
-            📦 Gerenciar dependências
-          </button>
-          <p className="config-card-description">
-            Verifica se as ferramentas necessárias estão instaladas.
-          </p>
-        </div>
-
-        {/* Card LLM */}
-        <div className="config-card">
-          <button onClick={onConfigureLLM} className="config-card-button orange">
-            🤖 Configurar LLM
-          </button>
-          <p className="config-card-description">
-            Configura o modelo de IA para análise de vídeos.
-          </p>
-        </div>
-
-        {/* Card Whisper */}
-        <div className="config-card">
-          <button onClick={onConfigureWhisper} className="config-card-button green">
-            🎤 Configurar Whisper
-          </button>
-          <p className="config-card-description">
-            Define o modelo Whisper e parâmetros de transcrição.
-          </p>
-        </div>
-
-        {/* Card FFmpeg */}
-        <div className="config-card">
-          <button onClick={onConfigureFFmpeg} className="config-card-button pink">
-            🎬 Configurar FFmpeg
-          </button>
-          <p className="config-card-description">Define parâmetros de renderização de vídeo.</p>
-        </div>
+        {cards.map((card) => (
+          <div key={card.title} className="config-card">
+            <AppButton onClick={card.onClick} className={`config-card-button ${card.className}`}>
+              {card.title}
+            </AppButton>
+            <p className="config-card-description">{card.description}</p>
+          </div>
+        ))}
       </div>
     </section>
   );

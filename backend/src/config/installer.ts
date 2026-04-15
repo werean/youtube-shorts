@@ -61,6 +61,28 @@ export const INSTALLATION_GUIDES: Record<
       description: "Instala Whisper via pip",
     },
   },
+  ytdlp: {
+    name: "yt-dlp",
+    manual: {
+      title: "Instalação Manual do yt-dlp",
+      description: "yt-dlp é usado para download/ingest de vídeos do YouTube e outras plataformas.",
+      steps: [
+        "1. Abra um terminal/PowerShell",
+        "2. Execute: pip install -U yt-dlp",
+        "3. Verifique a instalação com: yt-dlp --version",
+      ],
+      links: [
+        {
+          text: "yt-dlp - instalação oficial",
+          url: "https://github.com/yt-dlp/yt-dlp?tab=readme-ov-file#installation",
+        },
+      ],
+    },
+    automatic: {
+      command: "pip install -U yt-dlp",
+      description: "Instala yt-dlp via pip",
+    },
+  },
   ffmpeg: {
     name: "FFmpeg",
     manual: {
@@ -80,8 +102,8 @@ export const INSTALLATION_GUIDES: Record<
       links: [{ text: "FFmpeg Builds", url: "https://www.gyan.dev/ffmpeg/builds/" }],
     },
     automatic: {
-      command: "choco install ffmpeg -y",
-      description: "Usa Chocolatey para instalar FFmpeg",
+      command: "winget install Gyan.FFmpeg",
+      description: "Instala FFmpeg via winget",
     },
   },
   cuda: {
@@ -89,22 +111,17 @@ export const INSTALLATION_GUIDES: Record<
     manual: {
       title: "Instalação Manual do CUDA",
       description:
-        "CUDA permite usar GPU NVIDIA para processar vídeos mais rapidamente. Opcional mas recomendado.",
+        "Para a maioria dos usuários, o NVIDIA App já instala e mantém os componentes necessários de driver/CUDA automaticamente.",
       steps: [
-        "1. Acesse https://developer.nvidia.com/cuda-downloads",
-        "2. Selecione seu SO (Windows), arquitetura (x86_64) e versão:",
-        "   - Recomenda-se CUDA 12.1 ou superior",
-        "3. Baixe o instalador web (.exe)",
-        "4. Execute e siga as instruções",
-        "5. Adicione ao PATH (geralmente automático)",
-        "6. Reinicie o PC",
-        "7. Verifique com: nvidia-smi",
+        "1. Instale o NVIDIA App pelo link oficial",
+        "2. Abra o NVIDIA App e atualize para o driver recomendado mais recente",
+        "3. Reinicie o computador, se solicitado",
+        "4. Verifique no terminal com: nvidia-smi",
       ],
       links: [
-        { text: "CUDA Downloads", url: "https://developer.nvidia.com/cuda-downloads" },
         {
-          text: "Instalação Detalhada",
-          url: "https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/",
+          text: "NVIDIA App (oficial)",
+          url: "https://www.nvidia.com/pt-br/software/nvidia-app/",
         },
       ],
     },
@@ -122,17 +139,20 @@ export const INSTALLATION_GUIDES: Record<
         "   - OS: Windows",
         "   - Package: pip",
         "   - Language: Python",
-        "   - Compute Platform: CUDA 12.1 (ou CPU se sem GPU)",
-        "3. Copie o comando gerado (ex: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121)",
+        "   - Compute Platform: CUDA 12.1 (RTX 4000 ou inferior) ou Nightly CUDA 12.8 (RTX 5000 series)",
+        "3. Copie o comando gerado.",
+        "   - RTX 4000 ou inferior: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121",
+        "   - RTX 5000 series: pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128",
         "4. Abra terminal e execute o comando",
-        '5. Verifique com: python -c "import torch; print(torch.__version__)"',
+        '5. Verifique com: python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"',
       ],
       links: [{ text: "PyTorch Get Started", url: "https://pytorch.org/get-started/locally/" }],
     },
     automatic: {
       command:
         "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121",
-      description: "Instala PyTorch com suporte CUDA 12.1",
+      description:
+        "Instala PyTorch com suporte CUDA 12.1 (RTX 4000 ou inferior). Para RTX 5000, use Nightly CUDA 12.8.",
     },
   },
   ollama: {

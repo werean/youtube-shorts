@@ -1,3 +1,5 @@
+@import "../lib/tokens.css";
+
 /* YouTube Shorts - Main Stylesheet */
 
 /* Core */
@@ -15,3 +17,7 @@
 
 /* Responsive */
 @import "./media.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

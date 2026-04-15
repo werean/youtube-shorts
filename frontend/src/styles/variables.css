@@ -1,20 +1,25 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Fraunces:wght@500;700&display=swap");
-
 :root {
-  color-scheme: light;
-  font-family: "Archivo", sans-serif;
+  color-scheme: dark;
+  font-family: Geist, system-ui, sans-serif;
 
   /* Colors */
-  --bg: #f6efe4;
-  --bg-contrast: #efe3d2;
-  --ink: #1c1a16;
-  --muted: #5b5349;
-  --accent: #d97b2b;
-  --accent-dark: #b86423;
-  --accent-2: #1f8a70;
-  --panel: #fff7ec;
-  --border: #e3d7c5;
+  --bg: #09090b;
+  --bg-1: #111113;
+  --bg-2: #18181b;
+  --bg-3: #27272a;
+  --bg-4: #3f3f46;
+  --bg-contrast: #18181b;
+  --ink: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #fafafa;
+  --accent-dark: #d4d4d8;
+  --accent-2: #d4d4d8;
+  --panel: #111113;
+  --border: #27272a;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
 
   /* Effects */
-  --shadow: 0 20px 50px rgba(31, 20, 10, 0.12);
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
 }

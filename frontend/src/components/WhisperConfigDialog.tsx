@@ -12,6 +12,7 @@ import {
   ConfigSection,
 } from "./WhisperConfigComponents";
 import { generateWhisperCommand } from "../utils/whisperCommandBuilder";
+import { AppButton } from "./shared";
 
 interface WhisperConfigDialogProps {
   whisperDevice: "cpu" | "cuda";
@@ -278,16 +279,16 @@ export function WhisperConfigDialog({
         style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "1100px", width: "95vw" }}
       >
         <div className="dialog-header">
-          <h3>🎙️ Configurar Whisper</h3>
+          <h3>Configurar Whisper</h3>
           <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onCancel}>
-              ✕
-            </button>
+            <AppButton variant="secondary" onClick={onCancel} style={{ padding: "8px 12px" }}>
+              Fechar
+            </AppButton>
           </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
-          <ConfigSection title="Opções Básicas" icon="⚡">
+          <ConfigSection title="Opções Básicas">
             <ConfigField
               label="Modelo"
               description="Escolha entre modelos rápidos ou precisos"
@@ -307,15 +308,15 @@ export function WhisperConfigDialog({
                       style={{
                         marginTop: "12px",
                         padding: "12px",
-                        backgroundColor: "#f5f5f5",
+                        backgroundColor: "var(--bg-contrast)",
                         borderRadius: "6px",
                         fontSize: "12px",
                         lineHeight: "1.6",
-                        color: "#333",
+                        color: "var(--ink)",
                       }}
                     >
                       <div style={{ fontWeight: "600", marginBottom: "8px" }}>
-                        📊 Especificações: {selectedModel.label}
+                        Especificações: {selectedModel.label}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                         <div>
@@ -331,14 +332,18 @@ export function WhisperConfigDialog({
                           <strong>Tempo (1h audio):</strong> {selectedModel.time_1h_audio}
                         </div>
                         <div style={{ gridColumn: "1 / -1" }}>
-                          <strong>Qualidade:</strong> {"⭐".repeat(selectedModel.quality)}
-                          {"☆".repeat(5 - selectedModel.quality)}
+                          <strong>Qualidade:</strong> {selectedModel.quality}/5
                         </div>
                         <div style={{ gridColumn: "1 / -1" }}>
-                          <strong>Velocidade:</strong> {"🚀".repeat(selectedModel.speed)}
-                          {"🐢".repeat(5 - selectedModel.speed)}
+                          <strong>Velocidade:</strong> {selectedModel.speed}/5
                         </div>
-                        <div style={{ gridColumn: "1 / -1", color: "#666", fontStyle: "italic" }}>
+                        <div
+                          style={{
+                            gridColumn: "1 / -1",
+                            color: "var(--muted)",
+                            fontStyle: "italic",
+                          }}
+                        >
                           <strong>Recomendado:</strong> {selectedModel.recommended_use}
                         </div>
                       </div>
@@ -381,7 +386,7 @@ export function WhisperConfigDialog({
           </ConfigSection>
 
           {/* Device & Output Section */}
-          <ConfigSection title="Dispositivo e Saída" icon="💾">
+          <ConfigSection title="Dispositivo e Saída">
             <ConfigField
               label="Dispositivo"
               description="Usar processador comum ou placa gráfica (GPU)"
@@ -389,23 +394,24 @@ export function WhisperConfigDialog({
             >
               <div style={{ display: "flex", gap: "8px" }}>
                 {(["cpu", "cuda"] as const).map((dev) => (
-                  <button
+                  <AppButton
                     key={dev}
                     onClick={() => setDevice(dev)}
                     style={{
                       flex: 1,
                       padding: "12px",
                       borderRadius: "8px",
-                      border: device === dev ? "2px solid #3b82f6" : "1px solid #ccc",
-                      background: device === dev ? "#e0e7ff" : "#fff",
+                      border:
+                        device === dev ? "2px solid var(--accent-2)" : "1px solid var(--border)",
+                      background: device === dev ? "var(--bg-3)" : "var(--panel)",
                       cursor: "pointer",
                       fontWeight: device === dev ? "600" : "400",
-                      color: device === dev ? "#3b82f6" : "#666",
+                      color: device === dev ? "var(--accent-2)" : "var(--muted)",
                       fontSize: "14px",
                     }}
                   >
-                    {dev === "cpu" ? "💻 CPU" : "🚀 CUDA"}
-                  </button>
+                    {dev === "cpu" ? "CPU" : "CUDA"}
+                  </AppButton>
                 ))}
               </div>
             </ConfigField>
@@ -428,28 +434,28 @@ export function WhisperConfigDialog({
             style={{
               marginTop: "24px",
               paddingTop: "16px",
-              borderTop: "1px solid #e5e7eb",
+              borderTop: "1px solid var(--border)",
             }}
           >
-            <button
+            <AppButton
               onClick={() => setShowAdvanced(!showAdvanced)}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
                 padding: "12px 16px",
-                backgroundColor: "#f9fafb",
-                border: "1px solid #e5e7eb",
+                backgroundColor: "var(--bg-contrast)",
+                border: "1px solid var(--border)",
                 borderRadius: "8px",
                 cursor: "pointer",
                 fontWeight: "600",
                 fontSize: "14px",
-                color: "#1f2937",
+                color: "var(--bg)",
                 width: "100%",
                 justifyContent: "space-between",
               }}
             >
-              <span>⚙️ Configurações Avançadas</span>
+              <span>Configurações Avançadas</span>
               <span
                 style={{
                   transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
@@ -458,14 +464,14 @@ export function WhisperConfigDialog({
               >
                 ▼
               </span>
-            </button>
+            </AppButton>
           </div>
 
           {/* Advanced Sections */}
           {showAdvanced && (
             <>
               {/* Search & Sampling Section */}
-              <ConfigSection title="Busca e Amostragem" icon="🔍">
+              <ConfigSection title="Busca e Amostragem">
                 <ConfigField
                   label="Modo verbose"
                   description="Exibir detalhes durante a transcrição"
@@ -543,7 +549,7 @@ export function WhisperConfigDialog({
               </ConfigSection>
 
               {/* Token & Prompt Section */}
-              <ConfigSection title="Token e Prompt" icon="💬">
+              <ConfigSection title="Token e Prompt">
                 <ConfigField
                   label="Suprimir tokens"
                   description="Ignorar certos símbolos e caracteres especiais"
@@ -590,7 +596,7 @@ export function WhisperConfigDialog({
               </ConfigSection>
 
               {/* Advanced Decoding Section */}
-              <ConfigSection title="Decodificação Avançada" icon="🧠">
+              <ConfigSection title="Decodificação Avançada">
                 <ConfigField
                   label="FP16"
                   description="Usar modo rápido (menos preciso mas mais veloz)"
@@ -654,7 +660,7 @@ export function WhisperConfigDialog({
               </ConfigSection>
 
               {/* Timestamp & Word Options Section */}
-              <ConfigSection title="Timestamps e Palavras" icon="⏱️">
+              <ConfigSection title="Timestamps e Palavras">
                 <ConfigField
                   label="Timestamps de palavras"
                   description="Saber em que segundo cada palavra foi dita"
@@ -694,7 +700,7 @@ export function WhisperConfigDialog({
 
               {/* Output Formatting Section */}
               {word_timestamps && (
-                <ConfigSection title="Formatação de Saída" icon="📝">
+                <ConfigSection title="Formatação de Saída">
                   <ConfigField
                     label="Largura máxima de linha"
                     description="Quebrar linha após X caracteres"
@@ -740,7 +746,7 @@ export function WhisperConfigDialog({
               )}
 
               {/* Performance Section */}
-              <ConfigSection title="Performance" icon="⚙️">
+              <ConfigSection title="Performance">
                 <ConfigField
                   label="Threads"
                   description="Usar mais núcleos do computador para processar mais rápido"
@@ -790,25 +796,25 @@ export function WhisperConfigDialog({
             style={{
               marginTop: "32px",
               padding: "16px",
-              backgroundColor: "#f3f4f6",
+              backgroundColor: "var(--bg-contrast)",
               borderRadius: "8px",
-              border: "1px solid #e5e7eb",
+              border: "1px solid var(--border)",
             }}
           >
             <div
               style={{
                 fontSize: "12px",
                 fontWeight: "600",
-                color: "#666",
+                color: "var(--muted)",
                 marginBottom: "8px",
               }}
             >
-              📋 Comando Whisper (Prévia)
+              Comando Whisper (Prévia)
             </div>
             <div
               style={{
-                backgroundColor: "#1f2937",
-                color: "#10b981",
+                backgroundColor: "var(--bg)",
+                color: "var(--success)",
                 padding: "12px",
                 borderRadius: "6px",
                 fontFamily: "monospace",
@@ -823,7 +829,7 @@ export function WhisperConfigDialog({
             <div
               style={{
                 fontSize: "11px",
-                color: "#999",
+                color: "var(--muted)",
                 marginTop: "8px",
                 fontStyle: "italic",
               }}
@@ -836,27 +842,27 @@ export function WhisperConfigDialog({
           <div
             style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "24px" }}
           >
-            <button
-              onClick={handleSave}
-              disabled={action.busy}
-              className="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
-            >
-              ✓ Salvar Configurações
-            </button>
-            <button
+            <AppButton
               onClick={onCancel}
-              className="secondary"
+              variant="secondary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
               }}
             >
               Cancelar
-            </button>
+            </AppButton>
+            <AppButton
+              onClick={handleSave}
+              disabled={action.busy}
+              variant="primary"
+              style={{
+                padding: "10px 20px",
+                borderRadius: "8px",
+              }}
+            >
+              Salvar Configurações
+            </AppButton>
           </div>
         </div>
       </div>

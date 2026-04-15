@@ -20,7 +20,7 @@ export function RenameVideoDialog({
     <div className="dialog-overlay" onClick={onCancel}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <h3>Renomear Vídeo</h3>
-        <p style={{ color: "#666", marginBottom: "15px" }}>
+        <p style={{ color: "var(--muted)", marginBottom: "15px" }}>
           ⚠️ <strong>Importante:</strong> Não renomeie os arquivos no seu computador. Use apenas
           esta interface para manter a associação entre o vídeo, transcrições e shorts gerados.
         </p>
@@ -32,7 +32,7 @@ export function RenameVideoDialog({
           style={{
             width: "100%",
             padding: "10px",
-            border: "1px solid #ddd",
+            border: "1px solid var(--border)",
             borderRadius: "4px",
             marginBottom: "15px",
             boxSizing: "border-box",
