@@ -72,6 +72,7 @@ export interface DialogsProps {
   whisperFormats: string[];
   whisperConfig?: Partial<WhisperConfig>;
   configBaseDir: string;
+  configDownloadResolution: "1080p" | "1440p" | "4k";
   appSettings: any;
 
   // Callbacks
@@ -98,7 +99,11 @@ export interface DialogsProps {
   onSaveWhisperConfig: (config: Partial<WhisperConfig>) => Promise<void>;
 
   onCloseConfigureApp: () => void;
-  onSaveConfigureApp: (baseDir: string) => Promise<void>;
+  onSaveConfigureApp: (
+    baseDir: string,
+    resolution: "1080p" | "1440p" | "4k",
+    askDeleteCutConfirm: boolean,
+  ) => Promise<void>;
 
   onCloseInstallationDialog: () => void;
   onCloseMoveUploadDialog: () => void;
@@ -220,6 +225,7 @@ export function DialogsSection(props: DialogsProps): ReactNode {
       {props.showConfigureAppDialog && (
         <ConfigureAppDialog
           configBaseDir={props.configBaseDir}
+          configDownloadResolution={props.configDownloadResolution}
           appSettings={props.appSettings}
           action={props.action}
           onSave={props.onSaveConfigureApp}

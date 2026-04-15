@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { selectFolder } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
-import { AppButton, AppDialog, AppInput, AppSelect } from "./shared";
+import { AppButton, AppCheckboxField, AppDialog, AppInput, AppSelect } from "./shared";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;
   configDownloadResolution: string;
   appSettings: any;
   action: ActionState;
-  onSave: (baseDir: string, resolution: "1080p" | "1440p" | "4k") => void;
+  onSave: (
+    baseDir: string,
+    resolution: "1080p" | "1440p" | "4k",
+    askDeleteCutConfirm: boolean,
+  ) => void;
   onCancel: () => void;
 }
 
@@ -24,6 +28,9 @@ export function ConfigureAppDialog({
   const [resolution, setResolution] = useState<"1080p" | "1440p" | "4k">(
     initialResolution as "1080p" | "1440p" | "4k",
   );
+  const [askDeleteCutConfirm, setAskDeleteCutConfirm] = useState<boolean>(
+    appSettings?.preferences?.ask_delete_cut_confirm ?? true,
+  );
 
   const handlePickFolder = async () => {
     try {
@@ -38,7 +45,7 @@ export function ConfigureAppDialog({
 
   const handleSave = () => {
     if (baseDir.trim()) {
-      onSave(baseDir, resolution);
+      onSave(baseDir, resolution, askDeleteCutConfirm);
     }
   };
 
@@ -106,6 +113,17 @@ export function ConfigureAppDialog({
       </label>
       <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px", marginBottom: "20px" }}>
         Resolução atual: {appSettings?.media.download_resolution || "1080p"}
+      </p>
+
+      <AppCheckboxField
+        label="Habilitar mensagem ao apagar corte"
+        checked={askDeleteCutConfirm}
+        onChange={setAskDeleteCutConfirm}
+        labelFontSize="0.88rem"
+      />
+      <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px", marginBottom: "20px" }}>
+        Estado atual:{" "}
+        {appSettings?.preferences?.ask_delete_cut_confirm === false ? "Desabilitado" : "Habilitado"}
       </p>
 
       <div className="info-box light">

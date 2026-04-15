@@ -69,7 +69,6 @@ import { LLMConfigDialog } from "./components/LLMConfigDialog";
 import { ConfigureAppDialog } from "./components/ConfigureAppDialog";
 import { TimestampDialog } from "./components/TimestampDialog";
 import { SimpleDialogs } from "./components/SimpleDialogs";
-import { CurationSection } from "./components/CurationSection";
 import { RenderingSection } from "./components/RenderingSection";
 import { UploadSection } from "./components/UploadSection";
 import { VideoListSection } from "./components/VideoListSection";
@@ -79,7 +78,7 @@ import { TranscriptionDeleteDialog } from "./components/TranscriptionDeleteDialo
 import { BlocksDialog } from "./components/BlocksDialog";
 import { AiResponseDialog } from "./components/AiResponseDialog";
 import { RegenerateAnalyzeDialog } from "./components/RegenerateAnalyzeDialog";
-import { AppButton, AppDialog } from "./components/shared";
+import { AppButton, AppCheckboxField, AppDialog } from "./components/shared";
 import {
   formatTimestamp,
   buildRenderUrl as buildRenderUrlUtil,
@@ -217,6 +216,9 @@ export default function App() {
   const [newCutEndSeconds, setNewCutEndSeconds] = useState<string>("");
   const [showTranscriptionRegenerateConfirmDialog, setShowTranscriptionRegenerateConfirmDialog] =
     useState(false);
+  const [showDeleteCutConfirmDialog, setShowDeleteCutConfirmDialog] = useState(false);
+  const [pendingDeleteCutId, setPendingDeleteCutId] = useState<string | null>(null);
+  const [dontAskDeleteCutAgain, setDontAskDeleteCutAgain] = useState(false);
   const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
   const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
   const [batchPipelineOptions, setBatchPipelineOptions] = useState({
@@ -247,7 +249,6 @@ export default function App() {
   const [expandUploadSection, setExpandUploadSection] = useState(true);
   const [expandVideoListSection, setExpandVideoListSection] = useState(true);
   const [expandVideoPlayerSection, setExpandVideoPlayerSection] = useState(true);
-  const [expandCurationSection, setExpandCurationSection] = useState(false);
   const [expandRenderingSection, setExpandRenderingSection] = useState(true);
   const [activeTaskLogs, setActiveTaskLogs] = useState<string[]>([]);
   const [activeTaskLogType, setActiveTaskLogType] = useState<"transcription" | "render" | null>(
@@ -1432,6 +1433,69 @@ export default function App() {
     );
   }
 
+  async function deleteSuggestedCut(cutId: string) {
+    const newSuggestedCuts = suggestedCuts.filter((item) => item.cut_id !== cutId);
+    const newCuts = cuts.filter((item) => item.cut_id !== cutId);
+
+    setSuggestedCuts(newSuggestedCuts);
+    setCuts(newCuts);
+
+    if (activeVideo) {
+      try {
+        await updateCuts(activeVideo.job.job_id, newCuts);
+      } catch (error) {
+        console.error("Failed to update cuts:", error);
+      }
+    }
+
+    if (selectedSuggestedCutId === cutId) {
+      setSelectedSuggestedCutId(null);
+      videoRef.current?.pause();
+    }
+
+    setHoveredCutId(null);
+  }
+
+  function requestDeleteSuggestedCut(cutId: string) {
+    const shouldAsk = appSettings?.preferences?.ask_delete_cut_confirm ?? true;
+    if (!shouldAsk) {
+      void deleteSuggestedCut(cutId);
+      return;
+    }
+
+    setPendingDeleteCutId(cutId);
+    setDontAskDeleteCutAgain(false);
+    setShowDeleteCutConfirmDialog(true);
+  }
+
+  async function confirmDeleteSuggestedCut() {
+    if (!pendingDeleteCutId) {
+      setShowDeleteCutConfirmDialog(false);
+      return;
+    }
+
+    if (dontAskDeleteCutAgain) {
+      try {
+        const updated = await saveSettings({
+          preferences: {
+            ask_move_on_upload: appSettings?.preferences?.ask_move_on_upload ?? true,
+            move_uploads: appSettings?.preferences?.move_uploads ?? false,
+            ask_delete_cut_confirm: false,
+          },
+        });
+        setAppSettings(updated);
+      } catch (error) {
+        console.error("Failed to update delete-cut confirmation preference:", error);
+      }
+    }
+
+    const cutId = pendingDeleteCutId;
+    setPendingDeleteCutId(null);
+    setShowDeleteCutConfirmDialog(false);
+    setDontAskDeleteCutAgain(false);
+    await deleteSuggestedCut(cutId);
+  }
+
   function loadCutsForVideo(jobId: string) {
     return runAction(
       () => listCuts(jobId),
@@ -1545,6 +1609,7 @@ export default function App() {
         preferences: {
           ask_move_on_upload: askAgain,
           move_uploads: moveUploads,
+          ask_delete_cut_confirm: appSettings?.preferences?.ask_delete_cut_confirm ?? true,
         },
       });
       setAppSettings(updated);
@@ -2282,9 +2347,11 @@ export default function App() {
                                 style={{
                                   position: "absolute",
                                   right: "6px",
-                                  top: "4px",
+                                  top: "50%",
+                                  transform: "translateY(-50%)",
                                   display: "flex",
-                                  gap: "4px",
+                                  alignItems: "center",
+                                  gap: "6px",
                                 }}
                               >
                                 <button
@@ -2313,15 +2380,15 @@ export default function App() {
                                     setHoveredCutAction(null);
                                   }}
                                   style={{
-                                    width: "16px",
-                                    height: "16px",
+                                    width: "14px",
+                                    height: "14px",
                                     borderRadius: "4px",
                                     background: "transparent",
                                     border: "none",
                                     cursor: "pointer",
                                     padding: 0,
                                     fontSize: "12px",
-                                    lineHeight: "16px",
+                                    lineHeight: "14px",
                                     color:
                                       hoveredCutId === cut.cut_id && hoveredCutAction === "edit"
                                         ? "var(--accent-2)"
@@ -2329,35 +2396,17 @@ export default function App() {
                                   }}
                                   aria-label="Editar timestamp"
                                 >
-                                  E
+                                  <span
+                                    className="material-icons"
+                                    aria-hidden="true"
+                                    style={{ fontSize: "12px", lineHeight: 1 }}
+                                  >
+                                    edit
+                                  </span>
                                 </button>
                                 <button
                                   className="icon-btn"
-                                  onClick={async () => {
-                                    const newSuggestedCuts = suggestedCuts.filter(
-                                      (item) => item.cut_id !== cut.cut_id,
-                                    );
-                                    const newCuts = cuts.filter(
-                                      (item) => item.cut_id !== cut.cut_id,
-                                    );
-
-                                    setSuggestedCuts(newSuggestedCuts);
-                                    setCuts(newCuts);
-
-                                    if (activeVideo) {
-                                      try {
-                                        await updateCuts(activeVideo.job.job_id, newCuts);
-                                      } catch (error) {
-                                        console.error("Failed to update cuts:", error);
-                                      }
-                                    }
-
-                                    if (selectedSuggestedCutId === cut.cut_id) {
-                                      setSelectedSuggestedCutId(null);
-                                      videoRef.current?.pause();
-                                    }
-                                    setHoveredCutId(null);
-                                  }}
+                                  onClick={() => requestDeleteSuggestedCut(cut.cut_id)}
                                   onMouseEnter={() => {
                                     setHoveredCutId(cut.cut_id);
                                     setHoveredCutAction("delete");
@@ -2367,15 +2416,15 @@ export default function App() {
                                     setHoveredCutAction(null);
                                   }}
                                   style={{
-                                    width: "16px",
-                                    height: "16px",
+                                    width: "14px",
+                                    height: "14px",
                                     borderRadius: "4px",
                                     background: "transparent",
                                     border: "none",
                                     cursor: "pointer",
                                     padding: 0,
                                     fontSize: "12px",
-                                    lineHeight: "16px",
+                                    lineHeight: "14px",
                                     color:
                                       hoveredCutId === cut.cut_id && hoveredCutAction === "delete"
                                         ? "var(--danger)"
@@ -2383,7 +2432,13 @@ export default function App() {
                                   }}
                                   aria-label="Deletar timestamp"
                                 >
-                                  X
+                                  <span
+                                    className="material-icons"
+                                    aria-hidden="true"
+                                    style={{ fontSize: "12px", lineHeight: 1 }}
+                                  >
+                                    delete
+                                  </span>
                                 </button>
                               </div>
                             </div>
@@ -2425,6 +2480,44 @@ export default function App() {
           }
         >
           <p>Isso irá apagar sua transcrição atual, deseja continuar?</p>
+        </AppDialog>
+      )}
+
+      {showDeleteCutConfirmDialog && (
+        <AppDialog
+          title="Confirmar exclusão"
+          onClose={() => {
+            setShowDeleteCutConfirmDialog(false);
+            setPendingDeleteCutId(null);
+            setDontAskDeleteCutAgain(false);
+          }}
+          showHeaderClose={false}
+          footer={
+            <div className="ds-dialog-actions">
+              <AppButton
+                variant="primary"
+                onClick={() => {
+                  setShowDeleteCutConfirmDialog(false);
+                  setPendingDeleteCutId(null);
+                  setDontAskDeleteCutAgain(false);
+                }}
+              >
+                Cancelar
+              </AppButton>
+              <AppButton variant="secondary" onClick={() => void confirmDeleteSuggestedCut()}>
+                Apagar
+              </AppButton>
+            </div>
+          }
+        >
+          <p>Deseja realmente apagar o corte?</p>
+          <AppCheckboxField
+            label="Não exibir essa mensagem novamente"
+            checked={dontAskDeleteCutAgain}
+            onChange={setDontAskDeleteCutAgain}
+            compact
+            marginTop="12px"
+          />
         </AppDialog>
       )}
 
@@ -2650,15 +2743,7 @@ export default function App() {
         />
       )}
 
-      {/* 4. Curation Section */}
-      <CurationSection
-        isLoadingCuts={isLoadingCuts}
-        cuts={cuts}
-        isExpanded={expandCurationSection}
-        onToggle={() => setExpandCurationSection((current) => !current)}
-      />
-
-      {/* 5. Rendering Section */}
+      {/* 4. Rendering Section */}
       <RenderingSection
         isLoadingRenderOutputs={isLoadingRenderOutputs}
         isRendering={isRendering}
@@ -2769,13 +2854,18 @@ export default function App() {
           configDownloadResolution={configDownloadResolution}
           appSettings={appSettings}
           action={action}
-          onSave={(baseDir, resolution) => {
+          onSave={(baseDir, resolution, askDeleteCutConfirm) => {
             runAction(
               () =>
                 saveSettings({
                   media: {
                     base_dir: baseDir,
                     download_resolution: resolution,
+                  },
+                  preferences: {
+                    ask_move_on_upload: appSettings?.preferences?.ask_move_on_upload ?? true,
+                    move_uploads: appSettings?.preferences?.move_uploads ?? false,
+                    ask_delete_cut_confirm: askDeleteCutConfirm,
                   },
                 }),
               () => {
@@ -2929,4 +3019,3 @@ export default function App() {
     </div>
   );
 }
-

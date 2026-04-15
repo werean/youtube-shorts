@@ -208,42 +208,6 @@ button:disabled {
   margin-top: 12px;
 }
 
-.cuts {
-  display: grid;
-  gap: 16px;
-}
-
-.cut-card {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px;
-  background: #fffdf8;
-}
-
-.cut-card header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-}
-
-.score {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--accent-2);
-}
-
-.reason {
-  margin-top: 8px;
-  font-size: 0.9rem;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 12px;
-}
-
 .muted {
   color: var(--muted);
 }

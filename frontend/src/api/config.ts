@@ -79,6 +79,7 @@ export interface AppSettings {
   preferences: {
     ask_move_on_upload: boolean;
     move_uploads: boolean;
+    ask_delete_cut_confirm: boolean;
   };
   whisper: {
     device: "cpu" | "cuda";

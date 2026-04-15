@@ -9,7 +9,9 @@
     "dev": "bun run --watch src/main.ts",
     "dev:tsx": "tsx watch src/main.ts",
     "start": "bun run dist/main.js",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "youtube",
@@ -31,6 +33,7 @@
     "@types/uuid": "^9.0.7",
     "bun-types": "^1.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.8"
   }
 }

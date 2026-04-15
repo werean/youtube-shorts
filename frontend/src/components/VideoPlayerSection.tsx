@@ -357,24 +357,26 @@ export function VideoPlayerSection({
                             style={{
                               position: "absolute",
                               right: "6px",
-                              top: "4px",
+                              top: "50%",
+                              transform: "translateY(-50%)",
                               display: "flex",
-                              gap: "4px",
+                              alignItems: "center",
+                              gap: "6px",
                             }}
                           >
                             <button
                               className="icon-btn"
                               onClick={() => onShowEditCutDialog(cut)}
                               style={{
-                                width: "16px",
-                                height: "16px",
+                                width: "14px",
+                                height: "14px",
                                 borderRadius: "4px",
                                 background: "transparent",
                                 border: "none",
                                 cursor: "pointer",
                                 padding: 0,
                                 fontSize: "12px",
-                                lineHeight: "16px",
+                                lineHeight: "14px",
                                 color:
                                   hoveredCutAction === "edit" ? "var(--accent-2)" : "var(--muted)",
                               }}
@@ -382,21 +384,27 @@ export function VideoPlayerSection({
                               onMouseLeave={() => setHoveredCutAction(null)}
                               aria-label="Editar timestamp"
                             >
-                              E
+                              <span
+                                className="material-icons"
+                                aria-hidden="true"
+                                style={{ fontSize: "12px", lineHeight: 1 }}
+                              >
+                                edit
+                              </span>
                             </button>
                             <button
                               className="icon-btn"
                               onClick={() => onDeleteCut(cut.cut_id)}
                               style={{
-                                width: "16px",
-                                height: "16px",
+                                width: "14px",
+                                height: "14px",
                                 borderRadius: "4px",
                                 background: "transparent",
                                 border: "none",
                                 cursor: "pointer",
                                 padding: 0,
                                 fontSize: "12px",
-                                lineHeight: "16px",
+                                lineHeight: "14px",
                                 color:
                                   hoveredCutAction === "delete" ? "var(--danger)" : "var(--muted)",
                               }}
@@ -404,7 +412,13 @@ export function VideoPlayerSection({
                               onMouseLeave={() => setHoveredCutAction(null)}
                               aria-label="Deletar timestamp"
                             >
-                              X
+                              <span
+                                className="material-icons"
+                                aria-hidden="true"
+                                style={{ fontSize: "12px", lineHeight: 1 }}
+                              >
+                                delete
+                              </span>
                             </button>
                           </div>
                         )}
@@ -425,4 +439,3 @@ export function VideoPlayerSection({
     )
   );
 }
-

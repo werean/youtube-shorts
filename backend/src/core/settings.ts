@@ -20,6 +20,7 @@ export interface AppSettings {
   preferences: {
     ask_move_on_upload: boolean;
     move_uploads: boolean;
+    ask_delete_cut_confirm: boolean;
   };
   whisper: {
     device: "cpu" | "cuda";
@@ -85,6 +86,7 @@ function defaultSettings(): AppSettings {
     preferences: {
       ask_move_on_upload: true,
       move_uploads: true,
+      ask_delete_cut_confirm: true,
     },
     whisper: {
       device: "cuda",
@@ -148,6 +150,10 @@ export function loadSettings(): AppSettings {
           typeof parsed.preferences?.move_uploads === "boolean"
             ? parsed.preferences?.move_uploads
             : defaults.preferences.move_uploads,
+        ask_delete_cut_confirm:
+          typeof parsed.preferences?.ask_delete_cut_confirm === "boolean"
+            ? parsed.preferences?.ask_delete_cut_confirm
+            : defaults.preferences.ask_delete_cut_confirm,
       },
       whisper: {
         device: parsed.whisper?.device === "cpu" ? "cpu" : "cuda",
@@ -199,6 +205,8 @@ export function updateSettings(partial: Partial<AppSettings>): AppSettings {
       ask_move_on_upload:
         partial.preferences?.ask_move_on_upload ?? current.preferences.ask_move_on_upload,
       move_uploads: partial.preferences?.move_uploads ?? current.preferences.move_uploads,
+      ask_delete_cut_confirm:
+        partial.preferences?.ask_delete_cut_confirm ?? current.preferences.ask_delete_cut_confirm,
     },
     whisper: {
       device: partial.whisper?.device ?? current.whisper.device,
