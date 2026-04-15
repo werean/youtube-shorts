@@ -21,8 +21,8 @@ export function RenameVideoDialog({
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <h3>Renomear Vídeo</h3>
         <p style={{ color: "var(--muted)", marginBottom: "15px" }}>
-          ⚠️ <strong>Importante:</strong> Não renomeie os arquivos no seu computador. Use apenas
-          esta interface para manter a associação entre o vídeo, transcrições e shorts gerados.
+          <strong>Importante:</strong> Não renomeie os arquivos no seu computador. Use apenas esta
+          interface para manter a associação entre o vídeo, transcrições e shorts gerados.
         </p>
         <input
           type="text"
@@ -46,7 +46,7 @@ export function RenameVideoDialog({
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button onClick={onCancel}>Cancelar</button>
           <button
-            className="primary"
+            className="secondary"
             disabled={action.busy || !newName.trim()}
             onClick={() => {
               if (newName.trim()) {
@@ -61,3 +61,4 @@ export function RenameVideoDialog({
     </div>
   );
 }
+

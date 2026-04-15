@@ -280,11 +280,6 @@ export function WhisperConfigDialog({
       >
         <div className="dialog-header">
           <h3>Configurar Whisper</h3>
-          <div className="dialog-actions">
-            <AppButton variant="secondary" onClick={onCancel} style={{ padding: "8px 12px" }}>
-              Fechar
-            </AppButton>
-          </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
@@ -844,7 +839,7 @@ export function WhisperConfigDialog({
           >
             <AppButton
               onClick={onCancel}
-              variant="secondary"
+              variant="primary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -855,7 +850,7 @@ export function WhisperConfigDialog({
             <AppButton
               onClick={handleSave}
               disabled={action.busy}
-              variant="primary"
+              variant="secondary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -869,3 +864,4 @@ export function WhisperConfigDialog({
     </div>
   );
 }
+

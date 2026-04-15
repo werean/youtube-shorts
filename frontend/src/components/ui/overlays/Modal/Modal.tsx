@@ -142,7 +142,7 @@ export function Modal({
             aria-label={closeLabel}
             onClick={onClose}
           >
-            ×
+            X
           </button>
         </header>
 
@@ -153,5 +153,3 @@ export function Modal({
     document.body,
   );
 }
-
-

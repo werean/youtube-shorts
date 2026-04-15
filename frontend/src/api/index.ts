@@ -11,6 +11,7 @@ export {
   listArchivedVideos,
   archiveVideo,
   deleteVideo,
+  openVideoFolder,
 } from "./videos";
 
 // Transcription API
@@ -20,7 +21,7 @@ export { transcribeJob, getTranscription, deleteTranscription, buildBlocks } fro
 export { listCuts, updateCuts, approveCut, rejectCut, analyzeJob } from "./cuts";
 
 // Rendering API
-export { renderJob, listRenderOutputs, deleteRenderOutput } from "./rendering";
+export { renderJob, listRenderOutputs, deleteRenderOutput, openRenderFolder } from "./rendering";
 
 // Cancel API
 export { cancelTranscription, cancelRendering } from "./cancel";

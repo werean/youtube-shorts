@@ -136,11 +136,6 @@ export function LLMConfigDialog({
       >
         <div className="dialog-header">
           <h3>Configurar LLM</h3>
-          <div className="dialog-actions">
-            <AppButton variant="secondary" onClick={onCancel} style={{ padding: "8px 12px" }}>
-              Fechar
-            </AppButton>
-          </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           <div style={{ marginBottom: "14px" }}>
@@ -269,7 +264,7 @@ export function LLMConfigDialog({
                       >
                         <span style={{ fontSize: "12px", fontWeight: 600 }}>{item.name}</span>
                         <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                          {item.source === "cloud" ? "☁️ Cloud" : "💻 Local"}
+                          {item.source === "cloud" ? "Cloud" : "Local"}
                         </span>
                         <span
                           style={{
@@ -328,7 +323,7 @@ export function LLMConfigDialog({
           <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
             <AppButton
               onClick={onCancel}
-              variant="secondary"
+              variant="primary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -339,7 +334,7 @@ export function LLMConfigDialog({
             <AppButton
               onClick={() => onSave(model, prompt)}
               disabled={action.busy || !model}
-              variant="primary"
+              variant="secondary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -353,3 +348,4 @@ export function LLMConfigDialog({
     </div>
   );
 }
+

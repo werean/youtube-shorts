@@ -1,9 +1,13 @@
+import { useState } from "react";
+import { AppButton } from "./shared";
+
 interface RenderingSectionProps {
   isLoadingRenderOutputs: boolean;
   isRendering: boolean;
   renderOutputs: string[];
   buildRenderUrl: (path: string) => string;
   onDeleteRender: (fileName: string) => Promise<void>;
+  onOpenRenderFolder: (fileName: string) => Promise<void>;
   isExpanded: boolean;
   onToggle: () => void;
 }
@@ -14,9 +18,12 @@ export function RenderingSection({
   renderOutputs,
   buildRenderUrl,
   onDeleteRender,
+  onOpenRenderFolder,
   isExpanded,
   onToggle,
 }: RenderingSectionProps) {
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
   return (
     <section className="panel" style={{ marginBottom: "24px" }}>
       <div
@@ -28,7 +35,8 @@ export function RenderingSection({
         }}
       >
         <h2 style={{ margin: 0, flex: 1 }}>5. Renderização</h2>
-        <button
+        <AppButton
+          variant="ghost"
           onClick={onToggle}
           style={{
             background: "none",
@@ -51,7 +59,7 @@ export function RenderingSection({
           >
             keyboard_arrow_down
           </i>
-        </button>
+        </AppButton>
       </div>
       {isExpanded &&
         (isLoadingRenderOutputs ? (
@@ -78,8 +86,44 @@ export function RenderingSection({
               console.log(`[UI] Render output path: ${path}, URL: ${url}`);
               return (
                 <article key={path} className="short-card">
-                  <header>
-                    <h3>{fileName}</h3>
+                  <header
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <h3 style={{ margin: 0, paddingRight: "8px" }}>{fileName}</h3>
+
+                    <div style={{ position: "relative" }}>
+                      <AppButton
+                        className="menu-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenId((current) => (current === path ? null : path));
+                        }}
+                      >
+                        ...
+                      </AppButton>
+
+                      {menuOpenId === path && (
+                        <div className="menu-popover">
+                          <AppButton
+                            onClick={async () => {
+                              try {
+                                await onOpenRenderFolder(fileName);
+                              } catch (error) {
+                                console.error("Failed to open folder:", error);
+                              } finally {
+                                setMenuOpenId(null);
+                              }
+                            }}
+                          >
+                            Open Folder
+                          </AppButton>
+                        </div>
+                      )}
+                    </div>
                   </header>
                   <div style={{ overflow: "hidden", borderRadius: "12px", marginBottom: "12px" }}>
                     <video
@@ -101,8 +145,8 @@ export function RenderingSection({
                     />
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      className="primary"
+                    <AppButton
+                      variant="secondary"
                       style={{ flex: 1 }}
                       onClick={() => {
                         const a = document.createElement("a");
@@ -112,10 +156,10 @@ export function RenderingSection({
                         a.click();
                       }}
                     >
-                      👁️ Abrir vídeo
-                    </button>
-                    <button
-                      className="secondary"
+                      Abrir vídeo
+                    </AppButton>
+                    <AppButton
+                      variant="secondary"
                       onClick={async () => {
                         try {
                           await onDeleteRender(fileName);
@@ -124,8 +168,8 @@ export function RenderingSection({
                         }
                       }}
                     >
-                      🗑️ Deletar
-                    </button>
+                      Deletar
+                    </AppButton>
                   </div>
                 </article>
               );
@@ -135,3 +179,4 @@ export function RenderingSection({
     </section>
   );
 }
+

@@ -156,7 +156,7 @@ input {
 }
 
 button {
-  padding: 10px 16px;
+  padding: 10px 20px;
   border-radius: 8px;
   border: none;
   font-weight: 600;
@@ -166,18 +166,19 @@ button {
 }
 
 button.primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-button.secondary {
-  background: var(--bg-contrast);
+  background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--border);
 }
 
+button.secondary {
+  background: var(--ink);
+  color: var(--panel);
+  border: 1px solid transparent;
+}
+
 button.secondary:hover:not(:disabled) {
-  background: var(--border);
+  background: #000;
 }
 
 button.accent {

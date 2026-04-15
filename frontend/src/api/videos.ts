@@ -14,15 +14,15 @@ export async function uploadVideoFile(file: File): Promise<{ job: any; video_pat
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[API] ✗ Error response: ${text}`);
+      console.error(`[API] Error response: ${text}`);
       throw new Error(text || `Upload failed: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log(`[API] ✓ Upload success`, data);
+    console.log(`[API] Upload success`, data);
     return data;
   } catch (error: any) {
-    console.error(`[API] ✗ Upload error:`, error.message);
+    console.error(`[API] Upload error:`, error.message);
     throw error;
   }
 }
@@ -41,4 +41,8 @@ export async function archiveVideo(jobId: string): Promise<{ ok: boolean; job_id
 
 export async function deleteVideo(jobId: string): Promise<{ ok: boolean; job_id: string }> {
   return request(`/videos/${jobId}`, { method: "DELETE" });
+}
+
+export async function openVideoFolder(jobId: string): Promise<{ ok: boolean }> {
+  return request(`/videos/${jobId}/open-folder`, { method: "POST" });
 }

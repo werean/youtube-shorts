@@ -28,6 +28,7 @@ import {
   renameVideo,
   transcribeJob,
   updateCuts,
+  openRenderFolder,
   uploadVideoFile,
   getDependencies,
   getInstallationGuide,
@@ -72,6 +73,13 @@ import { CurationSection } from "./components/CurationSection";
 import { RenderingSection } from "./components/RenderingSection";
 import { UploadSection } from "./components/UploadSection";
 import { VideoListSection } from "./components/VideoListSection";
+import { TranscriptionFormatListDialog } from "./components/TranscriptionFormatListDialog";
+import { TranscriptionContentDialog } from "./components/TranscriptionContentDialog";
+import { TranscriptionDeleteDialog } from "./components/TranscriptionDeleteDialog";
+import { BlocksDialog } from "./components/BlocksDialog";
+import { AiResponseDialog } from "./components/AiResponseDialog";
+import { RegenerateAnalyzeDialog } from "./components/RegenerateAnalyzeDialog";
+import { AppButton, AppDialog } from "./components/shared";
 import {
   formatTimestamp,
   buildRenderUrl as buildRenderUrlUtil,
@@ -202,12 +210,13 @@ export default function App() {
   const [action, setAction] = useState<ActionState>(initialAction);
   const [blocks, setBlocks] = useState<Record<string, unknown>[]>([]);
   const [aiResponseRaw, setAiResponseRaw] = useState<string | null>(null);
-  const [keepCutIds, setKeepCutIds] = useState<string[]>([]);
   const [showAddManualCutDialog, setShowAddManualCutDialog] = useState(false);
   const [newCutStartMinutes, setNewCutStartMinutes] = useState<string>("");
   const [newCutStartSeconds, setNewCutStartSeconds] = useState<string>("");
   const [newCutEndMinutes, setNewCutEndMinutes] = useState<string>("");
   const [newCutEndSeconds, setNewCutEndSeconds] = useState<string>("");
+  const [showTranscriptionRegenerateConfirmDialog, setShowTranscriptionRegenerateConfirmDialog] =
+    useState(false);
   const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
   const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
   const [batchPipelineOptions, setBatchPipelineOptions] = useState({
@@ -352,15 +361,15 @@ export default function App() {
     try {
       console.log(`[App] Chamando função...`);
       const result = await fn();
-      console.log(`[App] ✓ Ação completada com sucesso`);
+      console.log(`[App] Ação completada com sucesso`);
       onSuccess?.(result);
       setAction({ busy: false });
     } catch (error: any) {
-      console.error(`[App] ✗ Erro na ação:`, error);
-      console.error(`[App] ✗ Mensagem:`, error.message);
-      console.error(`[App] ✗ Stack:`, error.stack);
+      console.error(`[App] Erro na ação:`, error);
+      console.error(`[App] Mensagem:`, error.message);
+      console.error(`[App] Stack:`, error.stack);
       const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
-      console.error(`[App] ✗ Será exibido ao usuário:`, errorMessage);
+      console.error(`[App] Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
     }
   }
@@ -932,7 +941,7 @@ export default function App() {
             setBatchPendingCuts(progress.pending_cuts);
           }
 
-          const approvalLog = `⏸️ Aguardando aprovação dos cortes do vídeo ${progress.current_job_index + 1}`;
+          const approvalLog = `Aguardando aprovação dos cortes do vídeo ${progress.current_job_index + 1}`;
           setBatchProcessingLogs((prev) => {
             if (prev[prev.length - 1] !== approvalLog) {
               return [...prev, approvalLog];
@@ -956,7 +965,7 @@ export default function App() {
           waiting_approval: "Aguardando aprovação",
         };
 
-        const newLog = `📌 Vídeo ${progress.current_job_index + 1} - ${stepLabels[progress.current_step] || progress.current_step}`;
+        const newLog = `Vídeo ${progress.current_job_index + 1} - ${stepLabels[progress.current_step] || progress.current_step}`;
 
         setBatchProcessingLogs((prev) => {
           // Avoid duplicate logs
@@ -978,7 +987,7 @@ export default function App() {
           setBatchProcessingLogs((prev) => [
             ...prev,
             "",
-            `✅ Processamento concluído!`,
+            `Processamento concluído!`,
             `   Sucesso: ${progress.completed_jobs.length}`,
             `   Falhas: ${progress.failed_jobs.length}`,
           ]);
@@ -988,7 +997,7 @@ export default function App() {
             setBatchProcessingLogs((prev) => [
               ...prev,
               "",
-              "❌ Jobs com falha:",
+              "Jobs com falha:",
               ...progress.failed_jobs.map((f) => `   - ${f.job_id}: ${f.error}`),
             ]);
           }
@@ -1004,7 +1013,7 @@ export default function App() {
       } catch (error: any) {
         console.error("[UI] Error polling batch status:", error);
         stopBatchPolling();
-        setBatchProcessingLogs((prev) => [...prev, `❌ Erro ao buscar status: ${error.message}`]);
+        setBatchProcessingLogs((prev) => [...prev, `Erro ao buscar status: ${error.message}`]);
         setIsBatchProcessing(false);
       }
     };
@@ -1255,11 +1264,6 @@ export default function App() {
     }
   }, [activeVideo?.job?.job_id]);
 
-  function getTranscriptionFormatLabel(format: "text" | "vtt" | "segments"): string {
-    if (format === "segments") return "JSON";
-    return format.toUpperCase();
-  }
-
   function normalizeCutIds(existing: Cut[], incoming: Cut[]): Cut[] {
     const idSet = new Set(existing.map((cut) => cut.cut_id));
     let maxId = existing.reduce((max, cut) => {
@@ -1349,6 +1353,81 @@ export default function App() {
           const firstVideo = activeItems[0]; // Primeiro do array = mais antigo (ordenado por created_at)
           setActiveVideoId(firstVideo.job.job_id);
         }
+      },
+    );
+  }
+
+  function upsertVideoIntoList(video: VideoItem) {
+    const jobId = String(video?.job?.job_id ?? "").trim();
+    const title = String(video?.job?.video_name ?? video?.job?.source_file_name ?? "").trim();
+    const videoPath = String(video?.videoPath ?? "").trim();
+
+    if (!jobId || !title || !videoPath) {
+      console.warn("[UI] Ignorando vídeo inválido (faltando dados obrigatórios)", {
+        jobId,
+        title,
+        videoPath,
+      });
+      return;
+    }
+
+    const normalized: VideoItem = {
+      ...video,
+      job: {
+        ...video.job,
+        video_name: title,
+      },
+      videoPath,
+    };
+
+    setVideos((current) => [normalized, ...current.filter((v) => v.job.job_id !== jobId)]);
+    setActiveVideoId(jobId);
+  }
+
+  function startTranscriptionFlow() {
+    if (!activeVideo) {
+      return;
+    }
+
+    console.log(`[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`);
+    setShowTranscriptionFormatListDialog(false);
+    setShowTranscriptionContentDialog(false);
+    setShowTranscriptionDeleteDialog(false);
+    setShowTranscriptionRegenerateConfirmDialog(false);
+    setShowBlocksDialog(false);
+    setSelectedTranscriptionFormat(null);
+    setPendingDeleteFormat(null);
+    setSelectedSuggestedCutId(null);
+    setBlocks([]);
+    setSuggestedCuts([]);
+    setActiveTaskLogType("transcription");
+    setActiveTaskLogs([]);
+    setExpandTaskLogs(false);
+    stopLogsPolling();
+    updateVideo(activeVideo.job.job_id, {
+      isTranscribing: true,
+      transcriptionLogs: [],
+      transcription: "",
+      transcriptionSegments: [],
+      transcriptionFormats: undefined,
+    });
+
+    return runAction(
+      async () => {
+        if (hasAnyTranscription) {
+          await deleteTranscription(activeVideo.job.job_id, "all");
+        }
+        return transcribeJob(activeVideo.job.job_id);
+      },
+      (result: any) => {
+        console.log(`[UI] Transcrição completada`);
+        updateVideo(activeVideo.job.job_id, {
+          transcription: result.transcription,
+          transcriptionSegments: result.segments,
+          transcriptionFormats: result.available_formats,
+          isTranscribing: false,
+        });
+        refreshVideo(activeVideo.job.job_id);
       },
     );
   }
@@ -1521,10 +1600,10 @@ export default function App() {
         },
       });
       applyToolConfigs(response);
-      console.log("[UI] ✓ Configurações do Whisper salvas");
+      console.log("[UI] Configurações do Whisper salvas");
       setShowWhisperConfigDialog(false);
     } catch (error) {
-      console.error("[UI] ✗ Erro ao salvar configurações do Whisper:", error);
+      console.error("[UI] Erro ao salvar configurações do Whisper:", error);
     }
   }
 
@@ -1537,10 +1616,10 @@ export default function App() {
         },
       });
       applyToolConfigs(response);
-      console.log("[UI] ✓ Configurações do LLM salvas");
+      console.log("[UI] Configurações do LLM salvas");
       setShowLLMConfigDialog(false);
     } catch (error) {
-      console.error("[UI] ✗ Erro ao salvar configurações do LLM:", error);
+      console.error("[UI] Erro ao salvar configurações do LLM:", error);
     }
   }
 
@@ -1548,10 +1627,10 @@ export default function App() {
     try {
       const response = await saveToolConfigs({ ffmpeg: config });
       applyToolConfigs(response);
-      console.log("[UI] ✓ Configurações do FFmpeg salvas");
+      console.log("[UI] Configurações do FFmpeg salvas");
       setShowFFmpegConfigDialog(false);
     } catch (error) {
-      console.error("[UI] ✗ Erro ao salvar configurações do FFmpeg:", error);
+      console.error("[UI] Erro ao salvar configurações do FFmpeg:", error);
     }
   }
 
@@ -1559,9 +1638,9 @@ export default function App() {
     try {
       const response = await resetAllToolConfigs();
       applyToolConfigs(response);
-      console.log("[UI] ✓ Configurações resetadas");
+      console.log("[UI] Configurações resetadas");
     } catch (error) {
-      console.error("[UI] ✗ Erro ao resetar configurações:", error);
+      console.error("[UI] Erro ao resetar configurações:", error);
     }
   }
 
@@ -1569,9 +1648,9 @@ export default function App() {
     try {
       const response = await resetToolConfigSection(section);
       applyToolConfigs(response);
-      console.log(`[UI] ✓ Configuração resetada: ${section}`);
+      console.log(`[UI] Configuração resetada: ${section}`);
     } catch (error) {
-      console.error(`[UI] ✗ Erro ao resetar ${section}:`, error);
+      console.error(`[UI] Erro ao resetar ${section}:`, error);
     }
   }
 
@@ -1581,9 +1660,9 @@ export default function App() {
       const parsed = JSON.parse(content) as ToolConfigs;
       const response = await importToolConfigs(parsed);
       applyToolConfigs(response);
-      console.log("[UI] ✓ Configurações importadas");
+      console.log("[UI] Configurações importadas");
     } catch (error) {
-      console.error("[UI] ✗ Erro ao importar configurações:", error);
+      console.error("[UI] Erro ao importar configurações:", error);
     }
   }
 
@@ -1713,8 +1792,7 @@ export default function App() {
       <UploadSection
         action={action}
         onVideoAdded={(video) => {
-          setVideos((current) => [video, ...current]);
-          setActiveVideoId(video.job.job_id);
+          upsertVideoIntoList(video);
         }}
         onLoadVideos={loadVideos}
         appSettings={appSettings}
@@ -1735,17 +1813,17 @@ export default function App() {
         action={action}
         onSelectVideo={(videoId) => {
           if (videoId === null) {
-            console.log(`[UI] ✗ Vídeo desmarcado`);
+            console.log(`[UI] Vídeo desmarcado`);
             setActiveVideoId(null);
           } else {
             const validation = canStartOperation(videoId);
             if (!validation.allowed) {
-              console.warn(`[UI] ⚠️  ${validation.message}`);
-              alert(`⚠️ ${validation.message}`);
+              console.warn(`[UI] ${validation.message}`);
+              alert(validation.message);
               return;
             }
             const video = videos.find((v) => v.job.job_id === videoId);
-            console.log(`\n[UI] ✓ Vídeo selecionado:`);
+            console.log(`\n[UI] Vídeo selecionado:`);
             console.log(`[UI]   Job ID: ${videoId}`);
             console.log(`[UI]   Video Path: ${video?.videoPath}`);
             console.log(`[UI]   Status: ${video?.job.status}`);
@@ -1814,7 +1892,7 @@ export default function App() {
                         src={`${apiBaseUrl}${activeVideo.videoPath}`}
                         className="video-player"
                         onLoadStart={() => {
-                          console.log(`\n[video] 🎬 Iniciando carregamento do vídeo:`);
+                          console.log(`\n[video] Iniciando carregamento do vídeo:`);
                           console.log(`[video]   Job ID: ${activeVideo.job.job_id}`);
                           console.log(`[video]   Video Path: ${activeVideo.videoPath}`);
                           console.log(
@@ -1822,7 +1900,7 @@ export default function App() {
                           );
                         }}
                         onError={(e) => {
-                          console.error(`\n[video] ❌ ERRO ao carregar vídeo:`);
+                          console.error(`\n[video] ERRO ao carregar vídeo:`);
                           console.error(`[video]   Job ID: ${activeVideo.job.job_id}`);
                           console.error(`[video]   Video Path: ${activeVideo.videoPath}`);
                           console.error(
@@ -1840,10 +1918,10 @@ export default function App() {
                           }
                         }}
                         onLoadedMetadata={() => {
-                          console.log(`[video] ✓ Metadados carregados com sucesso`);
+                          console.log(`[video] Metadados carregados com sucesso`);
                         }}
                         onCanPlay={() => {
-                          console.log(`[video] ✓ Vídeo pronto para reproduzir`);
+                          console.log(`[video] Vídeo pronto para reproduzir`);
                         }}
                       />
                     </div>
@@ -1851,7 +1929,7 @@ export default function App() {
                     {/* Batch Processing Logs */}
                     {isBatchProcessing && batchProcessingLogs.length > 0 && (
                       <div className="batch-logs">
-                        <h4 className="batch-logs-title">📋 Logs do Pipeline em Lote</h4>
+                        <h4 className="batch-logs-title">Logs do Pipeline em Lote</h4>
                         <div className="batch-logs-content">
                           {batchProcessingLogs.map((log, idx) => (
                             <div key={idx}>{log}</div>
@@ -1866,8 +1944,8 @@ export default function App() {
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <span>
                               {activeTaskLogType === "transcription"
-                                ? "📝 Logs da transcrição"
-                                : "🎬 Logs da renderização"}
+                                ? "Logs da transcrição"
+                                : "Logs da renderização"}
                             </span>
                             {activeTaskLogType === "transcription" &&
                               activeVideo?.isTranscribing && (
@@ -1944,7 +2022,7 @@ export default function App() {
                             opacity: hasAnyTranscription ? 1 : 0.5,
                           }}
                         >
-                          📄 Visualizar transcrição
+                          Visualizar transcrição
                         </button>
                       </ActionCard>
                       <ActionCard description="Gera ou recria a transcrição do vídeo.">
@@ -1959,60 +2037,24 @@ export default function App() {
                             // Check if another video is being transcribed/rendered
                             const validation = canStartOperation(activeVideo.job.job_id);
                             if (!validation.allowed) {
-                              console.warn(`[UI] ⚠️  ${validation.message}`);
-                              alert(`⚠️ ${validation.message}`);
+                              console.warn(`[UI] ${validation.message}`);
+                              alert(validation.message);
                               return;
                             }
 
-                            console.log(
-                              `[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`,
-                            );
-                            setShowTranscriptionFormatListDialog(false);
-                            setShowTranscriptionContentDialog(false);
-                            setShowTranscriptionDeleteDialog(false);
-                            setShowBlocksDialog(false);
-                            setSelectedTranscriptionFormat(null);
-                            setPendingDeleteFormat(null);
-                            setSelectedSuggestedCutId(null);
-                            setBlocks([]);
-                            setSuggestedCuts([]);
-                            setActiveTaskLogType("transcription");
-                            setActiveTaskLogs([]);
-                            setExpandTaskLogs(false);
-                            stopLogsPolling();
-                            updateVideo(activeVideo.job.job_id, {
-                              isTranscribing: true,
-                              transcriptionLogs: [],
-                              transcription: "",
-                              transcriptionSegments: [],
-                              transcriptionFormats: undefined,
-                            });
+                            if (hasAnyTranscription) {
+                              setShowTranscriptionRegenerateConfirmDialog(true);
+                              return;
+                            }
 
-                            return runAction(
-                              async () => {
-                                if (hasAnyTranscription) {
-                                  await deleteTranscription(activeVideo.job.job_id, "all");
-                                }
-                                return transcribeJob(activeVideo.job.job_id);
-                              },
-                              (result: any) => {
-                                console.log(`[UI] Transcrição completada`);
-                                updateVideo(activeVideo.job.job_id, {
-                                  transcription: result.transcription,
-                                  transcriptionSegments: result.segments,
-                                  transcriptionFormats: result.available_formats,
-                                  isTranscribing: false,
-                                });
-                                refreshVideo(activeVideo.job.job_id);
-                              },
-                            );
+                            return startTranscriptionFlow();
                           }}
                         >
                           {activeVideo.isTranscribing
-                            ? "⏳ Transcrevendo..."
+                            ? "Transcrevendo..."
                             : hasAnyTranscription
                               ? "Gerar nova transcrição"
-                              : "🎙️ Transcrever"}
+                              : "Transcrever"}
                         </button>
                       </ActionCard>
                       <ActionCard description="Agrupa a transcrição em blocos semânticos.">
@@ -2030,7 +2072,7 @@ export default function App() {
                             )
                           }
                         >
-                          🔗 Blocos
+                          Blocos
                         </button>
                       </ActionCard>
                       <div className="action-card">
@@ -2042,7 +2084,6 @@ export default function App() {
                           className="config-card-button orange"
                           onClick={() => {
                             if (suggestedCuts.length > 0) {
-                              setKeepCutIds([]);
                               setShowRegenerateAnalyzeDialog(true);
                               return;
                             }
@@ -2061,10 +2102,10 @@ export default function App() {
                           }}
                         >
                           {isAnalyzing
-                            ? "⏳ Analisando..."
+                            ? "Analisando..."
                             : suggestedCuts.length > 0
                               ? "Gerar nova análise"
-                              : "🤖 Análise"}
+                              : "Análise"}
                         </button>
                         <p className="config-card-description">
                           Analisa com IA para encontrar hooks.
@@ -2086,8 +2127,8 @@ export default function App() {
                             // Check if another video is being transcribed/rendered
                             const validation = canStartOperation(activeVideo.job.job_id);
                             if (!validation.allowed) {
-                              console.warn(`[UI] ⚠️  ${validation.message}`);
-                              alert(`⚠️ ${validation.message}`);
+                              console.warn(`[UI] ${validation.message}`);
+                              alert(validation.message);
                               return;
                             }
 
@@ -2109,7 +2150,7 @@ export default function App() {
                             );
                           }}
                         >
-                          {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
+                          {isRendering ? "Renderizando..." : "Renderizar"}
                         </button>
                         {isRendering && (
                           <p
@@ -2134,7 +2175,7 @@ export default function App() {
                             setShowAddManualCutDialog(true);
                           }}
                         >
-                          ➕ Adicionar Corte Manual
+                          Adicionar Corte Manual
                         </button>
                         <p className="config-card-description">
                           Cria um corte com timestamps específicos.
@@ -2155,7 +2196,7 @@ export default function App() {
                             setShowBatchPipelineDialog(true);
                           }}
                         >
-                          🚀 Pipeline em Lote
+                          Pipeline em Lote
                         </button>
                         <p className="config-card-description">
                           Processa múltiplos vídeos sequencialmente.
@@ -2178,7 +2219,7 @@ export default function App() {
                         {batchWaitingForApproval && activeBatchId && (
                           <div style={{ marginBottom: "16px", textAlign: "center" }}>
                             <button
-                              className="primary"
+                              className="secondary"
                               onClick={async () => {
                                 try {
                                   await continueBatchPipeline(activeBatchId);
@@ -2186,26 +2227,18 @@ export default function App() {
                                   setBatchPendingCuts([]);
                                   setBatchProcessingLogs((prev) => [
                                     ...prev,
-                                    "✅ Cortes aprovados, continuando pipeline...",
+                                    "Cortes aprovados, continuando pipeline...",
                                   ]);
                                 } catch (error: any) {
                                   console.error("[UI] Error continuing batch pipeline:", error);
                                   setBatchProcessingLogs((prev) => [
                                     ...prev,
-                                    `❌ Erro ao continuar: ${error.message}`,
+                                    `Erro ao continuar: ${error.message}`,
                                   ]);
                                 }
                               }}
-                              style={{
-                                padding: "12px 24px",
-                                fontSize: "16px",
-                                fontWeight: "600",
-                                borderRadius: "8px",
-                                background: "var(--bg-3)",
-                                color: "var(--ink)",
-                              }}
                             >
-                              ▶️ Continuar Pipeline
+                              Continuar Pipeline
                             </button>
                           </div>
                         )}
@@ -2217,7 +2250,7 @@ export default function App() {
                               style={{ position: "relative", display: "inline-flex" }}
                             >
                               <button
-                                className="secondary"
+                                className="cut-timestamp-btn"
                                 onClick={() => {
                                   setSelectedSuggestedCutId(cut.cut_id);
                                   if (videoRef.current) {
@@ -2296,7 +2329,7 @@ export default function App() {
                                   }}
                                   aria-label="Editar timestamp"
                                 >
-                                  ✎
+                                  E
                                 </button>
                                 <button
                                   className="icon-btn"
@@ -2350,7 +2383,7 @@ export default function App() {
                                   }}
                                   aria-label="Deletar timestamp"
                                 >
-                                  ✕
+                                  X
                                 </button>
                               </div>
                             </div>
@@ -2372,340 +2405,148 @@ export default function App() {
       )}
 
       {/* Transcription Format List */}
+      {showTranscriptionRegenerateConfirmDialog && (
+        <AppDialog
+          title="Confirmar nova transcrição"
+          onClose={() => setShowTranscriptionRegenerateConfirmDialog(false)}
+          showHeaderClose={false}
+          footer={
+            <div className="ds-dialog-actions">
+              <AppButton
+                variant="primary"
+                onClick={() => setShowTranscriptionRegenerateConfirmDialog(false)}
+              >
+                Cancelar
+              </AppButton>
+              <AppButton variant="secondary" onClick={() => void startTranscriptionFlow()}>
+                Continuar
+              </AppButton>
+            </div>
+          }
+        >
+          <p>Isso irá apagar sua transcrição atual, deseja continuar?</p>
+        </AppDialog>
+      )}
+
+      {/* Transcription Format List */}
       {showTranscriptionFormatListDialog && activeVideo && (
-        <div className="dialog-overlay" onClick={() => setShowTranscriptionFormatListDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Transcrição</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowTranscriptionFormatListDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <p>Escolha um formato para visualizar:</p>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                {activeVideo.transcription && (
-                  <button
-                    className="secondary"
-                    onClick={() => {
-                      setSelectedTranscriptionFormat("text");
-                      setShowTranscriptionFormatListDialog(false);
-                      setShowTranscriptionContentDialog(true);
-                    }}
-                  >
-                    TXT
-                  </button>
-                )}
-                {activeVideo.transcriptionFormats?.vtt && (
-                  <button
-                    className="secondary"
-                    onClick={() => {
-                      setSelectedTranscriptionFormat("vtt");
-                      setShowTranscriptionFormatListDialog(false);
-                      setShowTranscriptionContentDialog(true);
-                    }}
-                  >
-                    VTT
-                  </button>
-                )}
-                {activeVideo.transcriptionSegments?.length ? (
-                  <button
-                    className="secondary"
-                    onClick={() => {
-                      setSelectedTranscriptionFormat("segments");
-                      setShowTranscriptionFormatListDialog(false);
-                      setShowTranscriptionContentDialog(true);
-                    }}
-                  >
-                    JSON
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
+        <TranscriptionFormatListDialog
+          activeVideoHasText={Boolean(activeVideo.transcription)}
+          activeVideoHasVtt={Boolean(activeVideo.transcriptionFormats?.vtt)}
+          activeVideoHasSegments={Boolean(activeVideo.transcriptionSegments?.length)}
+          onSelectFormat={(format) => {
+            setSelectedTranscriptionFormat(format);
+            setShowTranscriptionContentDialog(true);
+          }}
+          onClose={() => setShowTranscriptionFormatListDialog(false)}
+        />
       )}
 
       {/* Transcription Content Dialog */}
       {showTranscriptionContentDialog && transcriptionContent && (
-        <div className="dialog-overlay" onClick={() => setShowTranscriptionContentDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>{transcriptionContent.title}</h3>
-              {selectedTranscriptionFormat && (
-                <button
-                  className="danger"
-                  onClick={() => {
-                    setPendingDeleteFormat(selectedTranscriptionFormat);
-                    setShowTranscriptionDeleteDialog(true);
-                  }}
-                >
-                  Deletar transcrição
-                </button>
-              )}
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowTranscriptionContentDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <pre className="transcription-text">{transcriptionContent.content}</pre>
-            </div>
-          </div>
-        </div>
+        <TranscriptionContentDialog
+          title={transcriptionContent.title}
+          content={transcriptionContent.content}
+          selectedFormat={selectedTranscriptionFormat || "text"}
+          onClose={() => setShowTranscriptionContentDialog(false)}
+          onDelete={(format) => {
+            setPendingDeleteFormat(format);
+            setShowTranscriptionDeleteDialog(true);
+          }}
+        />
       )}
 
       {showTranscriptionDeleteDialog && pendingDeleteFormat && activeVideo && (
-        <div
-          className="dialog-overlay"
-          onClick={() => {
+        <TranscriptionDeleteDialog
+          pendingDeleteFormat={pendingDeleteFormat}
+          action={action}
+          onCancel={() => {
             setShowTranscriptionDeleteDialog(false);
             setPendingDeleteFormat(null);
           }}
-        >
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Confirmar exclusão</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => {
-                    setShowTranscriptionDeleteDialog(false);
-                    setPendingDeleteFormat(null);
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <p>
-                Tem certeza que deseja deletar a transcrição em formato{" "}
-                <strong>{getTranscriptionFormatLabel(pendingDeleteFormat)}</strong>?
-              </p>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button
-                  className="danger"
-                  onClick={() =>
-                    runAction(
-                      () => deleteTranscription(activeVideo.job.job_id, pendingDeleteFormat),
-                      (result: any) => {
-                        const formats = result?.available_formats;
-                        const nextFormats = formats
-                          ? {
-                              segments: Boolean(formats.segments),
-                              text: Boolean(formats.text),
-                              vtt: Boolean(formats.vtt),
-                            }
-                          : undefined;
-                        const nextTranscription =
-                          nextFormats && nextFormats.text === false
-                            ? ""
-                            : activeVideo.transcription;
+          onConfirm={(format) =>
+            runAction(
+              () => deleteTranscription(activeVideo.job.job_id, format),
+              (result: any) => {
+                const formats = result?.available_formats;
+                const nextFormats = formats
+                  ? {
+                      segments: Boolean(formats.segments),
+                      text: Boolean(formats.text),
+                      vtt: Boolean(formats.vtt),
+                    }
+                  : undefined;
+                const nextTranscription =
+                  nextFormats && nextFormats.text === false ? "" : activeVideo.transcription;
 
-                        updateVideo(activeVideo.job.job_id, {
-                          transcription: nextTranscription,
-                          transcriptionSegments:
-                            pendingDeleteFormat === "segments" && nextFormats?.segments === false
-                              ? []
-                              : activeVideo.transcriptionSegments,
-                          transcriptionFormats: nextFormats,
-                        });
-                        if (pendingDeleteFormat === selectedTranscriptionFormat) {
-                          setShowTranscriptionContentDialog(false);
-                        }
-                        setShowTranscriptionDeleteDialog(false);
-                        setPendingDeleteFormat(null);
-                      },
-                    )
-                  }
-                >
-                  Confirmar
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setShowTranscriptionDeleteDialog(false);
-                    setPendingDeleteFormat(null);
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+                updateVideo(activeVideo.job.job_id, {
+                  transcription: nextTranscription,
+                  transcriptionSegments:
+                    format === "segments" && nextFormats?.segments === false
+                      ? []
+                      : activeVideo.transcriptionSegments,
+                  transcriptionFormats: nextFormats,
+                });
+                if (format === selectedTranscriptionFormat) {
+                  setShowTranscriptionContentDialog(false);
+                }
+                setShowTranscriptionDeleteDialog(false);
+                setPendingDeleteFormat(null);
+              },
+            )
+          }
+        />
       )}
 
       {/* Blocks Dialog */}
       {showBlocksDialog && blocks.length > 0 && (
-        <div className="dialog-overlay" onClick={() => setShowBlocksDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Blocos Semânticos ({blocks.length})</h3>
-              <div className="dialog-actions">
-                <button className="icon-btn close-btn" onClick={() => setShowBlocksDialog(false)}>
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <div style={{ overflowY: "auto", maxHeight: "500px" }}>
-                {blocks.map((block: any, index: number) => (
-                  <div
-                    key={index}
-                    style={{
-                      marginBottom: "16px",
-                      padding: "12px",
-                      backgroundColor: "var(--bg-contrast)",
-                      borderRadius: "8px",
-                      borderLeft: "4px solid var(--accent-2)",
-                    }}
-                  >
-                    <div style={{ marginBottom: "8px" }}>
-                      <strong>Bloco {index + 1}</strong>
-                      {block.block_id && <span> ({block.block_id})</span>}
-                    </div>
-                    <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "var(--muted)" }}>
-                      {block.start?.toFixed(2)}s - {block.end?.toFixed(2)}s
-                    </div>
-                    <div style={{ lineHeight: "1.6" }}>{block.text}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <BlocksDialog blocks={blocks} onClose={() => setShowBlocksDialog(false)} />
       )}
 
       {/* AI Response Dialog */}
       {showAiResponseDialog && aiResponseRaw && (
-        <div className="dialog-overlay" onClick={() => setShowAiResponseDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Resposta original da IA</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => setShowAiResponseDialog(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <pre className="transcription-text">{aiResponseRaw}</pre>
-            </div>
-          </div>
-        </div>
+        <AiResponseDialog
+          aiResponseRaw={aiResponseRaw}
+          onClose={() => setShowAiResponseDialog(false)}
+        />
       )}
 
       {/* Regenerate Analyze Dialog */}
       {showRegenerateAnalyzeDialog && suggestedCuts.length > 0 && activeVideo && (
-        <div
-          className="dialog-overlay"
-          onClick={() => {
+        <RegenerateAnalyzeDialog
+          suggestedCuts={suggestedCuts}
+          action={{ busy: isAnalyzing }}
+          onCancel={() => setShowRegenerateAnalyzeDialog(false)}
+          onMaintainSelected={(keptCutIds) => {
+            const keptCuts = suggestedCuts.filter((cut) => keptCutIds.includes(cut.cut_id));
             setShowRegenerateAnalyzeDialog(false);
-            setKeepCutIds([]);
+            runAction(
+              async () => {
+                setIsAnalyzing(true);
+                try {
+                  return await analyzeJob(activeVideo.job.job_id);
+                } finally {
+                  setIsAnalyzing(false);
+                }
+              },
+              (value) => handleAnalyzeResult(value, keptCuts),
+            );
           }}
-        >
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-header">
-              <h3>Gerar nova análise</h3>
-              <div className="dialog-actions">
-                <button
-                  className="icon-btn close-btn"
-                  onClick={() => {
-                    setShowRegenerateAnalyzeDialog(false);
-                    setKeepCutIds([]);
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="dialog-content">
-              <p>Selecione os cortes que deseja manter:</p>
-              <div style={{ display: "grid", gap: "8px", marginBottom: "16px" }}>
-                {suggestedCuts.map((cut) => (
-                  <label
-                    key={cut.cut_id}
-                    style={{ display: "flex", gap: "8px", alignItems: "center" }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={keepCutIds.includes(cut.cut_id)}
-                      onChange={(event) => {
-                        if (event.target.checked) {
-                          setKeepCutIds((current) => [...current, cut.cut_id]);
-                        } else {
-                          setKeepCutIds((current) => current.filter((item) => item !== cut.cut_id));
-                        }
-                      }}
-                    />
-                    <span>
-                      {formatTimestamp(cut.start)} - {formatTimestamp(cut.end)}
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button
-                  className="primary"
-                  disabled={keepCutIds.length === 0 || isAnalyzing}
-                  onClick={() => {
-                    const keptCuts = suggestedCuts.filter((cut) => keepCutIds.includes(cut.cut_id));
-                    setShowRegenerateAnalyzeDialog(false);
-                    setKeepCutIds([]);
-                    runAction(
-                      async () => {
-                        setIsAnalyzing(true);
-                        try {
-                          return await analyzeJob(activeVideo.job.job_id);
-                        } finally {
-                          setIsAnalyzing(false);
-                        }
-                      },
-                      (value) => handleAnalyzeResult(value, keptCuts),
-                    );
-                  }}
-                >
-                  {isAnalyzing ? "⏳ Analisando..." : "Manter os cortes selecionados e gerar novos"}
-                </button>
-                <button
-                  className="secondary"
-                  disabled={isAnalyzing}
-                  onClick={() => {
-                    setShowRegenerateAnalyzeDialog(false);
-                    setKeepCutIds([]);
-                    runAction(
-                      async () => {
-                        setIsAnalyzing(true);
-                        try {
-                          return await analyzeJob(activeVideo.job.job_id);
-                        } finally {
-                          setIsAnalyzing(false);
-                        }
-                      },
-                      (value) => handleAnalyzeResult(value),
-                    );
-                  }}
-                >
-                  {isAnalyzing ? "⏳ Analisando..." : "Apagar cortes e gerar novos cortes"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          onRegenerateAll={() => {
+            setShowRegenerateAnalyzeDialog(false);
+            runAction(
+              async () => {
+                setIsAnalyzing(true);
+                try {
+                  return await analyzeJob(activeVideo.job.job_id);
+                } finally {
+                  setIsAnalyzing(false);
+                }
+              },
+              (value) => handleAnalyzeResult(value),
+            );
+          }}
+        />
       )}
 
       {/* Edit Cut Dialog */}
@@ -2823,6 +2664,12 @@ export default function App() {
         isRendering={isRendering}
         renderOutputs={renderOutputs}
         buildRenderUrl={buildRenderUrl}
+        onOpenRenderFolder={async (fileName) => {
+          if (!activeVideo) {
+            throw new Error("Nenhum vídeo selecionado");
+          }
+          await runAction(() => openRenderFolder(activeVideo.job.job_id, fileName));
+        }}
         onDeleteRender={async (fileName) => {
           if (activeVideo) {
             await deleteRenderOutput(activeVideo.job.job_id, fileName);
@@ -2964,17 +2811,14 @@ export default function App() {
           onCancel={async () => {
             if (isBatchProcessing && activeBatchId) {
               try {
-                setBatchProcessingLogs((prev) => [...prev, "⚠️ Cancelamento solicitado..."]);
+                setBatchProcessingLogs((prev) => [...prev, "Cancelamento solicitado..."]);
                 await cancelBatchPipeline(activeBatchId);
                 stopBatchPolling();
                 setIsBatchProcessing(false);
-                setBatchProcessingLogs((prev) => [...prev, "❌ Processamento cancelado"]);
+                setBatchProcessingLogs((prev) => [...prev, "Processamento cancelado"]);
               } catch (error: any) {
                 console.error("[UI] Error cancelling batch:", error);
-                setBatchProcessingLogs((prev) => [
-                  ...prev,
-                  `❌ Erro ao cancelar: ${error.message}`,
-                ]);
+                setBatchProcessingLogs((prev) => [...prev, `Erro ao cancelar: ${error.message}`]);
               }
             } else {
               setShowBatchPipelineDialog(false);
@@ -2989,7 +2833,7 @@ export default function App() {
             try {
               setIsBatchProcessing(true);
               setBatchProcessingLogs([
-                `🚀 Iniciando processamento de ${selectedVideosForBatch.length} vídeo(s)...`,
+                `Iniciando processamento de ${selectedVideosForBatch.length} vídeo(s)...`,
               ]);
 
               setShowBatchPipelineDialog(false);
@@ -2999,7 +2843,7 @@ export default function App() {
               setActiveBatchId(result.batch_id);
               setBatchProcessingLogs((prev) => [
                 ...prev,
-                `✅ Pipeline iniciado (ID: ${result.batch_id})`,
+                `Pipeline iniciado (ID: ${result.batch_id})`,
               ]);
 
               startBatchPolling(result.batch_id);
@@ -3007,7 +2851,7 @@ export default function App() {
               console.error("[UI] Error starting batch pipeline:", error);
               setBatchProcessingLogs((prev) => [
                 ...prev,
-                `❌ Erro ao iniciar pipeline: ${error.message}`,
+                `Erro ao iniciar pipeline: ${error.message}`,
               ]);
               setIsBatchProcessing(false);
             }
@@ -3028,22 +2872,16 @@ export default function App() {
             style={{ maxWidth: "400px" }}
           >
             <div className="dialog-header">
-              <h3>✅ Pipeline Concluído</h3>
+              <h3>Pipeline Concluído</h3>
             </div>
             <div className="dialog-content" style={{ padding: "20px" }}>
               <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
               <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
                 <button
-                  className="primary"
+                  className="secondary"
                   onClick={() => {
                     setShowBatchCompletionNotification(false);
                     setBatchCompletionMessage("");
-                  }}
-                  style={{
-                    padding: "10px 30px",
-                    borderRadius: "8px",
-                    fontSize: "16px",
-                    fontWeight: "600",
                   }}
                 >
                   OK
@@ -3091,3 +2929,4 @@ export default function App() {
     </div>
   );
 }
+

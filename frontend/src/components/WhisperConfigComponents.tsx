@@ -296,7 +296,6 @@ export function MultiSelect({ values, onChange, options }: MultiSelectProps) {
               transition: "all 0.2s",
             }}
           >
-            {isSelected ? "✓ " : ""}
             {option.label}
           </AppButton>
         );
@@ -339,7 +338,7 @@ export function ConfigSection({ title, children }: SectionProps) {
         }}
       >
         <span>{title}</span>
-        <span style={{ fontSize: "14px", color: "var(--muted)" }}>{expanded ? "▼" : "▶"}</span>
+        <span style={{ fontSize: "14px", color: "var(--muted)" }}>{expanded ? "v" : ">"}</span>
       </AppButton>
       {expanded && <div style={{ paddingLeft: "0" }}>{children}</div>}
     </div>

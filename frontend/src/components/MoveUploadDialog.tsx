@@ -12,7 +12,7 @@ export function MoveUploadDialog({ onClose, onConfirmMove, onConfirmKeep }: Move
           <h3>Mover video para a pasta configurada?</h3>
           <div className="dialog-actions">
             <button className="icon-btn close-btn" onClick={onClose}>
-              ✕
+              X
             </button>
           </div>
         </div>
@@ -22,10 +22,10 @@ export function MoveUploadDialog({ onClose, onConfirmMove, onConfirmKeep }: Move
             disco?
           </p>
           <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="primary" onClick={onConfirmMove}>
+            <button className="secondary" onClick={onConfirmMove}>
               Mover e enviar
             </button>
-            <button className="secondary" onClick={onConfirmKeep}>
+            <button className="primary" onClick={onConfirmKeep}>
               Manter copia
             </button>
           </div>
@@ -34,5 +34,4 @@ export function MoveUploadDialog({ onClose, onConfirmMove, onConfirmKeep }: Move
     </div>
   );
 }
-
 

@@ -1,4 +1,5 @@
 import type React from "react";
+import { AppButton, AppDialog } from "./shared";
 
 interface VideoItem {
   job: {
@@ -43,338 +44,160 @@ export function BatchPipelineDialog({
   onStart,
 }: BatchPipelineDialogProps) {
   return (
-    <div
-      className="dialog-overlay"
-      onClick={() => {
+    <AppDialog
+      title="Pipeline em Lote"
+      onClose={() => {
         if (!isBatchProcessing) {
           onClose();
         }
       }}
+      showHeaderClose={false}
+      onOverlayClick={() => {
+        if (!isBatchProcessing) {
+          onClose();
+        }
+      }}
+      disableClose={isBatchProcessing}
+      wide
+      scrollable
+      footer={
+        <>
+          <AppButton variant="primary" onClick={onCancel}>
+            {isBatchProcessing ? "Cancelar Processamento" : "Fechar"}
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            onClick={onStart}
+            disabled={isBatchProcessing || selectedVideosForBatch.length === 0}
+          >
+            {isBatchProcessing ? "Processando..." : "Iniciar Pipeline"}
+          </AppButton>
+        </>
+      }
     >
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: "900px", maxHeight: "90vh" }}
-      >
-        <div className="dialog-header">
-          <h3>🚀 Pipeline em Lote</h3>
-          <div className="dialog-actions">
-            <button
-              className="icon-btn close-btn"
-              onClick={() => {
-                if (!isBatchProcessing) {
-                  onClose();
-                }
-              }}
-              disabled={isBatchProcessing}
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content" style={{ padding: "20px" }}>
-          {/* Seção de seleção de vídeos */}
-          <div style={{ marginBottom: "24px" }}>
-            <h4 style={{ marginBottom: "12px", fontSize: "16px", fontWeight: "600" }}>
-              Seus Vídeos
-            </h4>
-            <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "12px" }}>
-              Selecione um ou mais vídeos para processar sequencialmente.
-            </p>
-            <div
-              style={{
-                maxHeight: "250px",
-                overflowY: "auto",
-                border: "1px solid var(--border)",
-                borderRadius: "8px",
-                padding: "12px",
-                background: "var(--bg-contrast)",
-              }}
-            >
-              {videos.length === 0 ? (
-                <p style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>
-                  Nenhum vídeo disponível
-                </p>
-              ) : (
-                videos.map((video) => (
-                  <div
-                    key={video.job.job_id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      padding: "8px 12px",
-                      marginBottom: "8px",
-                      background: selectedVideosForBatch.includes(video.job.job_id)
-                        ? "var(--bg-3)"
-                        : "var(--panel)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      transition: "all 0.2s",
-                    }}
-                    onClick={() => {
+      <div className="ds-dialog-stack">
+        <section className="ds-dialog-stack">
+          <h4 className="ds-dialog-section-title">Seus Vídeos</h4>
+          <p className="muted">Selecione um ou mais vídeos para processar sequencialmente.</p>
+          <div className="ds-video-list-box">
+            {videos.length === 0 ? (
+              <p className="muted ds-empty-state">Nenhum vídeo disponível</p>
+            ) : (
+              videos.map((video) => (
+                <label key={video.job.job_id} className="ds-batch-video-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedVideosForBatch.includes(video.job.job_id)}
+                    disabled={isBatchProcessing}
+                    onChange={() => {
                       if (!isBatchProcessing) {
                         onVideoToggle(video.job.job_id);
                       }
                     }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedVideosForBatch.includes(video.job.job_id)}
-                      onChange={() => {}}
-                      disabled={isBatchProcessing}
-                      style={{ marginRight: "12px", cursor: "pointer" }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: "500", fontSize: "14px" }}>
-                        {video.job.video_name || video.job.job_id}
-                        {selectedVideosForBatch.includes(video.job.job_id) &&
-                        ((video.hasTranscription && batchPipelineOptions.transcription) ||
-                          (video.hasAnalysis && batchPipelineOptions.analysis)) ? (
-                          <span style={{ color: "var(--warning)", marginLeft: "8px" }}>
-                            —{" "}
-                            {video.hasTranscription &&
-                            batchPipelineOptions.transcription &&
-                            video.hasAnalysis &&
-                            batchPipelineOptions.analysis
-                              ? "Transcrição e Análise existentes serão sobrescritas"
-                              : video.hasTranscription && batchPipelineOptions.transcription
-                                ? "Transcrição existente será sobrescrita"
-                                : "Análise existente será sobrescrita"}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}>
-                        Status: {video.job.status}
-                      </div>
-                    </div>
+                  />
+                  <div>
+                    <p className="ds-batch-video-title">
+                      {video.job.video_name || video.job.job_id}
+                    </p>
+                    {selectedVideosForBatch.includes(video.job.job_id) &&
+                    ((video.hasTranscription && batchPipelineOptions.transcription) ||
+                      (video.hasAnalysis && batchPipelineOptions.analysis)) ? (
+                      <p className="ds-batch-video-warning">
+                        {video.hasTranscription &&
+                        batchPipelineOptions.transcription &&
+                        video.hasAnalysis &&
+                        batchPipelineOptions.analysis
+                          ? "Transcrição e Análise existentes serão sobrescritas"
+                          : video.hasTranscription && batchPipelineOptions.transcription
+                            ? "Transcrição existente será sobrescrita"
+                            : "Análise existente será sobrescrita"}
+                      </p>
+                    ) : null}
+                    <p className="ds-batch-video-status">Status: {video.job.status}</p>
                   </div>
-                ))
-              )}
-            </div>
+                </label>
+              ))
+            )}
           </div>
+        </section>
 
-          {/* Seção de opções de pipeline */}
-          <div style={{ marginBottom: "24px" }}>
-            <h4 style={{ marginBottom: "12px", fontSize: "16px", fontWeight: "600" }}>
-              O que você deseja fazer?
-            </h4>
-            <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "12px" }}>
-              Análise requer Transcrição. Renderizar e Revisar antes requerem Análise.
-            </p>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, 1fr)",
-                gap: "12px",
+        <section className="ds-dialog-stack">
+          <h4 className="ds-dialog-section-title">O que você deseja fazer?</h4>
+          <p className="muted">
+            Análise requer Transcrição. Renderizar e Revisar antes requerem Análise.
+          </p>
+          <div className="ds-batch-options-grid">
+            <article className="ds-batch-option-card ds-batch-option-card--locked">
+              <h5>Transcrição</h5>
+              <p className="muted">Obrigatória</p>
+            </article>
+
+            <article
+              className={`ds-batch-option-card ${batchPipelineOptions.analysis ? "is-active" : ""}`}
+              onClick={() => {
+                if (!isBatchProcessing) {
+                  const newAnalysis = !batchPipelineOptions.analysis;
+                  onOptionChange({
+                    analysis: newAnalysis,
+                    render: newAnalysis ? batchPipelineOptions.render : false,
+                    preApprove: newAnalysis ? batchPipelineOptions.preApprove : false,
+                  });
+                }
               }}
             >
-              {/* Transcrição */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  padding: "16px",
-                  border: "2px solid var(--border)",
-                  borderRadius: "12px",
-                  background: "var(--bg-contrast)",
-                  cursor: "not-allowed",
-                  opacity: 0.8,
-                }}
-              >
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>🎙️</div>
-                <div style={{ fontWeight: "600", marginBottom: "4px" }}>Transcrição</div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--muted)",
-                    textAlign: "center",
-                    marginTop: "4px",
-                  }}
-                >
-                  Obrigatória
-                </div>
-              </div>
+              <h5>Análise com IA</h5>
+              <p className="muted">Identifica hooks</p>
+              <input
+                type="checkbox"
+                checked={batchPipelineOptions.analysis}
+                onChange={() => {}}
+                disabled={isBatchProcessing}
+              />
+            </article>
 
-              {/* Análise com IA */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  padding: "16px",
-                  border: `2px solid ${batchPipelineOptions.analysis ? "var(--accent-2)" : "var(--border)"}`,
-                  borderRadius: "12px",
-                  background: batchPipelineOptions.analysis ? "var(--bg-3)" : "var(--panel)",
-                  cursor: isBatchProcessing ? "not-allowed" : "pointer",
-                  transition: "all 0.2s",
-                }}
-                onClick={() => {
-                  if (!isBatchProcessing) {
-                    const newAnalysis = !batchPipelineOptions.analysis;
-                    onOptionChange({
-                      analysis: newAnalysis,
-                      render: newAnalysis ? batchPipelineOptions.render : false,
-                      preApprove: newAnalysis ? batchPipelineOptions.preApprove : false,
-                    });
-                  }
-                }}
-              >
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>🤖</div>
-                <div style={{ fontWeight: "600", marginBottom: "4px" }}>Análise com IA</div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--muted)",
-                    textAlign: "center",
-                    marginTop: "4px",
-                  }}
-                >
-                  Identifica hooks
-                </div>
-                <input
-                  type="checkbox"
-                  checked={batchPipelineOptions.analysis}
-                  onChange={() => {}}
-                  disabled={isBatchProcessing}
-                  style={{ marginTop: "8px", cursor: "pointer" }}
-                />
-              </div>
-
-              {/* Renderizar */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  padding: "16px",
-                  border: `2px solid ${
-                    batchPipelineOptions.render && batchPipelineOptions.analysis
-                      ? "var(--accent-2)"
-                      : "var(--border)"
-                  }`,
-                  borderRadius: "12px",
-                  background:
-                    batchPipelineOptions.render && batchPipelineOptions.analysis
-                      ? "var(--bg-3)"
-                      : "var(--panel)",
-                  cursor:
-                    isBatchProcessing || !batchPipelineOptions.analysis ? "not-allowed" : "pointer",
-                  opacity: !batchPipelineOptions.analysis ? 0.5 : 1,
-                  transition: "all 0.2s",
-                }}
-                onClick={() => {
-                  if (!isBatchProcessing && batchPipelineOptions.analysis) {
-                    onOptionChange({ render: !batchPipelineOptions.render });
-                  }
-                }}
-              >
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>🎬</div>
-                <div style={{ fontWeight: "600", marginBottom: "4px" }}>Renderizar</div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--muted)",
-                    textAlign: "center",
-                    marginTop: "4px",
-                  }}
-                >
-                  Gera vídeos
-                </div>
-                <input
-                  type="checkbox"
-                  checked={batchPipelineOptions.render}
-                  onChange={() => {}}
-                  disabled={isBatchProcessing || !batchPipelineOptions.analysis}
-                  style={{ marginTop: "8px", cursor: "pointer" }}
-                />
-              </div>
-
-              {/* Revisar antes */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  padding: "16px",
-                  border: `2px solid ${
-                    batchPipelineOptions.preApprove && batchPipelineOptions.analysis
-                      ? "var(--accent-2)"
-                      : "var(--border)"
-                  }`,
-                  borderRadius: "12px",
-                  background:
-                    batchPipelineOptions.preApprove && batchPipelineOptions.analysis
-                      ? "var(--bg-3)"
-                      : "var(--panel)",
-                  cursor:
-                    isBatchProcessing || !batchPipelineOptions.analysis ? "not-allowed" : "pointer",
-                  opacity: !batchPipelineOptions.analysis ? 0.5 : 1,
-                  transition: "all 0.2s",
-                }}
-                onClick={() => {
-                  if (!isBatchProcessing && batchPipelineOptions.analysis) {
-                    onOptionChange({ preApprove: !batchPipelineOptions.preApprove });
-                  }
-                }}
-              >
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>✅</div>
-                <div style={{ fontWeight: "600", marginBottom: "4px" }}>Revisar antes</div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--muted)",
-                    textAlign: "center",
-                    marginTop: "4px",
-                  }}
-                >
-                  Pausa para revisar
-                </div>
-                <input
-                  type="checkbox"
-                  checked={batchPipelineOptions.preApprove}
-                  onChange={() => {}}
-                  disabled={isBatchProcessing || !batchPipelineOptions.analysis}
-                  style={{ marginTop: "8px", cursor: "pointer" }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Botões de ação */}
-          <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-            <button
-              onClick={onCancel}
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-                background: "var(--panel)",
-                cursor: "pointer",
+            <article
+              className={`ds-batch-option-card ${
+                batchPipelineOptions.render && batchPipelineOptions.analysis ? "is-active" : ""
+              } ${!batchPipelineOptions.analysis ? "is-disabled" : ""}`}
+              onClick={() => {
+                if (!isBatchProcessing && batchPipelineOptions.analysis) {
+                  onOptionChange({ render: !batchPipelineOptions.render });
+                }
               }}
             >
-              {isBatchProcessing ? "Cancelar Processamento" : "Fechar"}
-            </button>
-            <button
-              onClick={onStart}
-              disabled={isBatchProcessing || selectedVideosForBatch.length === 0}
-              className="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-                opacity: isBatchProcessing || selectedVideosForBatch.length === 0 ? 0.5 : 1,
-                cursor:
-                  isBatchProcessing || selectedVideosForBatch.length === 0
-                    ? "not-allowed"
-                    : "pointer",
+              <h5>Renderizar</h5>
+              <p className="muted">Gera vídeos</p>
+              <input
+                type="checkbox"
+                checked={batchPipelineOptions.render}
+                onChange={() => {}}
+                disabled={isBatchProcessing || !batchPipelineOptions.analysis}
+              />
+            </article>
+
+            <article
+              className={`ds-batch-option-card ${
+                batchPipelineOptions.preApprove && batchPipelineOptions.analysis ? "is-active" : ""
+              } ${!batchPipelineOptions.analysis ? "is-disabled" : ""}`}
+              onClick={() => {
+                if (!isBatchProcessing && batchPipelineOptions.analysis) {
+                  onOptionChange({ preApprove: !batchPipelineOptions.preApprove });
+                }
               }}
             >
-              {isBatchProcessing ? "⏳ Processando..." : "Iniciar Pipeline"}
-            </button>
+              <h5>Revisar antes</h5>
+              <p className="muted">Pausa para revisar</p>
+              <input
+                type="checkbox"
+                checked={batchPipelineOptions.preApprove}
+                onChange={() => {}}
+                disabled={isBatchProcessing || !batchPipelineOptions.analysis}
+              />
+            </article>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </AppDialog>
   );
 }
+

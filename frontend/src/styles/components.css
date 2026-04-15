@@ -57,7 +57,7 @@
 
 /* Buttons */
 button {
-  padding: 10px 16px;
+  padding: 10px 20px;
   border-radius: 8px;
   border: none;
   font-weight: 600;
@@ -68,22 +68,24 @@ button {
 }
 
 button.primary {
-  background: var(--accent);
-  color: var(--bg);
-}
-
-button.primary:hover:not(:disabled) {
-  background: var(--accent-dark);
-}
-
-button.secondary {
-  background: var(--bg-contrast);
+  background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--border);
 }
 
+button.primary:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+button.secondary {
+  background: var(--ink);
+  color: var(--panel);
+  border: 1px solid transparent;
+}
+
 button.secondary:hover:not(:disabled) {
-  background: var(--border);
+  background: #000;
 }
 
 button.accent {
@@ -99,6 +101,48 @@ button.ghost {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.app-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.app-btn--default {
+  background: var(--bg-contrast);
+  color: var(--ink);
+}
+
+.app-btn--primary {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.app-btn--primary:hover:not(:disabled) {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+
+.app-btn--secondary {
+  background: var(--ink) !important;
+  color: var(--panel) !important;
+  border: 1px solid transparent !important;
+}
+
+.app-btn--accent {
+  background: var(--accent-2);
+  color: var(--bg);
+}
+
+.app-btn--ghost {
+  background: transparent;
+  border: 1px solid var(--border);
 }
 
 .button-with-icon {
@@ -178,6 +222,12 @@ button:disabled {
 
 .muted {
   color: var(--muted);
+}
+
+.cut-timestamp-btn {
+  background: var(--bg-contrast);
+  color: var(--muted);
+  border: none;
 }
 
 .text-center {

@@ -17,6 +17,7 @@ import { JobStatus } from "../models/job";
 import * as metadata from "../storage/metadata";
 import * as files from "../storage/files";
 import { jobDir } from "../core/paths";
+import { openFolderInExplorerForFile } from "../utils/openFolder";
 
 interface VideoRecord {
   job: Job | null;
@@ -215,6 +216,35 @@ const videosRoutes: FastifyPluginAsync = async (fastify) => {
 
     return { ok: true, job_id };
   });
+
+  fastify.post<{ Params: { job_id: string } }>(
+    "/videos/:job_id/open-folder",
+    async (request, reply) => {
+      try {
+        const { job_id } = request.params;
+        const job = metadata.loadJob(job_id);
+        const filePath = job.source_video_path;
+
+        if (!filePath || typeof filePath !== "string") {
+          return reply.code(404).send({ detail: "Video path not set" });
+        }
+
+        const settings = loadSettings();
+        const allowedRoots = [settings.media.base_dir, archivedVideosDir()];
+        const result = openFolderInExplorerForFile(filePath, allowedRoots);
+
+        if (!result.ok) {
+          const msg = result.detail || "Failed to open folder";
+          const status = msg === "File not found" ? 404 : msg === "Invalid path" ? 400 : 500;
+          return reply.code(status).send({ detail: msg });
+        }
+
+        return { ok: true };
+      } catch (error: any) {
+        return reply.code(500).send({ detail: error.message });
+      }
+    },
+  );
 };
 
 export default videosRoutes;

@@ -9,6 +9,8 @@ import { JobStatus } from "../../models/job";
 import * as metadata from "../../storage/metadata";
 import * as rendering from "../../pipeline/rendering";
 import * as files from "../../storage/files";
+import { loadSettings, archivedVideosDir } from "../../core/settings";
+import { openFolderInExplorerForFile } from "../../utils/openFolder";
 
 export function registerRenderRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/render", async (request, reply) => {
@@ -83,6 +85,33 @@ export function registerRenderRoutes(fastify: FastifyInstance) {
       } catch (error: any) {
         console.error(`[jobs] Error deleting render:`, error);
         reply.code(500).send({ detail: error.message });
+      }
+    },
+  );
+
+  fastify.post<{ Params: { job_id: string; file: string } }>(
+    "/:job_id/renders/:file/open-folder",
+    async (request, reply) => {
+      try {
+        const { job_id, file } = request.params;
+        const safeFile = path.basename(file);
+
+        const shortsDir = files.ensureShortsJobDir(job_id);
+        const filePath = path.join(shortsDir, safeFile);
+
+        const settings = loadSettings();
+        const allowedRoots = [settings.media.base_dir, archivedVideosDir()];
+        const result = openFolderInExplorerForFile(filePath, allowedRoots);
+
+        if (!result.ok) {
+          const msg = result.detail || "Failed to open folder";
+          const status = msg === "File not found" ? 404 : msg === "Invalid path" ? 400 : 500;
+          return reply.code(status).send({ detail: msg });
+        }
+
+        return { ok: true };
+      } catch (error: any) {
+        return reply.code(500).send({ detail: error.message });
       }
     },
   );

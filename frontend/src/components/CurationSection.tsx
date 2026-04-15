@@ -84,10 +84,10 @@ export function CurationSection({
                   )}
                 </header>
                 <div className="reason">
-                  <strong>🎣 Hook:</strong> {cut.hook_reason || "-"}
+                  <strong>Hook:</strong> {cut.hook_reason || "-"}
                 </div>
                 <div className="reason">
-                  <strong>📢 Conteúdo:</strong> {cut.content_reason || "-"}
+                  <strong>Conteúdo:</strong> {cut.content_reason || "-"}
                 </div>
               </article>
             ))}

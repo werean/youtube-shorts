@@ -1,3 +1,5 @@
+import { AppDialog } from "./shared";
+
 interface BlocksDialogProps {
   blocks: Record<string, unknown>[];
   onClose: () => void;
@@ -5,42 +7,21 @@ interface BlocksDialogProps {
 
 export function BlocksDialog({ blocks, onClose }: BlocksDialogProps) {
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>Blocos Semânticos ({blocks.length})</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content">
-          <div style={{ overflowY: "auto", maxHeight: "500px" }}>
-            {blocks.map((block: any, index: number) => (
-              <div
-                key={index}
-                style={{
-                  marginBottom: "16px",
-                  padding: "12px",
-                  backgroundColor: "var(--bg-contrast)",
-                  borderRadius: "8px",
-                  borderLeft: "4px solid var(--accent-2)",
-                }}
-              >
-                <div style={{ marginBottom: "8px" }}>
-                  <strong>Bloco {index + 1}</strong>
-                  {block.block_id && <span> ({block.block_id})</span>}
-                </div>
-                <div style={{ marginBottom: "8px", fontSize: "0.9em", color: "var(--muted)" }}>
-                  {block.start?.toFixed(2)}s - {block.end?.toFixed(2)}s
-                </div>
-                <div style={{ lineHeight: "1.6" }}>{block.text}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+    <AppDialog title={`Blocos Semânticos (${blocks.length})`} onClose={onClose} wide scrollable>
+      <div className="ds-dialog-scroll-list">
+        {blocks.map((block: any, index: number) => (
+          <article key={index} className="ds-dialog-block-card">
+            <div className="ds-dialog-block-title">
+              <strong>Bloco {index + 1}</strong>
+              {block.block_id ? <span> ({block.block_id})</span> : null}
+            </div>
+            <p className="ds-dialog-block-range">
+              {block.start?.toFixed(2)}s - {block.end?.toFixed(2)}s
+            </p>
+            <div className="ds-dialog-block-text">{String(block.text || "")}</div>
+          </article>
+        ))}
       </div>
-    </div>
+    </AppDialog>
   );
 }

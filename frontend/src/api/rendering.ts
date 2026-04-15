@@ -14,3 +14,9 @@ export async function deleteRenderOutput(
 ): Promise<{ ok: boolean }> {
   return request(`/jobs/${jobId}/renders/${encodeURIComponent(filename)}`, { method: "DELETE" });
 }
+
+export async function openRenderFolder(jobId: string, filename: string): Promise<{ ok: boolean }> {
+  return request(`/jobs/${jobId}/renders/${encodeURIComponent(filename)}/open-folder`, {
+    method: "POST",
+  });
+}

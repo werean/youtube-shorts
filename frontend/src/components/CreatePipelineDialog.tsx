@@ -73,7 +73,7 @@ export function CreatePipelineDialog({
           <h3>Criar Pipeline</h3>
           <div className="dialog-actions">
             <button className="icon-btn close-btn" onClick={onClose} disabled={isProcessing}>
-              ✕
+              X
             </button>
           </div>
         </div>
@@ -154,7 +154,7 @@ export function CreatePipelineDialog({
                                 lineHeight: "1.3",
                               }}
                             >
-                              ⚠️ {warnings.join(" — ")}. Prosseguir irá apagar e sobrescrever.
+                              {warnings.join(" — ")}. Prosseguir irá apagar e sobrescrever.
                             </div>
                           )}
                         </div>
@@ -275,7 +275,7 @@ export function CreatePipelineDialog({
 
         <div className="dialog-actions" style={{ justifyContent: "flex-end", gap: "8px" }}>
           <button
-            className="secondary"
+            className="primary"
             onClick={onClose}
             disabled={isProcessing}
             style={{
@@ -286,7 +286,7 @@ export function CreatePipelineDialog({
             Cancelar
           </button>
           <button
-            className="primary"
+            className="secondary"
             onClick={handleStart}
             disabled={isProcessing || selectedVideoIds.length === 0}
             style={{
@@ -294,10 +294,11 @@ export function CreatePipelineDialog({
               cursor: isProcessing || selectedVideoIds.length === 0 ? "not-allowed" : "pointer",
             }}
           >
-            {isProcessing ? "⏳ Processando..." : "Iniciar Pipeline"}
+            {isProcessing ? "Processando..." : "Iniciar Pipeline"}
           </button>
         </div>
       </div>
     </div>
   );
 }
+

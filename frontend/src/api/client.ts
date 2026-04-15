@@ -13,17 +13,17 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     if (!response.ok) {
       const text = await response.text();
-      console.error(`[API] ✗ Error response: ${text}`);
+      console.error(`[API] Error response: ${text}`);
       throw new Error(text || `Request failed: ${response.status}`);
     }
 
     const data = (await response.json()) as T;
-    console.log(`[API] ✓ Success`, data);
+    console.log(`[API] Success`, data);
     return data;
   } catch (error: any) {
-    console.error(`[API] ✗ Fetch error:`, error.message);
-    console.error(`[API] ✗ Error type:`, error.name);
-    console.error(`[API] ✗ Full error:`, error);
+    console.error(`[API] Fetch error:`, error.message);
+    console.error(`[API] Error type:`, error.name);
+    console.error(`[API] Full error:`, error);
     throw error;
   }
 }

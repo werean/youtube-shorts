@@ -9,11 +9,11 @@ interface AppButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClass: Record<AppButtonVariant, string> = {
-  default: "",
-  primary: "primary",
-  secondary: "secondary",
-  accent: "accent",
-  ghost: "ghost",
+  default: "app-btn app-btn--default",
+  primary: "primary app-btn app-btn--primary",
+  secondary: "secondary app-btn app-btn--secondary",
+  accent: "accent app-btn app-btn--accent",
+  ghost: "ghost app-btn app-btn--ghost",
 };
 
 export function AppButton({

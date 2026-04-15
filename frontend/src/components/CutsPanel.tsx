@@ -52,14 +52,14 @@ export function CutsPanel({
                 )}
               </header>
               <div className="reason">
-                <strong>🎣 Hook:</strong> {cut.hook_reason || "-"}
+                <strong>Hook:</strong> {cut.hook_reason || "-"}
               </div>
               <div className="reason">
-                <strong>📢 Conteúdo:</strong> {cut.content_reason || "-"}
+                <strong>Conteúdo:</strong> {cut.content_reason || "-"}
               </div>
               <div className="actions">
                 <button
-                  className="primary"
+                  className="secondary"
                   disabled={action.busy}
                   onClick={() =>
                     onRunAction(
@@ -70,10 +70,10 @@ export function CutsPanel({
                     )
                   }
                 >
-                  ✓ Aprovar
+                  Aprovar
                 </button>
                 <button
-                  className="secondary"
+                  className="primary"
                   disabled={action.busy}
                   onClick={() =>
                     onRunAction(
@@ -84,7 +84,7 @@ export function CutsPanel({
                     )
                   }
                 >
-                  ✗ Reprovar
+                  Reprovar
                 </button>
               </div>
             </article>
@@ -94,5 +94,4 @@ export function CutsPanel({
     </section>
   );
 }
-
 

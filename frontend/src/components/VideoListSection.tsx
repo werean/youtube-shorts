@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { VideoItem } from "../hooks";
-import { archiveVideo, deleteVideo, renameVideo } from "../api";
+import { archiveVideo, deleteVideo, openVideoFolder, renameVideo } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
 
 interface VideoListSectionProps {
@@ -151,6 +151,18 @@ export function VideoListSection({
 
                   {menuOpenId === video.job.job_id && (
                     <div className="menu-popover">
+                      <button
+                        onClick={() =>
+                          onRunAction(
+                            () => openVideoFolder(video.job.job_id),
+                            () => {
+                              setMenuOpenId(null);
+                            },
+                          )
+                        }
+                      >
+                        Open Folder
+                      </button>
                       {videoView === "active" && (
                         <>
                           <button
@@ -205,5 +217,3 @@ export function VideoListSection({
     </section>
   );
 }
-
-

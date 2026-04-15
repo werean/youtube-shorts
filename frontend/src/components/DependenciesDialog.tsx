@@ -237,11 +237,6 @@ export function DependenciesDialog({
       >
         <div className="dialog-header">
           <h3>Gerenciar dependências</h3>
-          <div className="dialog-actions">
-            <AppButton variant="secondary" onClick={onClose} style={{ padding: "8px 12px" }}>
-              Fechar
-            </AppButton>
-          </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -361,11 +356,7 @@ export function DependenciesDialog({
                         onClick={() => onShowInstallInstructions(name)}
                         disabled={isLoading || isLoadingInitial}
                         variant="secondary"
-                        style={{
-                          padding: "4px 8px",
-                          fontSize: "12px",
-                          opacity: isLoading || isLoadingInitial ? 0.6 : 1,
-                        }}
+                        className="ds-deps-mini-btn"
                       >
                         Instalação manual
                       </AppButton>
@@ -384,18 +375,7 @@ export function DependenciesDialog({
                           setSelectedViewMode(null);
                         }}
                         variant="secondary"
-                        style={{
-                          padding: "4px 8px",
-                          fontSize: "12px",
-                          color:
-                            isInstalling || isUninstalling || isLoading || isLoadingInitial
-                              ? "var(--muted)"
-                              : "var(--success)",
-                          opacity:
-                            isInstalling || isUninstalling || isLoading || isLoadingInitial
-                              ? 0.6
-                              : 1,
-                        }}
+                        className="ds-deps-mini-btn ds-deps-mini-btn--success"
                       >
                         {isInstalling ? "Instalando..." : "Instalação automática"}
                       </AppButton>
@@ -407,19 +387,8 @@ export function DependenciesDialog({
                           setOperationChoice({ name, mode: "uninstall" });
                           setSelectedViewMode(null);
                         }}
-                        variant="secondary"
-                        style={{
-                          padding: "4px 8px",
-                          fontSize: "12px",
-                          color:
-                            isInstalling || isUninstalling || isLoading || isLoadingInitial
-                              ? "var(--muted)"
-                              : "var(--danger)",
-                          opacity:
-                            isInstalling || isUninstalling || isLoading || isLoadingInitial
-                              ? 0.6
-                              : 1,
-                        }}
+                        variant="primary"
+                        className="ds-deps-mini-btn ds-deps-mini-btn--danger"
                       >
                         {isUninstalling ? "Desinstalando..." : "Desinstalar"}
                       </AppButton>
@@ -558,22 +527,18 @@ export function DependenciesDialog({
                   <AppButton
                     variant="secondary"
                     onClick={onDownloadInstallLogs}
-                    style={{ padding: "8px 12px", fontSize: "12px" }}
+                    className="ds-deps-mini-btn"
                   >
                     Baixar logs (.txt)
                   </AppButton>
                 )}
                 {installSessionId && installLogStatus === "running" && (
                   <AppButton
-                    variant="secondary"
+                    variant="primary"
                     onClick={() => {
                       void onCancelInstallSession(installSessionId);
                     }}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: "12px",
-                      color: "var(--danger)",
-                    }}
+                    className="ds-deps-mini-btn"
                   >
                     Cancelar execução
                   </AppButton>
@@ -590,16 +555,15 @@ export function DependenciesDialog({
               marginTop: "16px",
             }}
           >
-            <AppButton variant="secondary" onClick={onClose} style={{ padding: "10px 20px" }}>
+            <AppButton variant="primary" onClick={onClose}>
               Fechar
             </AppButton>
             <AppButton
-              variant="primary"
+              variant="secondary"
               onClick={() => {
                 void onRefresh();
               }}
               disabled={refreshingDependencies}
-              style={{ padding: "10px 20px", opacity: refreshingDependencies ? 0.6 : 1 }}
             >
               {refreshingDependencies ? "Recarregando..." : "Recarregar status"}
             </AppButton>
@@ -634,11 +598,7 @@ export function DependenciesDialog({
                   setSelectedViewMode("terminal");
                 }}
                 title="Abre o terminal do Windows com o comando da operação"
-                style={{
-                  padding: "10px 14px",
-                  border: selectedViewMode === "terminal" ? "1px solid var(--accent-2)" : undefined,
-                  color: selectedViewMode === "terminal" ? "var(--accent-2)" : undefined,
-                }}
+                className={`ds-deps-choice-btn ${selectedViewMode === "terminal" ? "is-active" : ""}`.trim()}
               >
                 Abrir terminal
               </AppButton>
@@ -649,11 +609,7 @@ export function DependenciesDialog({
                   setSelectedViewMode("logs");
                 }}
                 title="Mantém a operação na aplicação e mostra logs em tempo real"
-                style={{
-                  padding: "10px 14px",
-                  border: selectedViewMode === "logs" ? "1px solid var(--accent-2)" : undefined,
-                  color: selectedViewMode === "logs" ? "var(--accent-2)" : undefined,
-                }}
+                className={`ds-deps-choice-btn ${selectedViewMode === "logs" ? "is-active" : ""}`.trim()}
               >
                 Mostrar logs integrados
               </AppButton>
@@ -689,17 +645,17 @@ export function DependenciesDialog({
               style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}
             >
               <AppButton
-                variant="secondary"
+                variant="primary"
                 onClick={() => {
                   setOperationChoice(null);
                   setSelectedViewMode(null);
                 }}
-                style={{ padding: "8px 14px" }}
+                className="ds-deps-mini-btn"
               >
                 Cancelar
               </AppButton>
               <AppButton
-                variant="primary"
+                variant="secondary"
                 disabled={!selectedViewMode}
                 onClick={() => {
                   if (!selectedViewMode) {
@@ -707,7 +663,7 @@ export function DependenciesDialog({
                   }
                   void handleChosenViewMode(selectedViewMode);
                 }}
-                style={{ padding: "8px 14px" }}
+                className="ds-deps-mini-btn"
               >
                 {operationChoice.mode === "install" ? "Instalar" : "Desinstalar"}
               </AppButton>
@@ -747,14 +703,7 @@ export function DependenciesDialog({
                     // ignore storage errors
                   }
                 }}
-                style={{
-                  padding: "10px 14px",
-                  border:
-                    pytorchGpuTier === "rtx_4000_or_lower"
-                      ? "1px solid var(--accent-2)"
-                      : undefined,
-                  color: pytorchGpuTier === "rtx_4000_or_lower" ? "var(--accent-2)" : undefined,
-                }}
+                className={`ds-deps-choice-btn ${pytorchGpuTier === "rtx_4000_or_lower" ? "is-active" : ""}`.trim()}
               >
                 RTX 4000 series ou inferior
               </AppButton>
@@ -769,11 +718,7 @@ export function DependenciesDialog({
                     // ignore storage errors
                   }
                 }}
-                style={{
-                  padding: "10px 14px",
-                  border: pytorchGpuTier === "rtx_5000" ? "1px solid var(--accent-2)" : undefined,
-                  color: pytorchGpuTier === "rtx_5000" ? "var(--accent-2)" : undefined,
-                }}
+                className={`ds-deps-choice-btn ${pytorchGpuTier === "rtx_5000" ? "is-active" : ""}`.trim()}
               >
                 RTX 5000 series
               </AppButton>
@@ -783,16 +728,16 @@ export function DependenciesDialog({
               style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}
             >
               <AppButton
-                variant="secondary"
+                variant="primary"
                 onClick={() => {
                   setPytorchGpuPrompt(null);
                 }}
-                style={{ padding: "8px 14px" }}
+                className="ds-deps-mini-btn"
               >
                 Cancelar
               </AppButton>
               <AppButton
-                variant="primary"
+                variant="secondary"
                 disabled={!pytorchGpuTier}
                 onClick={() => {
                   if (!pytorchGpuTier) {
@@ -803,7 +748,7 @@ export function DependenciesDialog({
                   setOperationChoice(pytorchGpuPrompt);
                   setSelectedViewMode(null);
                 }}
-                style={{ padding: "8px 14px" }}
+                className="ds-deps-mini-btn"
               >
                 Continuar
               </AppButton>

@@ -20,16 +20,16 @@ export function useAction() {
     try {
       console.log(`[App] Chamando função...`);
       const result = await fn();
-      console.log(`[App] ✓ Ação completada com sucesso`);
+      console.log(`[App] Ação completada com sucesso`);
       onSuccess?.(result);
       setAction({ busy: false });
       return result;
     } catch (error: any) {
-      console.error(`[App] ✗ Erro na ação:`, error);
-      console.error(`[App] ✗ Mensagem:`, error.message);
-      console.error(`[App] ✗ Stack:`, error.stack);
+      console.error(`[App] Erro na ação:`, error);
+      console.error(`[App] Mensagem:`, error.message);
+      console.error(`[App] Stack:`, error.stack);
       const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
-      console.error(`[App] ✗ Será exibido ao usuário:`, errorMessage);
+      console.error(`[App] Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
       throw error;
     }

@@ -15,11 +15,11 @@ export interface InlineMessageProps extends HTMLAttributes<HTMLDivElement> {
 function toneIcon(tone: InlineMessageTone): string {
   switch (tone) {
     case "success":
-      return "✓";
+      return "OK";
     case "warning":
       return "!";
     case "error":
-      return "⨯";
+      return "X";
     case "info":
     default:
       return "i";
@@ -66,11 +66,9 @@ export function InlineMessage({
           onClick={onDismiss}
           aria-label={dismissLabel}
         >
-          ×
+          X
         </button>
       ) : null}
     </div>
   );
 }
-
-

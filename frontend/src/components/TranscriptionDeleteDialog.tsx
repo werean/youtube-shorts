@@ -1,4 +1,5 @@
 import type { ActionState } from "../hooks/useAppAction";
+import { AppButton, AppDialog } from "./shared";
 
 interface TranscriptionDeleteDialogProps {
   pendingDeleteFormat: "text" | "vtt" | "segments";
@@ -19,37 +20,31 @@ export function TranscriptionDeleteDialog({
   onCancel,
 }: TranscriptionDeleteDialogProps) {
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>Confirmar exclusão</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onCancel}>
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content">
-          <p>
-            Tem certeza que deseja deletar a transcrição em formato{" "}
-            <strong>{formatLabel(pendingDeleteFormat)}</strong>?
-          </p>
-          <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button
-              className="danger"
-              disabled={action.busy}
-              onClick={() => onConfirm(pendingDeleteFormat)}
-            >
-              Confirmar
-            </button>
-            <button className="secondary" onClick={onCancel}>
-              Cancelar
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AppDialog
+      title="Confirmar exclusão"
+      onClose={onCancel}
+      showHeaderClose={false}
+      footer={
+        <>
+          <AppButton variant="primary" onClick={onCancel} disabled={action.busy}>
+            Cancelar
+          </AppButton>
+          <AppButton
+            variant="default"
+            className="danger"
+            onClick={() => onConfirm(pendingDeleteFormat)}
+            disabled={action.busy}
+          >
+            {action.busy ? "Excluindo..." : "Confirmar"}
+          </AppButton>
+        </>
+      }
+    >
+      <p>
+        Tem certeza que deseja deletar a transcrição em formato{" "}
+        <strong>{formatLabel(pendingDeleteFormat)}</strong>?
+      </p>
+    </AppDialog>
   );
 }
-
 

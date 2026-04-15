@@ -44,7 +44,7 @@ export function SimpleDialogs({
               <h3>Renomear vídeo</h3>
               <div className="dialog-actions">
                 <button className="icon-btn close-btn" onClick={onRenameClose}>
-                  ✕
+                  X
                 </button>
               </div>
             </div>
@@ -59,10 +59,10 @@ export function SimpleDialogs({
                 />
               </label>
               <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button className="primary" onClick={onRenameSave}>
+                <button className="secondary" onClick={onRenameSave}>
                   Salvar
                 </button>
-                <button className="secondary" onClick={onRenameClose}>
+                <button className="primary" onClick={onRenameClose}>
                   Cancelar
                 </button>
               </div>
@@ -79,7 +79,7 @@ export function SimpleDialogs({
               <h3>Mover video para a pasta configurada?</h3>
               <div className="dialog-actions">
                 <button className="icon-btn close-btn" onClick={onMoveUploadClose}>
-                  ✕
+                  X
                 </button>
               </div>
             </div>
@@ -97,10 +97,10 @@ export function SimpleDialogs({
                 <span>Nao perguntar novamente</span>
               </label>
               <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button className="primary" onClick={() => onMoveUploadDecision(true)}>
+                <button className="secondary" onClick={() => onMoveUploadDecision(true)}>
                   Mover e enviar
                 </button>
-                <button className="secondary" onClick={() => onMoveUploadDecision(false)}>
+                <button className="primary" onClick={() => onMoveUploadDecision(false)}>
                   Manter copia
                 </button>
               </div>
@@ -122,13 +122,13 @@ export function SimpleDialogs({
             style={{ maxWidth: "400px" }}
           >
             <div className="dialog-header">
-              <h3>✅ Pipeline Concluído</h3>
+              <h3>Pipeline Concluído</h3>
             </div>
             <div className="dialog-content" style={{ padding: "20px" }}>
               <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
               <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
                 <button
-                  className="primary"
+                  className="secondary"
                   onClick={onBatchCompletionClose}
                   style={{
                     padding: "10px 30px",
@@ -147,5 +147,4 @@ export function SimpleDialogs({
     </>
   );
 }
-
 

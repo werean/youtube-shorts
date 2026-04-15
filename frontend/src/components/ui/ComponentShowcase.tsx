@@ -55,7 +55,7 @@ export function ComponentShowcase() {
             <Button onClick={() => setLoading((current) => !current)} loading={loading}>
               Toggle loading
             </Button>
-            <Button variant="secondary">Secondary</Button>
+            <Button variant="primary">Secondary</Button>
             <Button variant="ghost">Ghost</Button>
             <Button variant="danger">Danger</Button>
           </div>
@@ -81,7 +81,7 @@ export function ComponentShowcase() {
         initialFocusRef={submitButtonRef}
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-            <Button variant="secondary" onClick={() => setDialogOpen(false)}>
+            <Button variant="primary" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
             <Button ref={submitButtonRef} onClick={() => setDialogOpen(false)}>
@@ -95,5 +95,6 @@ export function ComponentShowcase() {
     </div>
   );
 }
+
 
 

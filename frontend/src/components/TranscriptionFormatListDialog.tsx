@@ -1,3 +1,5 @@
+import { AppButton, AppDialog } from "./shared";
+
 interface TranscriptionFormatListDialogProps {
   activeVideoHasText: boolean;
   activeVideoHasVtt: boolean;
@@ -13,58 +15,55 @@ export function TranscriptionFormatListDialog({
   onSelectFormat,
   onClose,
 }: TranscriptionFormatListDialogProps) {
+  const hasAnyFormat = activeVideoHasText || activeVideoHasVtt || activeVideoHasSegments;
+
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>Transcrição</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content">
-          <p>Escolha um formato para visualizar:</p>
-          <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            {activeVideoHasText && (
-              <button
-                className="secondary"
-                onClick={() => {
-                  onSelectFormat("text");
-                  onClose();
-                }}
-              >
-                TXT
-              </button>
-            )}
-            {activeVideoHasVtt && (
-              <button
-                className="secondary"
-                onClick={() => {
-                  onSelectFormat("vtt");
-                  onClose();
-                }}
-              >
-                VTT
-              </button>
-            )}
-            {activeVideoHasSegments && (
-              <button
-                className="secondary"
-                onClick={() => {
-                  onSelectFormat("segments");
-                  onClose();
-                }}
-              >
-                JSON
-              </button>
-            )}
-          </div>
-        </div>
+    <AppDialog
+      title="Transcrição"
+      onClose={onClose}
+      footer={
+        <>
+          {activeVideoHasText ? (
+            <AppButton
+              variant="secondary"
+              onClick={() => {
+                onSelectFormat("text");
+                onClose();
+              }}
+            >
+              TXT
+            </AppButton>
+          ) : null}
+          {activeVideoHasVtt ? (
+            <AppButton
+              variant="secondary"
+              onClick={() => {
+                onSelectFormat("vtt");
+                onClose();
+              }}
+            >
+              VTT
+            </AppButton>
+          ) : null}
+          {activeVideoHasSegments ? (
+            <AppButton
+              variant="secondary"
+              onClick={() => {
+                onSelectFormat("segments");
+                onClose();
+              }}
+            >
+              JSON
+            </AppButton>
+          ) : null}
+        </>
+      }
+    >
+      <div className="ds-dialog-stack">
+        <p className="muted">Escolha um formato para visualizar.</p>
+        {!hasAnyFormat ? <p className="muted">Nenhum formato de transcrição disponível.</p> : null}
       </div>
-    </div>
+    </AppDialog>
   );
 }
-
 

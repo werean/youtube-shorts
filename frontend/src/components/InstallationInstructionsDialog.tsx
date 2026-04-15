@@ -60,7 +60,7 @@ export function InstallationInstructionsDialog({
         <h3>{guide.manual.title}</h3>
         <div className="dialog-actions">
           <button className="icon-btn close-btn" onClick={onClose}>
-            ✕
+            X
           </button>
         </div>
       </div>
@@ -144,7 +144,7 @@ export function InstallationInstructionsDialog({
         <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "20px" }}>
           <button
             onClick={onClose}
-            className="primary"
+            className="secondary"
             style={{
               padding: "10px 20px",
               borderRadius: "8px",
@@ -157,3 +157,4 @@ export function InstallationInstructionsDialog({
     </div>
   );
 }
+

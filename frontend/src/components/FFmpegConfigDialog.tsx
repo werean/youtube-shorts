@@ -131,11 +131,6 @@ export function FFmpegConfigDialog({
       >
         <div className="dialog-header">
           <h3>Configurar FFmpeg</h3>
-          <div className="dialog-actions">
-            <AppButton variant="secondary" onClick={onCancel} style={{ padding: "8px 12px" }}>
-              Fechar
-            </AppButton>
-          </div>
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
@@ -416,7 +411,7 @@ export function FFmpegConfigDialog({
           >
             <AppButton
               onClick={onCancel}
-              variant="secondary"
+              variant="primary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -427,7 +422,7 @@ export function FFmpegConfigDialog({
             <AppButton
               onClick={handleSave}
               disabled={action.busy}
-              variant="primary"
+              variant="secondary"
               style={{
                 padding: "10px 20px",
                 borderRadius: "8px",
@@ -441,3 +436,4 @@ export function FFmpegConfigDialog({
     </div>
   );
 }
+

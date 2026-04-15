@@ -1,4 +1,4 @@
-import type { Segment } from "../types";
+import { AppButton, AppDialog } from "./shared";
 
 interface TranscriptionContentDialogProps {
   title: string;
@@ -16,25 +16,25 @@ export function TranscriptionContentDialog({
   onDelete,
 }: TranscriptionContentDialogProps) {
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>{title}</h3>
-          <button className="danger" onClick={() => onDelete(selectedFormat)}>
+    <AppDialog
+      title={title}
+      onClose={onClose}
+      showHeaderClose={false}
+      wide
+      scrollable
+      footer={
+        <>
+          <AppButton variant="default" className="danger" onClick={() => onDelete(selectedFormat)}>
             Deletar transcrição
-          </button>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content">
-          <pre className="transcription-text">{content}</pre>
-        </div>
-      </div>
-    </div>
+          </AppButton>
+          <AppButton variant="primary" onClick={onClose}>
+            Fechar
+          </AppButton>
+        </>
+      }
+    >
+      <pre className="transcription-text">{content}</pre>
+    </AppDialog>
   );
 }
-
 

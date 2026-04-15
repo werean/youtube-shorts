@@ -18,12 +18,12 @@ export async function runAction<T>(
   setAction({ busy: true });
   try {
     const result = await fn();
-    console.log(`[Action] ✓ Completada com sucesso`);
+    console.log(`[Action] Completada com sucesso`);
     onSuccess?.(result);
     setAction({ busy: false });
     return result;
   } catch (error: any) {
-    console.error(`[Action] ✗ Erro:`, error);
+    console.error(`[Action] Erro:`, error);
     const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
     setAction({ busy: false, error: errorMessage });
   }

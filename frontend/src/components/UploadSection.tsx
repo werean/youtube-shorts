@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { VideoItem } from "../hooks";
-import { createJob, ingestJob, uploadVideoFile } from "../api";
+import { createJob, getJob, ingestJob, uploadVideoFile } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
 import { AppButton } from "./shared";
 
@@ -53,8 +53,14 @@ export function UploadSection({
     for (const file of selectedFiles) {
       try {
         const result = await uploadVideoFile(file);
+        const title = String(
+          result.job?.video_name ?? result.job?.source_file_name ?? file.name,
+        ).trim();
         const newVideo: VideoItem = {
-          job: result.job,
+          job: {
+            ...result.job,
+            video_name: title,
+          },
           transcriptionLogs: [],
           videoPath: result.video_path,
         };
@@ -146,34 +152,47 @@ export function UploadSection({
                   />
                 </label>
                 <AppButton
-                  variant="primary"
+                  variant="secondary"
                   disabled={action.busy || youtubeUrl.length === 0}
                   fullWidth
                   style={{ padding: "14px 16px", marginTop: "8px" }}
                   onClick={() => {
                     runAction(
-                      () => createJob(youtubeUrl),
-                      (jobResult: any) => {
-                        const job = jobResult.job || jobResult;
-                        const newVideo: VideoItem = {
-                          job,
-                          transcriptionLogs: [],
-                        };
-                        onVideoAdded(newVideo);
+                      async () => {
+                        const job = await createJob(youtubeUrl);
                         setYoutubeUrl("");
 
-                        runAction(
-                          () => ingestJob(job.job_id),
-                          (ingestResult: any) => {
-                            // ingestResult contains { video_path, metadata_path }
-                            const updatedVideo: VideoItem = {
-                              ...newVideo,
-                              videoPath: ingestResult.video_path,
-                            };
-                            onVideoAdded(updatedVideo);
-                            onLoadVideos();
+                        const ingestResult = await ingestJob(job.job_id);
+                        const updatedJob = await getJob(job.job_id);
+
+                        return { updatedJob, ingestResult };
+                      },
+                      ({ updatedJob, ingestResult }) => {
+                        const title = String(
+                          updatedJob?.video_name ?? updatedJob?.source_file_name ?? "",
+                        ).trim();
+                        const videoPath = String(ingestResult?.video_path ?? "").trim();
+
+                        if (!title || !videoPath) {
+                          console.warn(
+                            "[UploadSection] Vídeo baixado mas metadata incompleta; recarregando lista.",
+                            { title, videoPath, jobId: updatedJob?.job_id },
+                          );
+                          onLoadVideos();
+                          return;
+                        }
+
+                        const newVideo: VideoItem = {
+                          job: {
+                            ...updatedJob,
+                            video_name: title,
                           },
-                        );
+                          transcriptionLogs: [],
+                          videoPath,
+                        };
+
+                        onVideoAdded(newVideo);
+                        onLoadVideos();
                       },
                     );
                   }}
@@ -359,7 +378,7 @@ export function UploadSection({
                 />
 
                 <AppButton
-                  variant="primary"
+                  variant="secondary"
                   disabled={action.busy || selectedFiles.length === 0}
                   fullWidth
                   style={{ padding: "14px 16px", marginTop: "8px" }}
@@ -380,3 +399,4 @@ export function UploadSection({
     </section>
   );
 }
+

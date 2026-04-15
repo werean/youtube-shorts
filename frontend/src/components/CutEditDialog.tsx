@@ -62,11 +62,6 @@ export function CutEditDialog({
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <h3>Editar timestamp</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onCancel}>
-              ✕
-            </button>
-          </div>
         </div>
         <div className="dialog-content">
           <div
@@ -128,10 +123,10 @@ export function CutEditDialog({
           </div>
 
           <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="primary" disabled={action.busy} onClick={handleSave}>
+            <button className="secondary" disabled={action.busy} onClick={handleSave}>
               Salvar
             </button>
-            <button className="secondary" onClick={onCancel}>
+            <button className="primary" onClick={onCancel}>
               Cancelar
             </button>
           </div>
@@ -140,5 +135,4 @@ export function CutEditDialog({
     </div>
   );
 }
-
 

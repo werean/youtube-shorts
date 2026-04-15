@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import type { Cut } from "../types";
+import { useEffect, useState } from "react";
+import { AppButton, AppDialog, AppInput } from "./shared";
 
 interface TimestampDialogProps {
   mode: "add" | "edit";
@@ -67,95 +67,75 @@ export function TimestampDialog({
   };
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>{mode === "add" ? "Adicionar Corte Manual" : "Editar timestamp"}</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
-        <div className="dialog-content">
-          {error && (
-            <div style={{ color: "red", marginBottom: "12px", fontSize: "0.9rem" }}>{error}</div>
-          )}
+    <AppDialog
+      title={mode === "add" ? "Adicionar Corte Manual" : "Editar timestamp"}
+      onClose={onClose}
+      showHeaderClose={false}
+      footer={
+        <>
+          <AppButton variant="primary" onClick={onClose}>
+            Cancelar
+          </AppButton>
+          <AppButton variant="secondary" onClick={handleSave}>
+            {mode === "add" ? "Adicionar" : "Salvar"}
+          </AppButton>
+        </>
+      }
+    >
+      {error ? <p className="ds-dialog-error">{error}</p> : null}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <label className="field">
-              Início - Minutos
-              <input
-                type="number"
-                min="0"
-                value={startMinutes}
-                onChange={(e) => setStartMinutes(e.target.value)}
-                placeholder="0"
-              />
-            </label>
-            <label className="field">
-              Início - Segundos
-              <input
-                type="number"
-                min="0"
-                max="59"
-                value={startSeconds}
-                onChange={(e) => setStartSeconds(e.target.value)}
-                placeholder="0"
-              />
-            </label>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <label className="field">
-              Fim - Minutos
-              <input
-                type="number"
-                min="0"
-                value={endMinutes}
-                onChange={(e) => setEndMinutes(e.target.value)}
-                placeholder="0"
-              />
-            </label>
-            <label className="field">
-              Fim - Segundos
-              <input
-                type="number"
-                min="0"
-                max="59"
-                value={endSeconds}
-                onChange={(e) => setEndSeconds(e.target.value)}
-                placeholder="0"
-              />
-            </label>
-          </div>
-
-          <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="primary" onClick={handleSave}>
-              {mode === "add" ? "Adicionar" : "Salvar"}
-            </button>
-            <button className="secondary" onClick={onClose}>
-              Cancelar
-            </button>
-          </div>
-        </div>
+      <div className="ds-time-grid">
+        <label className="field">
+          Início - Minutos
+          <AppInput
+            type="number"
+            min="0"
+            value={startMinutes}
+            onChange={(e) => setStartMinutes(e.target.value)}
+            placeholder="0"
+            fullWidth
+          />
+        </label>
+        <label className="field">
+          Início - Segundos
+          <AppInput
+            type="number"
+            min="0"
+            max="59"
+            value={startSeconds}
+            onChange={(e) => setStartSeconds(e.target.value)}
+            placeholder="0"
+            fullWidth
+          />
+        </label>
       </div>
-    </div>
+
+      <div className="ds-time-grid">
+        <label className="field">
+          Fim - Minutos
+          <AppInput
+            type="number"
+            min="0"
+            value={endMinutes}
+            onChange={(e) => setEndMinutes(e.target.value)}
+            placeholder="0"
+            fullWidth
+          />
+        </label>
+        <label className="field">
+          Fim - Segundos
+          <AppInput
+            type="number"
+            min="0"
+            max="59"
+            value={endSeconds}
+            onChange={(e) => setEndSeconds(e.target.value)}
+            placeholder="0"
+            fullWidth
+          />
+        </label>
+      </div>
+    </AppDialog>
   );
 }
-
 

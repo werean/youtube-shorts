@@ -62,7 +62,15 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  margin-top: 20px;
+  align-items: center;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.dialog-footer > button,
+.dialog-footer .ds-dialog-actions > button {
+  padding: 10px 20px;
+  opacity: 1;
 }
 
 .transcription-text {
@@ -136,4 +144,207 @@
 
 .dialog-link:hover {
   text-decoration: underline;
+}
+
+.ds-dialog-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.ds-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ds-dialog-actions--start {
+  justify-content: flex-start;
+}
+
+.ds-dialog-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.92rem;
+}
+
+.ds-time-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ds-dialog-scroll-list {
+  display: grid;
+  gap: 12px;
+  max-height: min(64vh, 560px);
+  overflow-y: auto;
+}
+
+.ds-dialog-block-card {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent-2);
+  border-radius: 10px;
+  background: var(--bg-contrast);
+  padding: 12px;
+}
+
+.ds-dialog-block-title {
+  margin-bottom: 8px;
+}
+
+.ds-dialog-block-range {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.ds-dialog-block-text {
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ds-cut-checkbox-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ds-cut-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-contrast);
+}
+
+.ds-dialog-section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.ds-video-list-box {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-contrast);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.ds-batch-video-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.ds-batch-video-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.ds-batch-video-warning {
+  margin: 4px 0 0;
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+
+.ds-batch-video-status {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ds-deps-mini-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.ds-deps-mini-btn--success {
+  color: var(--success);
+}
+
+.ds-deps-mini-btn--danger {
+  color: var(--danger);
+}
+
+.ds-deps-choice-btn {
+  padding: 10px 14px;
+}
+
+.ds-deps-choice-btn.is-active {
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+}
+
+.ds-batch-options-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ds-batch-option-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ds-batch-option-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.ds-batch-option-card p {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.ds-batch-option-card.is-active {
+  border-color: var(--accent-2);
+  background: var(--bg-3);
+}
+
+.ds-batch-option-card.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ds-batch-option-card--locked {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.ds-empty-state {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .ds-time-grid,
+  .ds-batch-options-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-dialog-actions {
+    width: 100%;
+  }
+
+  .ds-dialog-actions > .ui-button {
+    width: 100%;
+  }
 }

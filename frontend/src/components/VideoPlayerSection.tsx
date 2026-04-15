@@ -100,10 +100,10 @@ export function VideoPlayerSection({
                   className="video-player"
                   style={{ maxHeight: "400px" }}
                   onLoadStart={() => {
-                    console.log(`[video] 🎬 Loading video`);
+                    console.log(`[video] Loading video`);
                   }}
                   onError={(e) => {
-                    console.error(`[video] ❌ ERROR loading video:`, e);
+                    console.error(`[video] ERROR loading video:`, e);
                   }}
                 />
               </div>
@@ -138,7 +138,7 @@ export function VideoPlayerSection({
                       opacity: hasAnyTranscription ? 1 : 0.5,
                     }}
                   >
-                    📄 Visualizar transcrição
+                    Visualizar transcrição
                   </button>
                   <p
                     className="muted"
@@ -171,10 +171,10 @@ export function VideoPlayerSection({
                     onClick={onTranscribeClick}
                   >
                     {isTranscribing
-                      ? "⏳ Transcrevendo..."
+                      ? "Transcrevendo..."
                       : hasAnyTranscription
                         ? "Gerar nova transcrição"
-                        : "🎙️ Transcrever"}
+                        : "Transcrever"}
                   </button>
                   <p
                     className="muted"
@@ -206,7 +206,7 @@ export function VideoPlayerSection({
                     }}
                     onClick={onShowBlocksDialog}
                   >
-                    🔗 Blocos
+                    Blocos
                   </button>
                   <p
                     className="muted"
@@ -245,7 +245,7 @@ export function VideoPlayerSection({
                       }
                     }}
                   >
-                    {suggestedCuts.length > 0 ? "Gerar nova análise" : "🤖 Análise"}
+                    {suggestedCuts.length > 0 ? "Gerar nova análise" : "Análise"}
                   </button>
                   <p
                     className="muted"
@@ -293,7 +293,7 @@ export function VideoPlayerSection({
                     }}
                     onClick={onRenderClick}
                   >
-                    {isRendering ? "⏳ Renderizando..." : "🎬 Renderizar"}
+                    {isRendering ? "Renderizando..." : "Renderizar"}
                   </button>
                   {isRendering && (
                     <p
@@ -326,7 +326,7 @@ export function VideoPlayerSection({
                         onMouseLeave={() => setHoveredCutId(null)}
                       >
                         <button
-                          className="secondary"
+                          className="primary"
                           onClick={() => {
                             onSelectCut(cut.cut_id);
                             if (videoRef.current) {
@@ -382,7 +382,7 @@ export function VideoPlayerSection({
                               onMouseLeave={() => setHoveredCutAction(null)}
                               aria-label="Editar timestamp"
                             >
-                              ✎
+                              E
                             </button>
                             <button
                               className="icon-btn"
@@ -404,7 +404,7 @@ export function VideoPlayerSection({
                               onMouseLeave={() => setHoveredCutAction(null)}
                               aria-label="Deletar timestamp"
                             >
-                              ✕
+                              X
                             </button>
                           </div>
                         )}
@@ -425,3 +425,4 @@ export function VideoPlayerSection({
     )
   );
 }
+
