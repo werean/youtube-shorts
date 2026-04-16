@@ -1,11 +1,9 @@
 /* Status Card */
 .status-card {
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: 20px;
   padding: 20px 24px;
   min-width: 240px;
-  box-shadow: var(--shadow);
 }
 
 .status-label {
@@ -55,94 +53,71 @@
   grid-column: 1 / -1;
 }
 
+/* Card Foundation */
+.app-card,
+.status-card,
+.short-card,
+.video-item,
+.pipeline-step,
+.loading-placeholder {
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
 /* Buttons */
-button {
-  padding: 10px 20px;
-  border-radius: 8px;
-  border: none;
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--bg-contrast);
-  color: var(--ink);
-  transition: all 0.2s ease;
-}
-
-button.primary {
-  background: var(--panel);
-  color: var(--ink);
-  border: 1px solid var(--border);
-}
-
-button.primary:hover:not(:disabled) {
-  background: var(--panel);
-  border-color: var(--border);
-}
-
-button.secondary {
-  background: var(--ink);
-  color: var(--panel);
-  border: 1px solid transparent;
-}
-
-button.secondary:hover:not(:disabled) {
-  background: #000;
-}
-
-button.accent {
-  background: var(--accent-2);
-  color: var(--bg);
-}
-
-button.ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
+button,
 .app-btn {
   padding: 10px 20px;
   border-radius: 8px;
   border: none;
   font-weight: 600;
   cursor: pointer;
+  background: var(--bg-contrast);
+  color: var(--ink);
   transition: all 0.2s ease;
 }
 
-.app-btn--default {
-  background: var(--bg-contrast);
-  color: var(--ink);
-}
-
+button.primary,
 .app-btn--primary {
-  background: var(--panel) !important;
-  color: var(--ink) !important;
-  border: 1px solid var(--border) !important;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--border);
 }
 
+button.primary:hover:not(:disabled),
 .app-btn--primary:hover:not(:disabled) {
-  background: var(--panel) !important;
-  color: var(--ink) !important;
-  border-color: var(--border) !important;
+  background: var(--panel);
+  border-color: var(--border);
 }
 
+button.secondary,
 .app-btn--secondary {
-  background: var(--ink) !important;
-  color: var(--panel) !important;
-  border: 1px solid transparent !important;
+  background: var(--ink);
+  color: var(--panel);
+  border: 1px solid transparent;
 }
 
+button.accent,
 .app-btn--accent {
   background: var(--accent-2);
   color: var(--bg);
 }
 
+button.ghost,
 .app-btn--ghost {
   background: transparent;
   border: 1px solid var(--border);
+}
+
+button:disabled,
+.app-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.app-btn--default {
+  background: var(--bg-contrast);
+  color: var(--ink);
 }
 
 .button-with-icon {
@@ -200,7 +175,6 @@ button:disabled {
 
 /* Shorts */
 .short-card {
-  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 16px;
   background: var(--bg-contrast);
@@ -253,7 +227,6 @@ button:disabled {
 
 .video-item {
   background: var(--bg-contrast);
-  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
   position: relative;
@@ -321,8 +294,12 @@ button:disabled {
   border: 1px solid var(--border);
   background: var(--bg-contrast);
   padding: 6px 12px;
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1;
+}
+
+.menu-button:hover:not(:disabled) {
+  background: var(--bg-4);
 }
 
 .menu-popover {
@@ -394,7 +371,6 @@ button:disabled {
   gap: 8px;
   padding: 12px;
   background: var(--bg-contrast);
-  border: 1px solid var(--border);
   border-radius: 12px;
   text-align: center;
 }

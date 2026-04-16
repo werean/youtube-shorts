@@ -4,52 +4,69 @@
 
 import { SemanticBlock } from "../models/semantic_block";
 
-export const PROMPT_VERSION = "v1";
+export const PROMPT_VERSION = "v3";
 
-export const SYSTEM_PROMPT_TEMPLATE = `You are selecting highlight cuts for short-form vertical videos.
+export const SYSTEM_PROMPT_TEMPLATE = `You are an expert short-form video editor selecting highlight cuts from semantic transcript blocks.
 
-Input consists of semantic blocks with timestamps. Each block is a coherent unit.
-You must propose MULTIPLE cuts that form complete mini-stories (beginning, middle, end) on a single topic.
-Target duration is about 60 seconds. Prefer 45-70s, allow up to 75s only if the idea requires it.
-Avoid cuts shorter than 30s unless absolutely necessary.
-The first block of each cut MUST be a strong hook.
+Goal:
+- Propose MULTIPLE candidate cuts suitable for vertical short videos.
+- Each cut must be a complete mini-story with beginning, middle, and end.
+- Narrative coherence is more important than hitting an exact duration target.
 
-IMPORTANT: Scan through ALL blocks and identify ALL potential cuts. A good video can have 3-10+ cuts depending on content length and quality.
-Each cut should be a standalone piece with its own hook and complete narrative arc.
+Process requirements:
+- Review ALL blocks and find ALL good cut opportunities.
+- Use only provided blocks.
+- Use consecutive blocks only (no jumps).
+- The cut start must equal the first selected block start.
+- The cut end must equal the last selected block end.
+- Start where the idea naturally begins, not mid-thought.
+- Open with an engaging hook that still belongs to the same narrative thread.
+- End only at a natural conclusion.
+- Prefer complete context over arbitrary shortening.
+- Cuts must not overlap (a block can belong to only one cut).
+- Do not rewrite, summarize, or invent transcript content.
 
-Hook criteria (first 1-3 seconds):
-- Immediate impact
-- Strong claim
-- Clear opinion
-- Surprise or tension
-- Avoid introductions or context-dependent openings
+Title requirements:
+- Each cut MUST include a "title".
+- The title must be based only on the context inside that specific cut.
+- Keep the title specific, clear, and compelling.
+- Avoid generic titles.
 
-Rules:
-- Use only the provided blocks.
-- Use consecutive blocks only; do not skip around.
-- Start at the first block of a topic (avoid starting mid-thought).
-- End at a natural conclusion (avoid cutting off a thought).
-- The cut start time must match the first block start.
-- The cut end time must match the last block end.
-- Do NOT edit or rewrite text.
-- Do NOT include any extra commentary.
-- Output JSON only, no markdown.
-- Cuts must not overlap (each block can only be in one cut).
-- Sort cuts by score (best first).
+Output requirements:
+- Return JSON array only.
+- No markdown, no commentary, no extra keys.
+- Never include score, hook_reason, or content_reason.
+- Each item must contain only:
+  - "blocks": string[]
+  - "start": number
+  - "end": number
+  - "title": string
 
-Output format (JSON array):
+Example:
 [
 	{
-		"blocks": ["b12", "b13"],
+		"blocks": ["b12", "b13", "b14"],
 		"start": 42.1,
-		"end": 71.2,
-		"score": 94,
-		"hook_reason": "...",
-		"content_reason": "..."
+		"end": 91.6,
+		"title": "..."
 	}
 ]`;
 
-export function buildCutSelectionPrompt(blocks: SemanticBlock[]): string {
+export function buildCutSelectionPrompt(
+  blocks: SemanticBlock[],
+  options: { averageCutMinutes: number; maxExtraMinutes: number },
+): string {
+  const averageCutMinutes = Number.isFinite(options.averageCutMinutes)
+    ? Math.max(0.25, options.averageCutMinutes)
+    : 1;
+  const maxExtraMinutes = Number.isFinite(options.maxExtraMinutes)
+    ? Math.max(0, options.maxExtraMinutes)
+    : 0;
+
+  const averageCutSeconds = Math.round(averageCutMinutes * 60);
+  const maxExtraSeconds = Math.round(maxExtraMinutes * 60);
+  const zeroToleranceGraceSeconds = 10;
+
   const blocksText = blocks
     .map(
       (block) =>
@@ -57,7 +74,13 @@ export function buildCutSelectionPrompt(blocks: SemanticBlock[]): string {
     )
     .join("\n");
 
-  return `${SYSTEM_PROMPT_TEMPLATE}
+  return `Runtime context for this analysis:
+
+Duration guidance for this run:
+- Requested average cut duration: ${averageCutMinutes.toFixed(2)} minutes (${averageCutSeconds}s).
+- Additional contextual extension budget: ${maxExtraMinutes.toFixed(2)} minutes (${maxExtraSeconds}s).
+- If extension budget is zero, maximum grace extension is ${zeroToleranceGraceSeconds}s only to conclude context.
+- Prefer finishing inside average duration, but never break narrative coherence.
 
 Semantic blocks:
 ${blocksText}`;

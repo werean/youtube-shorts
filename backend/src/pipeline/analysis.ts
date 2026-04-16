@@ -36,6 +36,7 @@ function parseCuts(payload: any): Cut[] {
     const blocks = item.blocks;
     const start = item.start;
     const end = item.end;
+    const title = String(item.title || item.hook_reason || item.content_reason || "").trim();
 
     if (!Array.isArray(blocks) || start === undefined || end === undefined) {
       throw new Error("LLM cut item missing required fields");
@@ -46,9 +47,7 @@ function parseCuts(payload: any): Cut[] {
       block_ids: blocks.map((b: any) => String(b)),
       start: parseFloat(start),
       end: parseFloat(end),
-      score: item.score,
-      hook_reason: item.hook_reason,
-      content_reason: item.content_reason,
+      title: title || `Corte ${index + 1}`,
       status: "pending",
     });
   }
@@ -65,8 +64,13 @@ export async function analyzeBlocks(jobId: string): Promise<{ cuts: Cut[]; raw_r
     throw new Error("No semantic blocks available");
   }
 
-  const prompt = buildCutSelectionPrompt(blocks);
   const toolConfigs = loadActiveToolConfigs();
+  const averageCutMinutes = Number(toolConfigs.llm.average_cut_minutes ?? 1);
+  const maxExtraMinutes = Number(toolConfigs.llm.max_extra_minutes ?? 0);
+  const prompt = buildCutSelectionPrompt(blocks, {
+    averageCutMinutes,
+    maxExtraMinutes,
+  });
   const model = toolConfigs.llm.model || undefined;
   const client = new OllamaClient(undefined, model);
 

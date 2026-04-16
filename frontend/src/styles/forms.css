@@ -6,6 +6,17 @@
   margin-bottom: 12px;
 }
 
+.app-checkbox-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.2;
+  font-size: var(--app-checkbox-label-size, 0.96rem);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+textarea,
 .app-input {
   padding: 10px 12px;
   border-radius: 8px;
@@ -19,12 +30,35 @@
     background-color 150ms ease;
 }
 
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+textarea:focus,
 .app-input:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);
 }
 
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent 22%);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled,
+.app-input:disabled,
+.select-field:disabled,
+.app-checkbox:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+select,
 .select-field {
   appearance: none;
   -webkit-appearance: none;
@@ -47,7 +81,56 @@
     background-color 150ms ease;
 }
 
+select:focus,
 .select-field:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);
+}
+
+input[type="checkbox"],
+.app-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--ink) 28%);
+  background: var(--bg-contrast);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+input[type="checkbox"]::before,
+.app-checkbox::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  transition: transform 120ms ease-in-out;
+  clip-path: polygon(14% 44%, 0 60%, 45% 100%, 100% 20%, 84% 6%, 43% 69%);
+  background: var(--bg);
+}
+
+input[type="checkbox"]:checked,
+.app-checkbox:checked {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+input[type="checkbox"]:checked::before,
+.app-checkbox:checked::before {
+  transform: scale(1);
+}
+
+input[type="checkbox"]:focus,
+.app-checkbox:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);

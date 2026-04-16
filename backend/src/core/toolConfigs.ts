@@ -60,13 +60,23 @@ export type FFmpegToolConfig = {
   metadata?: string | null;
 };
 
+export type LlmRegisteredModel = {
+  name: string;
+  source: "cloud" | "local";
+};
+
+export type LlmToolConfig = {
+  model: string;
+  system_prompt: string;
+  average_cut_minutes: number;
+  max_extra_minutes: number;
+  registered_models?: LlmRegisteredModel[];
+};
+
 export interface ToolConfigs {
   whisper: WhisperToolConfig;
   ffmpeg: FFmpegToolConfig;
-  llm: {
-    model: string;
-    system_prompt: string;
-  };
+  llm: LlmToolConfig;
 }
 
 const DEFAULT_CONFIGS_FILE = path.join(dataDir(), "default_configs.json");
@@ -106,7 +116,19 @@ function cloneToolConfigs(configs: ToolConfigs): ToolConfigs {
         : configs.whisper.output_format,
     },
     ffmpeg: { ...configs.ffmpeg },
-    llm: { ...configs.llm },
+    llm: {
+      ...configs.llm,
+      registered_models: Array.isArray(configs.llm.registered_models)
+        ? configs.llm.registered_models
+            .map(
+              (item): LlmRegisteredModel => ({
+                name: String(item?.name || "").trim(),
+                source: item?.source === "local" ? "local" : "cloud",
+              }),
+            )
+            .filter((item) => item.name)
+        : [],
+    },
   };
 }
 
@@ -245,6 +267,65 @@ function normalizeFfmpegConfig(ffmpegConfig: FFmpegToolConfig): FFmpegToolConfig
   };
 }
 
+function normalizeRegisteredModels(value: unknown): LlmRegisteredModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const models: LlmRegisteredModel[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const candidate = item as { name?: unknown; source?: unknown };
+    const name = String(candidate.name || "").trim();
+    if (!name) {
+      continue;
+    }
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    models.push({
+      name,
+      source: candidate.source === "local" ? "local" : "cloud",
+    });
+  }
+
+  return models;
+}
+
+function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
+  const model = String(llmConfig.model || config.OLLAMA_MODEL).trim() || config.OLLAMA_MODEL;
+  const prompt = String(llmConfig.system_prompt || SYSTEM_PROMPT_TEMPLATE);
+  const averageCutMinutesRaw = toNumberOrNull(llmConfig.average_cut_minutes) ?? 1;
+  const maxExtraMinutesRaw = toNumberOrNull(llmConfig.max_extra_minutes) ?? 0;
+  const averageCutMinutes = Math.max(0.25, averageCutMinutesRaw);
+  const maxExtraMinutes = Math.max(0, Math.min(10, Math.round(maxExtraMinutesRaw * 4) / 4));
+  const registered = normalizeRegisteredModels(llmConfig.registered_models);
+
+  if (!registered.some((item) => item.name.toLowerCase() === model.toLowerCase())) {
+    registered.unshift({
+      name: model,
+      source: model.endsWith("-cloud") ? "cloud" : "local",
+    });
+  }
+
+  return {
+    model,
+    system_prompt: prompt,
+    average_cut_minutes: averageCutMinutes,
+    max_extra_minutes: maxExtraMinutes,
+    registered_models: registered,
+  };
+}
+
 function defaultToolConfigs(): ToolConfigs {
   return {
     whisper: {
@@ -300,6 +381,14 @@ function defaultToolConfigs(): ToolConfigs {
     llm: {
       model: config.OLLAMA_MODEL,
       system_prompt: SYSTEM_PROMPT_TEMPLATE,
+      average_cut_minutes: 1,
+      max_extra_minutes: 0,
+      registered_models: [
+        {
+          name: config.OLLAMA_MODEL,
+          source: config.OLLAMA_MODEL.endsWith("-cloud") ? "cloud" : "local",
+        },
+      ],
     },
   };
 }
@@ -391,7 +480,7 @@ function mergeWithDefaults(partial: Partial<ToolConfigs>): ToolConfigs {
   return {
     whisper: normalizeWhisperConfig({ ...defaults.whisper, ...(partial.whisper || {}) }),
     ffmpeg: normalizeFfmpegConfig({ ...defaults.ffmpeg, ...(partial.ffmpeg || {}) }),
-    llm: { ...defaults.llm, ...(partial.llm || {}) },
+    llm: normalizeLlmConfig({ ...defaults.llm, ...(partial.llm || {}) }),
   };
 }
 

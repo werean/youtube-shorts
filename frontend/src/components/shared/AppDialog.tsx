@@ -26,7 +26,7 @@ export function AppDialog({
 }: AppDialogProps) {
   return (
     <div
-      className="dialog-overlay"
+      className="dialog-overlay app-dialog-overlay"
       onClick={() => {
         if (!disableClose) {
           (onOverlayClick || onClose)();
@@ -34,13 +34,13 @@ export function AppDialog({
       }}
     >
       <div
-        className={`dialog ${wide ? "wide" : ""} ${scrollable ? "scrollable" : ""}`.trim()}
+        className={`dialog app-dialog ${wide ? "wide" : ""} ${scrollable ? "scrollable" : ""}`.trim()}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="dialog-header">
+        <div className="dialog-header app-dialog-header">
           <h3>{title}</h3>
           {showHeaderClose ? (
-            <div className="dialog-actions">
+            <div className="dialog-actions app-dialog-actions">
               <AppButton
                 variant="ghost"
                 className="icon-btn close-btn"
@@ -53,8 +53,8 @@ export function AppDialog({
             </div>
           ) : null}
         </div>
-        <div className="dialog-content">{children}</div>
-        {footer ? <div className="dialog-footer">{footer}</div> : null}
+        <div className="dialog-content app-dialog-content">{children}</div>
+        {footer ? <div className="dialog-footer app-dialog-footer">{footer}</div> : null}
       </div>
     </div>
   );

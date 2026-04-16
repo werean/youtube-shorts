@@ -26,9 +26,7 @@ export interface Cut {
   block_ids: string[];
   start: number;
   end: number;
-  score?: number | null;
-  hook_reason?: string | null;
-  content_reason?: string | null;
+  title?: string | null;
   status: string;
 }
 

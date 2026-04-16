@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ActionState } from "../hooks/useAppAction";
-import { AppButton, AppSelect } from "./shared";
+import { AppButton, AppInput, AppSelect } from "./shared";
 
 interface OllamaModelCatalogItem {
   name: string;
@@ -18,24 +18,72 @@ interface LLMConfigDialogProps {
   localAvailable?: boolean;
   remoteAvailable?: boolean;
   llmSystemPrompt: string;
+  llmAverageCutMinutes: number;
+  llmMaxExtraMinutes: number;
   action: ActionState;
-  onSave: (model: string, prompt: string) => void;
+  onRegisterModel: (
+    name: string,
+    source: "cloud" | "local",
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    model: { name: string; source: "cloud" | "local" };
+  }>;
+  onRemoveModel: (name: string) => Promise<{ success: boolean; message: string }>;
+  onRefreshModels: () => Promise<void>;
+  onSave: (
+    model: string,
+    prompt: string,
+    averageCutMinutes: number,
+    maxExtraMinutes: number,
+  ) => void;
   onCancel: () => void;
+}
+
+type ModelFilter = "all" | "cloud" | "local";
+type RegisterStep = "form" | "verifying" | "success" | "error";
+
+function isCloudModelName(name: string): boolean {
+  return name.toLowerCase().includes("cloud");
+}
+
+function formatDisplayModelName(name: string, source: "cloud" | "local"): string {
+  if (source !== "cloud") {
+    return name;
+  }
+
+  return name.toLowerCase().includes("-cloud") ? name : `${name} -cloud`;
 }
 
 export function LLMConfigDialog({
   llmModel: initialModel,
   availableModels,
   modelCatalog = [],
-  localAvailable,
-  remoteAvailable,
   llmSystemPrompt: initialPrompt,
+  llmAverageCutMinutes: initialAverageCutMinutes,
+  llmMaxExtraMinutes: initialMaxExtraMinutes,
   action,
+  onRegisterModel,
+  onRemoveModel,
+  onRefreshModels,
   onSave,
   onCancel,
 }: LLMConfigDialogProps) {
   const [model, setModel] = useState(initialModel);
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [averageCutMinutes, setAverageCutMinutes] = useState(
+    Number.isFinite(initialAverageCutMinutes) ? initialAverageCutMinutes : 1,
+  );
+  const [maxExtraMinutes, setMaxExtraMinutes] = useState(
+    Number.isFinite(initialMaxExtraMinutes) ? initialMaxExtraMinutes : 0,
+  );
+  const [modelFilter, setModelFilter] = useState<ModelFilter>("all");
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerSource, setRegisterSource] = useState<"" | "cloud" | "local">("");
+  const [registerStep, setRegisterStep] = useState<RegisterStep>("form");
+  const [registerMessage, setRegisterMessage] = useState("");
+  const [removingModelName, setRemovingModelName] = useState<string | null>(null);
 
   const modelOptions = useMemo(() => {
     const options = Array.from(new Set(availableModels.map((item) => item.trim()).filter(Boolean)));
@@ -54,7 +102,16 @@ export function LLMConfigDialog({
       if (!name) {
         continue;
       }
-      next.set(name, item);
+
+      const normalizedSource: "cloud" | "local" = isCloudModelName(name) ? "cloud" : "local";
+
+      next.set(name, {
+        ...item,
+        source: normalizedSource,
+        installed: normalizedSource === "cloud" ? false : item.installed,
+        running: normalizedSource === "cloud" ? false : item.running,
+        needsDownload: normalizedSource === "cloud" ? false : item.needsDownload,
+      });
     }
     return next;
   }, [modelCatalog]);
@@ -65,12 +122,13 @@ export function LLMConfigDialog({
 
     for (const name of modelOptions) {
       if (!known.has(name)) {
+        const cloudModel = isCloudModelName(name);
         fromCatalog.push({
           name,
-          source: "local",
-          installed: true,
+          source: cloudModel ? "cloud" : "local",
+          installed: cloudModel ? false : true,
           running: false,
-          needsDownload: false,
+          needsDownload: cloudModel ? false : true,
         });
       }
     }
@@ -84,7 +142,17 @@ export function LLMConfigDialog({
     });
   }, [catalogByName, modelOptions, model]);
 
-  const selectedModelMeta = model ? catalogByName.get(model) : undefined;
+  const filteredCatalog = useMemo(() => {
+    return orderedCatalog.filter((item) => {
+      if (modelFilter === "cloud") {
+        return item.source === "cloud";
+      }
+      if (modelFilter === "local") {
+        return item.source === "local";
+      }
+      return true;
+    });
+  }, [orderedCatalog, modelFilter]);
 
   function formatSize(bytes?: number): string {
     if (!bytes || bytes <= 0) {
@@ -107,7 +175,11 @@ export function LLMConfigDialog({
   function buildOptionLabel(option: string): string {
     const item = catalogByName.get(option);
     if (!item) {
-      return option;
+      return isCloudModelName(option) ? `${option} -cloud • cloud` : `${option} • local`;
+    }
+
+    if (item.source === "cloud") {
+      return `${formatDisplayModelName(option, "cloud")} • cloud`;
     }
 
     if (item.running) {
@@ -118,7 +190,69 @@ export function LLMConfigDialog({
       return `${option} • local (baixado)`;
     }
 
-    return `${option} • cloud (baixar)`;
+    return `${option} • local (não baixado)`;
+  }
+
+  function openRegisterModelForm() {
+    setShowRegisterForm(true);
+    setRegisterName("");
+    setRegisterSource("");
+    setRegisterStep("form");
+    setRegisterMessage("");
+  }
+
+  function formatMinutesAndSeconds(minutes: number): string {
+    const totalSeconds = Math.round(Math.max(0, minutes) * 60);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    if (secs === 0) {
+      return `${mins} min`;
+    }
+    return `${mins} min ${secs}s`;
+  }
+
+  async function handleRegisterModel() {
+    const nextName = registerName.trim();
+    if (!nextName || !registerSource) {
+      return;
+    }
+
+    setRegisterStep("verifying");
+    setRegisterMessage("");
+
+    try {
+      const result = await onRegisterModel(nextName, registerSource);
+      await onRefreshModels();
+      setModel(result.model.name);
+      setRegisterMessage(result.message || "Modelo cadastrado e validado com sucesso.");
+      setRegisterStep("success");
+    } catch (error: any) {
+      setRegisterMessage(String(error?.message || "Falha ao cadastrar ou verificar o modelo."));
+      setRegisterStep("error");
+    }
+  }
+
+  async function handleRemoveModel(name: string) {
+    const confirmDelete = window.confirm(
+      `Deseja remover o modelo '${name}'? Isso tenta executar 'ollama rm ${name}'.`,
+    );
+    if (!confirmDelete) {
+      return;
+    }
+
+    setRemovingModelName(name);
+    try {
+      const result = await onRemoveModel(name);
+      await onRefreshModels();
+      if (model === name) {
+        setModel("");
+      }
+      alert(result.message || "Modelo removido.");
+    } catch (error: any) {
+      alert(String(error?.message || "Falha ao remover o modelo."));
+    } finally {
+      setRemovingModelName(null);
+    }
   }
 
   useEffect(() => {
@@ -173,55 +307,35 @@ export function LLMConfigDialog({
             </AppSelect>
 
             <div style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <span
-                style={{
-                  fontSize: "11px",
-                  borderRadius: "999px",
-                  border: "1px solid var(--border)",
-                  padding: "2px 8px",
-                  color: localAvailable ? "var(--success)" : "var(--muted)",
-                  background: "var(--bg-contrast)",
-                }}
-              >
-                Local {localAvailable ? "online" : "offline"}
-              </span>
-              <span
-                style={{
-                  fontSize: "11px",
-                  borderRadius: "999px",
-                  border: "1px solid var(--border)",
-                  padding: "2px 8px",
-                  color: remoteAvailable ? "var(--accent-2)" : "var(--muted)",
-                  background: "var(--bg-contrast)",
-                }}
-              >
-                Catálogo cloud {remoteAvailable ? "online" : "offline"}
-              </span>
-              {selectedModelMeta && (
-                <span
-                  style={{
-                    fontSize: "11px",
-                    borderRadius: "999px",
-                    border: "1px solid var(--border)",
-                    padding: "2px 8px",
-                    color: selectedModelMeta.running
-                      ? "var(--success)"
-                      : selectedModelMeta.installed
-                        ? "var(--accent-2)"
-                        : "var(--warning)",
-                    background: "var(--bg-contrast)",
-                  }}
-                >
-                  {selectedModelMeta.running
-                    ? "Em execução"
-                    : selectedModelMeta.installed
-                      ? "Baixado local"
-                      : "Precisa baixar"}
-                </span>
-              )}
+              {(
+                [
+                  { key: "all", label: "Todos" },
+                  { key: "cloud", label: "Cloud" },
+                  { key: "local", label: "Modelos locais" },
+                ] as Array<{ key: ModelFilter; label: string }>
+              ).map((filter) => {
+                const active = modelFilter === filter.key;
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    onClick={() => setModelFilter(filter.key)}
+                    style={{
+                      fontSize: "11px",
+                      borderRadius: "999px",
+                      border: `1px solid ${active ? "var(--accent-2)" : "var(--border)"}`,
+                      padding: "2px 8px",
+                      color: active ? "var(--accent-2)" : "var(--muted)",
+                      background: active ? "var(--bg-3)" : "var(--bg-contrast)",
+                    }}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
             </div>
 
-            {orderedCatalog.length > 0 && (
+            {filteredCatalog.length > 0 && (
               <div
                 style={{
                   marginTop: "10px",
@@ -233,9 +347,9 @@ export function LLMConfigDialog({
                   padding: "6px",
                 }}
               >
-                {orderedCatalog.map((item) => {
+                {filteredCatalog.map((item) => {
                   const isSelected = item.name === model;
-                  const sizeLabel = formatSize(item.size);
+                  const sizeLabel = item.source === "cloud" ? "" : formatSize(item.size);
 
                   return (
                     <button
@@ -260,36 +374,246 @@ export function LLMConfigDialog({
                           alignItems: "center",
                           gap: "8px",
                           flexWrap: "wrap",
+                          justifyContent: "space-between",
                         }}
                       >
-                        <span style={{ fontSize: "12px", fontWeight: 600 }}>{item.name}</span>
-                        <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                          {item.source === "cloud" ? "Cloud" : "Local"}
-                        </span>
-                        <span
+                        <div
                           style={{
-                            fontSize: "11px",
-                            color: item.installed ? "var(--success)" : "var(--warning)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
                           }}
                         >
-                          {item.installed ? "Baixado" : "Precisa baixar"}
-                        </span>
-                        {item.running && (
-                          <span style={{ fontSize: "11px", color: "var(--success)" }}>
-                            Em execução
+                          <span style={{ fontSize: "12px", fontWeight: 600 }}>
+                            {formatDisplayModelName(item.name, item.source)}
                           </span>
-                        )}
-                        {sizeLabel && (
                           <span style={{ fontSize: "11px", color: "var(--muted)" }}>
-                            {sizeLabel}
+                            {item.source === "cloud" ? "Cloud" : "Local"}
                           </span>
-                        )}
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color:
+                                item.source === "cloud"
+                                  ? "var(--accent-2)"
+                                  : item.installed
+                                    ? "var(--success)"
+                                    : "var(--warning)",
+                            }}
+                          >
+                            {item.source === "cloud"
+                              ? "Uso remoto"
+                              : item.installed
+                                ? "Baixado"
+                                : "Precisa baixar"}
+                          </span>
+                          {item.running && (
+                            <span style={{ fontSize: "11px", color: "var(--success)" }}>
+                              Em execução
+                            </span>
+                          )}
+                          {sizeLabel && (
+                            <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                              {sizeLabel}
+                            </span>
+                          )}
+                        </div>
+                        <AppButton
+                          type="button"
+                          variant="primary"
+                          disabled={removingModelName === item.name}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleRemoveModel(item.name);
+                          }}
+                          style={{ padding: "6px 10px", fontSize: "11px" }}
+                        >
+                          {removingModelName === item.name ? "Removendo..." : "Remover"}
+                        </AppButton>
                       </div>
                     </button>
                   );
                 })}
               </div>
             )}
+
+            <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
+              <AppButton
+                type="button"
+                variant="primary"
+                onClick={openRegisterModelForm}
+                style={{ padding: "8px 12px", fontSize: "12px" }}
+              >
+                Adicionar modelo
+              </AppButton>
+            </div>
+
+            {showRegisterForm && (
+              <div
+                style={{
+                  marginTop: "10px",
+                  border: "1px solid var(--border)",
+                  borderRadius: "10px",
+                  padding: "12px",
+                  background: "var(--panel)",
+                }}
+              >
+                {registerStep === "form" && (
+                  <>
+                    <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--muted)" }}>
+                      Informe o nome exato do modelo e selecione cloud ou local.
+                    </p>
+                    <div style={{ display: "grid", gap: "8px" }}>
+                      <AppInput
+                        value={registerName}
+                        onChange={(event) => setRegisterName(event.target.value)}
+                        placeholder="Ex: qwen3-coder"
+                      />
+                      <AppSelect
+                        value={registerSource}
+                        onChange={(event) =>
+                          setRegisterSource(event.target.value as "" | "cloud" | "local")
+                        }
+                      >
+                        <option value="">Selecione cloud ou local</option>
+                        <option value="cloud">Cloud</option>
+                        <option value="local">Local</option>
+                      </AppSelect>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: "8px",
+                        marginTop: "10px",
+                      }}
+                    >
+                      <AppButton
+                        type="button"
+                        variant="primary"
+                        onClick={() => setShowRegisterForm(false)}
+                      >
+                        Cancelar
+                      </AppButton>
+                      <AppButton
+                        type="button"
+                        variant="secondary"
+                        disabled={!registerName.trim() || !registerSource}
+                        onClick={() => void handleRegisterModel()}
+                      >
+                        {registerSource === "local" ? "Baixar modelo" : "Usar modelo"}
+                      </AppButton>
+                    </div>
+                  </>
+                )}
+
+                {registerStep === "verifying" && (
+                  <div className="loading-container" style={{ marginTop: 0 }}>
+                    <div className="spinner" />
+                    <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                      verificando se tudo está funcionando corretamente
+                    </span>
+                  </div>
+                )}
+
+                {registerStep === "success" && (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    <p style={{ margin: 0, fontSize: "13px", color: "var(--success)" }}>
+                      {registerMessage || "Deu tudo certo."}
+                    </p>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <AppButton
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setShowRegisterForm(false)}
+                      >
+                        Ok
+                      </AppButton>
+                    </div>
+                  </div>
+                )}
+
+                {registerStep === "error" && (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    <p style={{ margin: 0, fontSize: "13px", color: "var(--danger)" }}>
+                      {registerMessage || "Falha ao verificar o modelo."}
+                    </p>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <AppButton
+                        type="button"
+                        variant="primary"
+                        onClick={() => setRegisterStep("form")}
+                      >
+                        Voltar e editar
+                      </AppButton>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {orderedCatalog.length > 0 && filteredCatalog.length === 0 && (
+              <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--muted)" }}>
+                Nenhum modelo encontrado para esse filtro.
+              </p>
+            )}
+          </div>
+
+          <div style={{ marginBottom: "12px" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "14px",
+                fontWeight: "500",
+                marginBottom: "8px",
+              }}
+            >
+              Duração média por corte (minutos)
+            </label>
+            <AppInput
+              type="number"
+              min={0.25}
+              max={60}
+              step={0.25}
+              value={averageCutMinutes}
+              onChange={(e) => {
+                const parsed = Number(e.target.value);
+                if (!Number.isFinite(parsed)) {
+                  setAverageCutMinutes(1);
+                  return;
+                }
+                setAverageCutMinutes(Math.max(0.25, parsed));
+              }}
+            />
+            <p style={{ marginTop: "8px", fontSize: "12px", color: "var(--muted)" }}>
+              O tempo é em média. O corte pode acabar antes se o contexto finalizar antes.
+            </p>
+          </div>
+
+          <div style={{ marginBottom: "12px" }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: "14px",
+                fontWeight: "500",
+                marginBottom: "8px",
+              }}
+            >
+              Tolerância para estender contexto: {formatMinutesAndSeconds(maxExtraMinutes)}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={0.25}
+              value={maxExtraMinutes}
+              onChange={(e) => setMaxExtraMinutes(Number(e.target.value))}
+              style={{ width: "100%" }}
+            />
+            <p style={{ marginTop: "8px", fontSize: "12px", color: "var(--muted)" }}>
+              0 a 10 minutos extras (em passos de 15 segundos) somente quando necessário para
+              concluir o assunto.
+            </p>
           </div>
 
           <div style={{ marginBottom: "12px" }}>
@@ -332,8 +656,8 @@ export function LLMConfigDialog({
               Cancelar
             </AppButton>
             <AppButton
-              onClick={() => onSave(model, prompt)}
-              disabled={action.busy || !model}
+              onClick={() => onSave(model, prompt, averageCutMinutes, maxExtraMinutes)}
+              disabled={action.busy || !model || averageCutMinutes <= 0}
               variant="secondary"
               style={{
                 padding: "10px 20px",
@@ -348,4 +672,3 @@ export function LLMConfigDialog({
     </div>
   );
 }
-

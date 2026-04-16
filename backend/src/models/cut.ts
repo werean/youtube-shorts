@@ -11,12 +11,8 @@ export interface Cut {
   start: number;
   /** Cut end time in seconds */
   end: number;
-  /** Optional LLM score for the cut */
-  score?: number;
-  /** Reason the opening is a strong hook */
-  hook_reason?: string;
-  /** Reason the cut has strong content cohesion */
-  content_reason?: string;
+  /** Suggested title for this specific cut */
+  title?: string;
   /** Curation status (e.g., pending/approved) */
   status: string;
 }

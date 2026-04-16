@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { AppButton } from "./shared";
 
 interface RenderingSectionProps {
   isLoadingRenderOutputs: boolean;
   isRendering: boolean;
   renderOutputs: string[];
+  renderTitlesByFileName: Record<string, string>;
   buildRenderUrl: (path: string) => string;
   onDeleteRender: (fileName: string) => Promise<void>;
   onOpenRenderFolder: (fileName: string) => Promise<void>;
@@ -16,14 +16,13 @@ export function RenderingSection({
   isLoadingRenderOutputs,
   isRendering,
   renderOutputs,
+  renderTitlesByFileName,
   buildRenderUrl,
   onDeleteRender,
   onOpenRenderFolder,
   isExpanded,
   onToggle,
 }: RenderingSectionProps) {
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-
   return (
     <section className="panel" style={{ marginBottom: "24px" }}>
       <div
@@ -83,6 +82,7 @@ export function RenderingSection({
             {renderOutputs.map((path) => {
               const url = buildRenderUrl(path);
               const fileName = path.split("/").pop() || "render.mp4";
+              const suggestedTitle = renderTitlesByFileName[fileName] || "Corte em destaque";
               console.log(`[UI] Render output path: ${path}, URL: ${url}`);
               return (
                 <article key={path} className="short-card">
@@ -95,35 +95,18 @@ export function RenderingSection({
                   >
                     <h3 style={{ margin: 0, paddingRight: "8px" }}>{fileName}</h3>
 
-                    <div style={{ position: "relative" }}>
-                      <AppButton
-                        className="menu-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuOpenId((current) => (current === path ? null : path));
-                        }}
-                      >
-                        ...
-                      </AppButton>
-
-                      {menuOpenId === path && (
-                        <div className="menu-popover">
-                          <AppButton
-                            onClick={async () => {
-                              try {
-                                await onOpenRenderFolder(fileName);
-                              } catch (error) {
-                                console.error("Failed to open folder:", error);
-                              } finally {
-                                setMenuOpenId(null);
-                              }
-                            }}
-                          >
-                            Open Folder
-                          </AppButton>
-                        </div>
-                      )}
-                    </div>
+                    <AppButton
+                      className="menu-button"
+                      onClick={async () => {
+                        try {
+                          await onOpenRenderFolder(fileName);
+                        } catch (error) {
+                          console.error("Failed to open folder:", error);
+                        }
+                      }}
+                    >
+                      Abrir pasta
+                    </AppButton>
                   </header>
                   <div style={{ overflow: "hidden", borderRadius: "12px", marginBottom: "12px" }}>
                     <video
@@ -144,6 +127,9 @@ export function RenderingSection({
                       }}
                     />
                   </div>
+                  <p style={{ margin: "0 0 12px", fontSize: "0.93rem", fontWeight: 600 }}>
+                    {suggestedTitle}
+                  </p>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <AppButton
                       variant="secondary"
@@ -179,4 +165,3 @@ export function RenderingSection({
     </section>
   );
 }
-

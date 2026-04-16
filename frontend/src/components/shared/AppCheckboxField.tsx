@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 interface AppCheckboxFieldProps {
   label: string;
   checked: boolean;
@@ -15,24 +17,18 @@ export function AppCheckboxField({
   marginTop = "0",
   labelFontSize,
 }: AppCheckboxFieldProps) {
+  const style: CSSProperties = {
+    marginTop,
+    ["--app-checkbox-label-size" as string]: labelFontSize ?? (compact ? "0.92rem" : "0.96rem"),
+  };
+
   return (
-    <label
-      className="field"
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: "8px",
-        marginTop,
-        fontSize: labelFontSize ?? (compact ? "0.92rem" : "0.96rem"),
-        lineHeight: 1.2,
-      }}
-    >
+    <label className="field app-checkbox-field" style={style}>
       <input
+        className="app-checkbox"
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ margin: 0 }}
       />
       {label}
     </label>

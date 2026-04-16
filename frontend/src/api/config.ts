@@ -107,6 +107,28 @@ export interface OllamaModelsResponse {
   remoteAvailable?: boolean;
 }
 
+export interface RegisterOllamaModelRequest {
+  name: string;
+  source: "cloud" | "local";
+}
+
+export interface RegisterOllamaModelResponse {
+  success: boolean;
+  message: string;
+  model: {
+    name: string;
+    source: "cloud" | "local";
+  };
+  configuredModel: string;
+}
+
+export interface RemoveOllamaModelResponse {
+  success: boolean;
+  message: string;
+  removedModel: string;
+  removedFromLocal: boolean;
+}
+
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
   return request("/config/llm-prompt");
 }
@@ -120,6 +142,22 @@ export async function getConfig(): Promise<{
 
 export async function getOllamaModels(): Promise<OllamaModelsResponse> {
   return request("/config/ollama-models");
+}
+
+export async function registerOllamaModel(
+  payload: RegisterOllamaModelRequest,
+): Promise<RegisterOllamaModelResponse> {
+  return request("/config/ollama-models/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function removeOllamaModel(modelName: string): Promise<RemoveOllamaModelResponse> {
+  return request(`/config/ollama-models/${encodeURIComponent(modelName)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function getDependencies(): Promise<{

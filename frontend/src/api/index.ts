@@ -44,6 +44,8 @@ export {
   getLLMPrompt,
   getConfig,
   getOllamaModels,
+  registerOllamaModel,
+  removeOllamaModel,
   getDependencies,
   getInstallationGuide,
   installDependency,
@@ -67,4 +69,7 @@ export {
   type DependencyOperationMode,
   type DependencyInstallOptions,
   type PytorchGpuTier,
+  type RegisterOllamaModelRequest,
+  type RegisterOllamaModelResponse,
+  type RemoveOllamaModelResponse,
 } from "./config";

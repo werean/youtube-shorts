@@ -3,7 +3,13 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { loadActiveToolConfigs } from "../../core/toolConfigs";
+import { spawn } from "child_process";
+import { config } from "../../core/config";
+import {
+  loadActiveToolConfigs,
+  updateToolConfigs,
+  type LlmRegisteredModel,
+} from "../../core/toolConfigs";
 
 type OllamaCatalogEntry = {
   name: string;
@@ -14,6 +20,162 @@ type OllamaCatalogEntry = {
   needsDownload: boolean;
   size?: number;
 };
+
+type OllamaCommandResult = {
+  ok: boolean;
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  errorMessage?: string;
+};
+
+function normalizeModelName(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function normalizeRegisteredModels(value: unknown): LlmRegisteredModel[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const models: LlmRegisteredModel[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const candidate = item as { name?: unknown; source?: unknown };
+    const name = normalizeModelName(candidate.name);
+    if (!name) {
+      continue;
+    }
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    models.push({
+      name,
+      source: candidate.source === "local" ? "local" : "cloud",
+    });
+  }
+
+  return models;
+}
+
+async function runOllamaCommand(
+  args: string[],
+  timeoutMs = 15 * 60 * 1000,
+): Promise<OllamaCommandResult> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const child = spawn("ollama", args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      child.kill();
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+    });
+
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+    });
+
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        ok: false,
+        code: null,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        errorMessage: error.message,
+      });
+    });
+
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        ok: code === 0,
+        code,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+      });
+    });
+  });
+}
+
+async function testOllamaModel(
+  model: string,
+): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
+  try {
+    const baseUrl = config.OLLAMA_BASE_URL.replace(/\/$/, "");
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(config.OLLAMA_API_KEY ? { Authorization: `Bearer ${config.OLLAMA_API_KEY}` } : {}),
+      },
+      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Responda apenas com: ok" }],
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = (await response.text()).trim();
+      return {
+        ok: false,
+        error: `Teste do modelo falhou (${response.status}). ${detail || "Sem detalhes"}`,
+      };
+    }
+
+    const payload = (await response.json()) as {
+      message?: { content?: unknown };
+      response?: unknown;
+    };
+
+    const content = String(payload.message?.content || payload.response || "").trim();
+    if (!content) {
+      return {
+        ok: false,
+        error: "O modelo respondeu sem conteúdo no teste.",
+      };
+    }
+
+    return { ok: true, content };
+  } catch (error: any) {
+    return {
+      ok: false,
+      error: String(error?.message || "Falha ao testar o modelo."),
+    };
+  }
+}
 
 export function registerConfigInfoRoutes(fastify: FastifyInstance) {
   fastify.get("/", async () => {
@@ -33,49 +195,90 @@ export function registerConfigInfoRoutes(fastify: FastifyInstance) {
 
   fastify.get("/ollama-models", async () => {
     const configs = loadActiveToolConfigs();
-    const configuredModel = String(configs.llm.model || "").trim();
-    const normalizeName = (value: unknown) => String(value || "").trim();
+    const configuredModel = normalizeModelName(configs.llm.model);
+    const registeredModels = normalizeRegisteredModels(configs.llm.registered_models);
 
-    const localTagsPromise = fetch("http://localhost:11434/api/tags", {
-      method: "GET",
-      signal: AbortSignal.timeout(3000),
-    });
-    const runningPromise = fetch("http://localhost:11434/api/ps", {
-      method: "GET",
-      signal: AbortSignal.timeout(3000),
-    });
-    const remoteCatalogPromise = fetch("https://ollama.com/api/tags", {
-      method: "GET",
-      signal: AbortSignal.timeout(5000),
-    });
+    const extractModelEntries = <T extends Record<string, unknown>>(payload: unknown): T[] => {
+      if (!payload || typeof payload !== "object") {
+        return [];
+      }
+      const container = payload as { models?: unknown; tags?: unknown };
+      if (Array.isArray(container.models)) {
+        return container.models.filter(Boolean) as T[];
+      }
+      if (Array.isArray(container.tags)) {
+        return container.tags.filter(Boolean) as T[];
+      }
+      return [];
+    };
 
-    const [localTagsResult, runningResult, remoteCatalogResult] = await Promise.allSettled([
+    const fetchLocalEndpoint = async (path: "/api/tags" | "/api/ps") => {
+      const bases = ["http://127.0.0.1:11434", "http://localhost:11434"];
+      let lastError: unknown;
+
+      for (const base of bases) {
+        try {
+          const response = await fetch(`${base}${path}`, {
+            method: "GET",
+            signal: AbortSignal.timeout(5000),
+          });
+          if (response.ok) {
+            return response;
+          }
+          lastError = new Error(`HTTP ${response.status} from ${base}${path}`);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      throw lastError instanceof Error ? lastError : new Error(`Failed to fetch ${path}`);
+    };
+
+    const localTagsPromise = fetchLocalEndpoint("/api/tags");
+    const runningPromise = fetchLocalEndpoint("/api/ps");
+
+    const [localTagsResult, runningResult] = await Promise.allSettled([
       localTagsPromise,
       runningPromise,
-      remoteCatalogPromise,
     ]);
 
     const catalogMap = new Map<string, OllamaCatalogEntry>();
     const localInstalled = new Set<string>();
     const localRunning = new Set<string>();
+    const registeredByName = new Map<string, LlmRegisteredModel>();
+
+    for (const item of registeredModels) {
+      registeredByName.set(item.name.toLowerCase(), item);
+      catalogMap.set(item.name, {
+        name: item.name,
+        model: item.name,
+        source: item.source,
+        installed: false,
+        running: false,
+        needsDownload: item.source === "local",
+      });
+    }
 
     if (localTagsResult.status === "fulfilled" && localTagsResult.value.ok) {
       try {
-        const payload = (await localTagsResult.value.json()) as {
-          models?: Array<{ name?: string; model?: string; size?: number }>;
-        };
+        const payload = (await localTagsResult.value.json()) as unknown;
+        const models = extractModelEntries<{ name?: string; model?: string; size?: number }>(
+          payload,
+        );
 
-        for (const model of payload.models || []) {
-          const modelName = normalizeName(model?.name || model?.model);
+        for (const model of models) {
+          const modelName = normalizeModelName(model?.name || model?.model);
           if (!modelName) {
             continue;
           }
 
           localInstalled.add(modelName);
+          const normalized = modelName.toLowerCase();
+          const registered = registeredByName.get(normalized);
           catalogMap.set(modelName, {
             name: modelName,
             model: modelName,
-            source: "local",
+            source: registered?.source || "local",
             installed: true,
             running: false,
             needsDownload: false,
@@ -89,12 +292,11 @@ export function registerConfigInfoRoutes(fastify: FastifyInstance) {
 
     if (runningResult.status === "fulfilled" && runningResult.value.ok) {
       try {
-        const payload = (await runningResult.value.json()) as {
-          models?: Array<{ name?: string; model?: string }>;
-        };
+        const payload = (await runningResult.value.json()) as unknown;
+        const models = extractModelEntries<{ name?: string; model?: string }>(payload);
 
-        for (const model of payload.models || []) {
-          const modelName = normalizeName(model?.name || model?.model);
+        for (const model of models) {
+          const modelName = normalizeModelName(model?.name || model?.model);
           if (!modelName) {
             continue;
           }
@@ -119,47 +321,6 @@ export function registerConfigInfoRoutes(fastify: FastifyInstance) {
         }
       } catch {
         // ignore malformed running payload
-      }
-    }
-
-    if (remoteCatalogResult.status === "fulfilled" && remoteCatalogResult.value.ok) {
-      try {
-        const payload = (await remoteCatalogResult.value.json()) as {
-          models?: Array<{ name?: string; model?: string; size?: number }>;
-        };
-
-        for (const model of payload.models || []) {
-          const modelName = normalizeName(model?.name || model?.model);
-          if (!modelName) {
-            continue;
-          }
-
-          const installed = localInstalled.has(modelName);
-          const running = localRunning.has(modelName);
-
-          const existing = catalogMap.get(modelName);
-          if (existing) {
-            existing.size =
-              existing.size ?? (typeof model?.size === "number" ? model.size : undefined);
-            existing.running = existing.running || running;
-            existing.installed = existing.installed || installed;
-            existing.needsDownload = !existing.installed;
-            existing.source = existing.installed || existing.running ? "local" : "cloud";
-            continue;
-          }
-
-          catalogMap.set(modelName, {
-            name: modelName,
-            model: modelName,
-            source: installed || running ? "local" : "cloud",
-            installed,
-            running,
-            needsDownload: !(installed || running),
-            size: typeof model?.size === "number" ? model.size : undefined,
-          });
-        }
-      } catch {
-        // ignore malformed remote payload
       }
     }
 
@@ -193,7 +354,118 @@ export function registerConfigInfoRoutes(fastify: FastifyInstance) {
       models,
       catalog,
       localAvailable: localTagsResult.status === "fulfilled" && localTagsResult.value.ok,
-      remoteAvailable: remoteCatalogResult.status === "fulfilled" && remoteCatalogResult.value.ok,
+      remoteAvailable: false,
+    };
+  });
+
+  fastify.post("/ollama-models/register", async (request: any, reply) => {
+    const body = (request.body || {}) as { name?: unknown; source?: unknown };
+    const rawName = normalizeModelName(body.name);
+    const sourceRaw = String(body.source || "").trim();
+
+    if (!rawName) {
+      return reply.code(400).send({ detail: "O nome do modelo é obrigatório." });
+    }
+
+    if (sourceRaw !== "cloud" && sourceRaw !== "local") {
+      return reply.code(400).send({ detail: "A origem do modelo deve ser cloud ou local." });
+    }
+
+    const source: "cloud" | "local" = sourceRaw;
+
+    let resolvedModelName = rawName;
+
+    if (source === "local") {
+      const pull = await runOllamaCommand(["pull", rawName]);
+      if (!pull.ok) {
+        return reply.code(400).send({
+          detail:
+            `Falha ao baixar o modelo '${rawName}'. ${pull.stderr || pull.stdout || pull.errorMessage || ""}`.trim(),
+        });
+      }
+    }
+
+    const candidates =
+      source === "cloud" && !rawName.endsWith("-cloud") ? [rawName, `${rawName}-cloud`] : [rawName];
+
+    let lastError = "Falha ao verificar o modelo.";
+    let verified = false;
+
+    for (const candidate of candidates) {
+      const testResult = await testOllamaModel(candidate);
+      if (testResult.ok) {
+        verified = true;
+        resolvedModelName = candidate;
+        break;
+      }
+      lastError = testResult.error;
+    }
+
+    if (!verified) {
+      return reply.code(400).send({ detail: lastError });
+    }
+
+    const active = loadActiveToolConfigs();
+    const current = normalizeRegisteredModels(active.llm.registered_models);
+    const filtered = current.filter(
+      (item) => item.name.toLowerCase() !== resolvedModelName.toLowerCase(),
+    );
+    filtered.push({ name: resolvedModelName, source });
+
+    const updated = updateToolConfigs({
+      llm: {
+        model: active.llm.model,
+        system_prompt: active.llm.system_prompt,
+        average_cut_minutes: active.llm.average_cut_minutes,
+        max_extra_minutes: active.llm.max_extra_minutes,
+        registered_models: filtered,
+      },
+    });
+
+    return {
+      success: true,
+      message: "Modelo cadastrado e verificado com sucesso.",
+      model: {
+        name: resolvedModelName,
+        source,
+      },
+      configuredModel: updated.llm.model,
+    };
+  });
+
+  fastify.delete("/ollama-models/:modelName", async (request: any, reply) => {
+    const modelName = normalizeModelName(
+      decodeURIComponent(String(request.params?.modelName || "")),
+    );
+
+    if (!modelName) {
+      return reply.code(400).send({ detail: "Nome do modelo inválido." });
+    }
+
+    const active = loadActiveToolConfigs();
+    const current = normalizeRegisteredModels(active.llm.registered_models);
+    const remaining = current.filter((item) => item.name.toLowerCase() !== modelName.toLowerCase());
+
+    updateToolConfigs({
+      llm: {
+        model: active.llm.model,
+        system_prompt: active.llm.system_prompt,
+        average_cut_minutes: active.llm.average_cut_minutes,
+        max_extra_minutes: active.llm.max_extra_minutes,
+        registered_models: remaining,
+      },
+    });
+
+    const rmResult = await runOllamaCommand(["rm", modelName], 180000);
+    const rmMessage = rmResult.ok
+      ? `Modelo '${modelName}' removido do Ollama local.`
+      : `Cadastro removido. Não foi possível remover no Ollama local: ${rmResult.stderr || rmResult.stdout || rmResult.errorMessage || "sem detalhes"}`;
+
+    return {
+      success: true,
+      message: rmMessage,
+      removedModel: modelName,
+      removedFromLocal: rmResult.ok,
     };
   });
 }

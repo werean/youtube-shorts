@@ -1,4 +1,5 @@
-.dialog-overlay {
+.dialog-overlay,
+.app-dialog-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -12,7 +13,8 @@
   padding: 20px;
 }
 
-.dialog {
+.dialog,
+.app-dialog {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -26,16 +28,19 @@
   box-shadow: var(--shadow);
 }
 
-.dialog.wide {
+.dialog.wide,
+.app-dialog.wide {
   max-width: 800px;
 }
 
-.dialog.scrollable {
+.dialog.scrollable,
+.app-dialog.scrollable {
   max-height: 90vh;
   overflow-y: auto;
 }
 
-.dialog-header {
+.dialog-header,
+.app-dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -43,22 +48,26 @@
   border-bottom: 1px solid var(--border);
 }
 
-.dialog-header h3 {
+.dialog-header h3,
+.app-dialog-header h3 {
   margin: 0;
 }
 
-.dialog-actions {
+.dialog-actions,
+.app-dialog-actions {
   display: flex;
   gap: 8px;
 }
 
-.dialog-content {
+.dialog-content,
+.app-dialog-content {
   padding: 24px;
   overflow-y: auto;
   flex: 1;
 }
 
-.dialog-footer {
+.dialog-footer,
+.app-dialog-footer {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
@@ -68,9 +77,22 @@
 }
 
 .dialog-footer > button,
-.dialog-footer .ds-dialog-actions > button {
+.dialog-footer .ds-dialog-actions > button,
+.app-dialog-footer > button,
+.app-dialog-footer .ds-dialog-actions > button {
   padding: 10px 20px;
   opacity: 1;
+}
+
+/* Dialog/Card Foundation */
+.app-dialog-card,
+.ds-dialog-block-card,
+.ds-video-list-box,
+.ds-batch-video-item,
+.ds-batch-option-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-contrast);
 }
 
 .transcription-text {
@@ -182,10 +204,7 @@
 }
 
 .ds-dialog-block-card {
-  border: 1px solid var(--border);
   border-left: 4px solid var(--accent-2);
-  border-radius: 10px;
-  background: var(--bg-contrast);
   padding: 12px;
 }
 
@@ -228,9 +247,6 @@
 .ds-video-list-box {
   max-height: 260px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-contrast);
   padding: 10px;
   display: grid;
   gap: 8px;
@@ -242,7 +258,6 @@
   gap: 10px;
   padding: 10px;
   border-radius: 8px;
-  border: 1px solid var(--border);
   background: var(--panel);
   cursor: pointer;
 }
@@ -294,7 +309,6 @@
 }
 
 .ds-batch-option-card {
-  border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
   padding: 14px;

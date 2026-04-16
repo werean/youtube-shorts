@@ -1,13 +1,12 @@
 {
   "media": {
     "base_dir": "C:\\Users\\lucas\\Downloads\\uploads",
-    "videos_dir": "C:\\Users\\lucas\\Downloads\\uploads\\videos",
-    "shorts_dir": "C:\\Users\\lucas\\Downloads\\uploads\\shorts",
-    "transcriptions_dir": "C:\\Users\\lucas\\Downloads\\uploads\\transcrições"
+    "download_resolution": "1080p"
   },
   "preferences": {
     "ask_move_on_upload": true,
-    "move_uploads": true
+    "move_uploads": true,
+    "ask_delete_cut_confirm": false
   },
   "whisper": {
     "device": "cuda",

@@ -41,6 +41,8 @@ import {
   saveSettings,
   getToolConfigs,
   getOllamaModels,
+  registerOllamaModel,
+  removeOllamaModel,
   saveToolConfigs,
   resetAllToolConfigs,
   resetToolConfigSection,
@@ -242,6 +244,8 @@ export default function App() {
   const [ollamaLocalAvailable, setOllamaLocalAvailable] = useState(false);
   const [ollamaRemoteAvailable, setOllamaRemoteAvailable] = useState(false);
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
+  const [llmAverageCutMinutes, setLlmAverageCutMinutes] = useState<number>(1);
+  const [llmMaxExtraMinutes, setLlmMaxExtraMinutes] = useState<number>(0);
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
   const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
@@ -423,105 +427,23 @@ export default function App() {
     return Array.from(merged);
   }
 
-  function mergeOllamaCatalog(
-    ...catalogLists: Array<Array<OllamaModelCatalogItem | null | undefined>>
-  ): OllamaModelCatalogItem[] {
-    const merged = new Map<string, OllamaModelCatalogItem>();
-
-    for (const catalogList of catalogLists) {
-      for (const candidate of catalogList) {
-        if (!candidate) {
-          continue;
-        }
-
-        const name = String(candidate.name || "").trim();
-        if (!name) {
-          continue;
-        }
-
-        const existing = merged.get(name);
-        if (!existing) {
-          merged.set(name, {
-            ...candidate,
-            name,
-          });
-          continue;
-        }
-
-        merged.set(name, {
-          ...existing,
-          ...candidate,
-          name,
-          installed: existing.installed || candidate.installed,
-          running: existing.running || candidate.running,
-          needsDownload: !(
-            existing.installed ||
-            candidate.installed ||
-            existing.running ||
-            candidate.running
-          ),
-          source:
-            existing.installed || candidate.installed || existing.running || candidate.running
-              ? "local"
-              : "cloud",
-          size: existing.size || candidate.size,
-        });
-      }
-    }
-
-    return Array.from(merged.values());
-  }
-
-  async function refreshOllamaModelOptions(
-    fallbackModel?: string,
-    showAlertOnError = false,
-  ): Promise<void> {
+  async function refreshOllamaModelOptions(showAlertOnError = false): Promise<void> {
     try {
       const result = await getOllamaModels();
 
-      const fallbackCatalog = mergeModelOptions(
-        [result.configuredModel],
-        [fallbackModel],
-        [llmModel],
-      ).map((name) => ({
-        name,
-        source: "local" as const,
-        installed: true,
-        running: false,
-        needsDownload: false,
-      }));
-
-      const mergedCatalog = mergeOllamaCatalog(
-        ollamaModelCatalog,
-        result.catalog || [],
-        fallbackCatalog,
-      );
-
-      setOllamaModelCatalog(mergedCatalog);
-      setOllamaModels((prev) =>
+      const backendCatalog = result.catalog || [];
+      setOllamaModelCatalog(backendCatalog);
+      setOllamaModels(
         mergeModelOptions(
-          prev,
           result.models,
-          mergedCatalog.map((entry) => entry.name),
+          backendCatalog.map((entry) => entry.name),
           [result.configuredModel],
-          [fallbackModel],
-          [llmModel],
         ),
       );
       setOllamaLocalAvailable(Boolean(result.localAvailable));
       setOllamaRemoteAvailable(Boolean(result.remoteAvailable));
     } catch (error) {
       console.error("Failed to load Ollama models:", error);
-      const fallbackCatalog = mergeModelOptions([fallbackModel], [llmModel]).map((name) => ({
-        name,
-        source: "local" as const,
-        installed: true,
-        running: false,
-        needsDownload: false,
-      }));
-
-      setOllamaModelCatalog((prev) => mergeOllamaCatalog(prev, fallbackCatalog));
-      setOllamaModels((prev) => mergeModelOptions(prev, [fallbackModel], [llmModel]));
       setOllamaLocalAvailable(false);
       setOllamaRemoteAvailable(false);
       if (showAlertOnError) {
@@ -858,7 +780,16 @@ export default function App() {
       }
 
       if (job.status !== "RENDERING") {
-        console.log(`[render] Job status is ${job.status}, stopping polling`);
+        const startupGraceMs = 30 * 1000;
+        const startedAt = renderPollStartTimeRef.current;
+        const elapsedMs = startedAt ? Date.now() - startedAt : 0;
+
+        if (elapsedMs < startupGraceMs) {
+          // The render endpoint may still be transitioning the job to RENDERING.
+          return;
+        }
+
+        console.log(`[render] Job status is ${job.status} after startup grace, stopping polling`);
         setRenderOutputsVersion((value) => value + 1);
         stopRenderPolling();
         return;
@@ -1097,6 +1028,44 @@ export default function App() {
   function buildRenderUrl(renderPath: string): string {
     return buildRenderUrlUtil(renderPath, renderOutputsVersion);
   }
+
+  function formatTimestampForFilename(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${String(mins).padStart(2, "0")}_${String(secs).padStart(2, "0")}`;
+  }
+
+  function buildCutFilenameFromRange(start: number, end: number): string {
+    return `${formatTimestampForFilename(start)}-${formatTimestampForFilename(end)}.mp4`;
+  }
+
+  function toCatchyTitle(cut: Cut): string {
+    const base = String(cut.title || "")
+      .replace(/\s+/g, " ")
+      .replace(/[.]+$/g, "")
+      .trim();
+
+    if (!base) {
+      return "Corte em destaque";
+    }
+
+    if (base.length <= 72) {
+      return base;
+    }
+
+    return `${base.slice(0, 69).trimEnd()}...`;
+  }
+
+  const renderTitlesByFileName = useMemo(() => {
+    const next: Record<string, string> = {};
+
+    for (const cut of cuts) {
+      const filename = buildCutFilenameFromRange(cut.start, cut.end);
+      next[filename] = toCatchyTitle(cut);
+    }
+
+    return next;
+  }, [cuts]);
 
   // Find any video currently transcribing or rendering
   function findActiveTranscriptionOrRendering(): string | null {
@@ -1635,20 +1604,9 @@ export default function App() {
     const configuredModel = String(active.llm.model || "").trim();
     setLlmModel(configuredModel);
     setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
-    if (configuredModel) {
-      setOllamaModelCatalog((prev) =>
-        mergeOllamaCatalog(prev, [
-          {
-            name: configuredModel,
-            source: "local",
-            installed: true,
-            running: false,
-            needsDownload: false,
-          },
-        ]),
-      );
-    }
     setLlmSystemPrompt(active.llm.system_prompt || "");
+    setLlmAverageCutMinutes(Number(active.llm.average_cut_minutes || 1));
+    setLlmMaxExtraMinutes(Number(active.llm.max_extra_minutes || 0));
   }
 
   async function saveWhisperConfig(config: Partial<WhisperConfig>) {
@@ -1672,12 +1630,19 @@ export default function App() {
     }
   }
 
-  async function saveLLMConfig(model: string, prompt: string) {
+  async function saveLLMConfig(
+    model: string,
+    prompt: string,
+    averageCutMinutes: number,
+    maxExtraMinutes: number,
+  ) {
     try {
       const response = await saveToolConfigs({
         llm: {
           model,
           system_prompt: prompt,
+          average_cut_minutes: averageCutMinutes,
+          max_extra_minutes: maxExtraMinutes,
         },
       });
       applyToolConfigs(response);
@@ -1686,6 +1651,14 @@ export default function App() {
     } catch (error) {
       console.error("[UI] Erro ao salvar configurações do LLM:", error);
     }
+  }
+
+  async function registerNewOllamaModel(name: string, source: "cloud" | "local") {
+    return registerOllamaModel({ name, source });
+  }
+
+  async function removeRegisteredOllamaModel(name: string) {
+    return removeOllamaModel(name);
   }
 
   async function saveFFmpegConfig(config: FFmpegConfig) {
@@ -1743,7 +1716,7 @@ export default function App() {
       try {
         const toolConfigs = await getToolConfigs();
         applyToolConfigs(toolConfigs);
-        await refreshOllamaModelOptions(toolConfigs.active.llm.model, false);
+        await refreshOllamaModelOptions(false);
       } catch (error) {
         console.error("Failed to load tool configs:", error);
       }
@@ -1847,7 +1820,7 @@ export default function App() {
         }}
         onConfigureLLM={() => {
           setShowLLMConfigDialog(true);
-          void refreshOllamaModelOptions(llmModel, false);
+          void refreshOllamaModelOptions(false);
         }}
         onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
         onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
@@ -2057,12 +2030,14 @@ export default function App() {
                               </button>
                             )}
                           </div>
-                          <button
-                            className="secondary log-toggle-button"
-                            onClick={() => setExpandTaskLogs((current) => !current)}
-                          >
-                            {expandTaskLogs ? "Mostrar menos" : "Mostrar mais"}
-                          </button>
+                          {!expandTaskLogs ? (
+                            <button
+                              className="secondary log-toggle-button"
+                              onClick={() => setExpandTaskLogs(true)}
+                            >
+                              Mostrar mais
+                            </button>
+                          ) : null}
                         </div>
                         <div
                           ref={taskLogsContainerRef}
@@ -2077,19 +2052,6 @@ export default function App() {
                       </div>
                     )}
                     <div className="action-cards-grid">
-                      <ActionCard description="Abre a transcrição nos formatos disponíveis.">
-                        <button
-                          disabled={!hasAnyTranscription}
-                          onClick={() => setShowTranscriptionFormatListDialog(true)}
-                          className="config-card-button blue"
-                          style={{
-                            cursor: hasAnyTranscription ? "pointer" : "not-allowed",
-                            opacity: hasAnyTranscription ? 1 : 0.5,
-                          }}
-                        >
-                          Visualizar transcrição
-                        </button>
-                      </ActionCard>
                       <ActionCard description="Gera ou recria a transcrição do vídeo.">
                         <button
                           disabled={action.busy}
@@ -2120,6 +2082,19 @@ export default function App() {
                             : hasAnyTranscription
                               ? "Gerar nova transcrição"
                               : "Transcrever"}
+                        </button>
+                      </ActionCard>
+                      <ActionCard description="Abre a transcrição nos formatos disponíveis.">
+                        <button
+                          disabled={!hasAnyTranscription}
+                          onClick={() => setShowTranscriptionFormatListDialog(true)}
+                          className="config-card-button blue"
+                          style={{
+                            cursor: hasAnyTranscription ? "pointer" : "not-allowed",
+                            opacity: hasAnyTranscription ? 1 : 0.5,
+                          }}
+                        >
+                          Visualizar transcrição
                         </button>
                       </ActionCard>
                       <ActionCard description="Agrupa a transcrição em blocos semânticos.">
@@ -2197,22 +2172,24 @@ export default function App() {
                               return;
                             }
 
-                            return runAction(
-                              async () => {
-                                // Sync cuts with backend before rendering
-                                await updateCuts(activeVideo.job.job_id, cuts);
-                                return renderJob(activeVideo.job.job_id);
-                              },
-                              () => {
-                                console.log(`[UI] Renderização iniciada`);
-                                setActiveTaskLogType("render");
-                                setActiveTaskLogs([]);
-                                setExpandTaskLogs(false);
-                                stopLogsPolling();
-                                setRenderOutputs([]);
-                                startRenderPolling(activeVideo.job.job_id, suggestedCuts.length);
-                              },
-                            );
+                            return runAction(async () => {
+                              console.log(`[UI] Renderização iniciada`);
+                              setActiveTaskLogType("render");
+                              setActiveTaskLogs([]);
+                              setExpandTaskLogs(false);
+                              stopLogsPolling();
+                              setRenderOutputs([]);
+                              startRenderPolling(activeVideo.job.job_id, cuts.length);
+
+                              // Sync cuts with backend before rendering
+                              await updateCuts(activeVideo.job.job_id, cuts);
+                              try {
+                                return await renderJob(activeVideo.job.job_id);
+                              } catch (error) {
+                                stopRenderPolling();
+                                throw error;
+                              }
+                            });
                           }}
                         >
                           {isRendering ? "Renderizando..." : "Renderizar"}
@@ -2527,9 +2504,37 @@ export default function App() {
           activeVideoHasText={Boolean(activeVideo.transcription)}
           activeVideoHasVtt={Boolean(activeVideo.transcriptionFormats?.vtt)}
           activeVideoHasSegments={Boolean(activeVideo.transcriptionSegments?.length)}
+          deletingTranscription={action.busy}
           onSelectFormat={(format) => {
             setSelectedTranscriptionFormat(format);
             setShowTranscriptionContentDialog(true);
+          }}
+          onDeleteAll={() => {
+            runAction(
+              () => deleteTranscription(activeVideo.job.job_id, "all"),
+              (result: any) => {
+                const formats = result?.available_formats;
+                const nextFormats = formats
+                  ? {
+                      segments: Boolean(formats.segments),
+                      text: Boolean(formats.text),
+                      vtt: Boolean(formats.vtt),
+                    }
+                  : undefined;
+
+                updateVideo(activeVideo.job.job_id, {
+                  transcription: "",
+                  transcriptionSegments: [],
+                  transcriptionFormats: nextFormats,
+                });
+
+                setShowTranscriptionContentDialog(false);
+                setShowTranscriptionDeleteDialog(false);
+                setSelectedTranscriptionFormat(null);
+                setPendingDeleteFormat(null);
+                setShowTranscriptionFormatListDialog(false);
+              },
+            );
           }}
           onClose={() => setShowTranscriptionFormatListDialog(false)}
         />
@@ -2711,8 +2716,7 @@ export default function App() {
               start: startValue,
               end: endValue,
               status: "approved",
-              hook_reason: "Corte adicionado manualmente",
-              content_reason: "Corte adicionado manualmente",
+              title: "Corte manual",
             };
 
             const newSuggestedCuts = [...suggestedCuts, newCut];
@@ -2748,6 +2752,7 @@ export default function App() {
         isLoadingRenderOutputs={isLoadingRenderOutputs}
         isRendering={isRendering}
         renderOutputs={renderOutputs}
+        renderTitlesByFileName={renderTitlesByFileName}
         buildRenderUrl={buildRenderUrl}
         onOpenRenderFolder={async (fileName) => {
           if (!activeVideo) {
@@ -2774,11 +2779,18 @@ export default function App() {
           localAvailable={ollamaLocalAvailable}
           remoteAvailable={ollamaRemoteAvailable}
           llmSystemPrompt={llmSystemPrompt}
+          llmAverageCutMinutes={llmAverageCutMinutes}
+          llmMaxExtraMinutes={llmMaxExtraMinutes}
           action={action}
-          onSave={(model, prompt) => {
+          onRegisterModel={registerNewOllamaModel}
+          onRemoveModel={removeRegisteredOllamaModel}
+          onRefreshModels={() => refreshOllamaModelOptions(true)}
+          onSave={(model, prompt, averageCutMinutes, maxExtraMinutes) => {
             setLlmModel(model);
             setLlmSystemPrompt(prompt);
-            void saveLLMConfig(model, prompt);
+            setLlmAverageCutMinutes(averageCutMinutes);
+            setLlmMaxExtraMinutes(maxExtraMinutes);
+            void saveLLMConfig(model, prompt, averageCutMinutes, maxExtraMinutes);
           }}
           onCancel={() => setShowLLMConfigDialog(false)}
         />
