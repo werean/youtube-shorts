@@ -307,16 +307,17 @@ export function MultiSelect({ values, onChange, options }: MultiSelectProps) {
 interface SectionProps {
   title: string;
   children: React.ReactNode;
+  showTopSeparator?: boolean;
 }
 
-export function ConfigSection({ title, children }: SectionProps) {
+export function ConfigSection({ title, children, showTopSeparator = true }: SectionProps) {
   const [expanded, setExpanded] = useState(true);
 
   return (
     <div
       style={{
         marginBottom: "24px",
-        borderTop: "1px solid var(--border)",
+        borderTop: showTopSeparator ? "1px solid var(--border)" : "none",
         paddingTop: "16px",
       }}
     >

@@ -6,6 +6,7 @@ interface ConfigurationPanelProps {
   onShowLLMConfigDialog: () => void;
   onShowWhisperConfigDialog: () => void;
   onShowFFmpegConfigDialog?: () => void;
+  onShowHowToUse?: () => void;
 }
 
 export function ConfigurationPanel({
@@ -14,6 +15,7 @@ export function ConfigurationPanel({
   onShowLLMConfigDialog,
   onShowWhisperConfigDialog,
   onShowFFmpegConfigDialog,
+  onShowHowToUse,
 }: ConfigurationPanelProps) {
   return (
     <ConfigurationSection
@@ -22,6 +24,7 @@ export function ConfigurationPanel({
       onConfigureLLM={onShowLLMConfigDialog}
       onConfigureWhisper={onShowWhisperConfigDialog}
       onConfigureFFmpeg={onShowFFmpegConfigDialog || (() => {})}
+      onShowHowToUse={onShowHowToUse}
     />
   );
 }

@@ -6,6 +6,7 @@ interface ConfigurationSectionProps {
   onConfigureLLM: () => void;
   onConfigureWhisper: () => void;
   onConfigureFFmpeg: () => void;
+  onShowHowToUse?: () => void;
 }
 
 export function ConfigurationSection({
@@ -14,6 +15,7 @@ export function ConfigurationSection({
   onConfigureLLM,
   onConfigureWhisper,
   onConfigureFFmpeg,
+  onShowHowToUse,
 }: ConfigurationSectionProps) {
   const cards = [
     {
@@ -45,6 +47,12 @@ export function ConfigurationSection({
       description: "Define parâmetros de renderização de vídeo.",
       className: "pink",
       onClick: onConfigureFFmpeg,
+    },
+    {
+      title: "Como utilizar",
+      description: "Veja um guia rápido para usar o fluxo completo da aplicação.",
+      className: "cyan",
+      onClick: onShowHowToUse || (() => {}),
     },
   ];
 

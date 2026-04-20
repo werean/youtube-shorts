@@ -65,12 +65,7 @@ export async function analyzeBlocks(jobId: string): Promise<{ cuts: Cut[]; raw_r
   }
 
   const toolConfigs = loadActiveToolConfigs();
-  const averageCutMinutes = Number(toolConfigs.llm.average_cut_minutes ?? 1);
-  const maxExtraMinutes = Number(toolConfigs.llm.max_extra_minutes ?? 0);
-  const prompt = buildCutSelectionPrompt(blocks, {
-    averageCutMinutes,
-    maxExtraMinutes,
-  });
+  const prompt = buildCutSelectionPrompt(blocks);
   const model = toolConfigs.llm.model || undefined;
   const client = new OllamaClient(undefined, model);
 

@@ -68,8 +68,6 @@ export type LlmRegisteredModel = {
 export type LlmToolConfig = {
   model: string;
   system_prompt: string;
-  average_cut_minutes: number;
-  max_extra_minutes: number;
   registered_models?: LlmRegisteredModel[];
 };
 
@@ -304,10 +302,6 @@ function normalizeRegisteredModels(value: unknown): LlmRegisteredModel[] {
 function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
   const model = String(llmConfig.model || config.OLLAMA_MODEL).trim() || config.OLLAMA_MODEL;
   const prompt = String(llmConfig.system_prompt || SYSTEM_PROMPT_TEMPLATE);
-  const averageCutMinutesRaw = toNumberOrNull(llmConfig.average_cut_minutes) ?? 1;
-  const maxExtraMinutesRaw = toNumberOrNull(llmConfig.max_extra_minutes) ?? 0;
-  const averageCutMinutes = Math.max(0.25, averageCutMinutesRaw);
-  const maxExtraMinutes = Math.max(0, Math.min(10, Math.round(maxExtraMinutesRaw * 4) / 4));
   const registered = normalizeRegisteredModels(llmConfig.registered_models);
 
   if (!registered.some((item) => item.name.toLowerCase() === model.toLowerCase())) {
@@ -320,8 +314,6 @@ function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
   return {
     model,
     system_prompt: prompt,
-    average_cut_minutes: averageCutMinutes,
-    max_extra_minutes: maxExtraMinutes,
     registered_models: registered,
   };
 }
@@ -381,8 +373,6 @@ function defaultToolConfigs(): ToolConfigs {
     llm: {
       model: config.OLLAMA_MODEL,
       system_prompt: SYSTEM_PROMPT_TEMPLATE,
-      average_cut_minutes: 1,
-      max_extra_minutes: 0,
       registered_models: [
         {
           name: config.OLLAMA_MODEL,

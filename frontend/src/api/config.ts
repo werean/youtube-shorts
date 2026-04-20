@@ -129,8 +129,35 @@ export interface RemoveOllamaModelResponse {
   removedFromLocal: boolean;
 }
 
+export interface SavedLLMPrompt {
+  id: string;
+  name: string;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
   return request("/config/llm-prompt");
+}
+
+export async function getDefaultLLMPrompt(): Promise<{ prompt: string; version: string }> {
+  return request("/config/llm-prompt/default");
+}
+
+export async function getSavedLLMPrompts(): Promise<{ prompts: SavedLLMPrompt[] }> {
+  return request("/config/llm-saved-prompts");
+}
+
+export async function saveLLMPrompt(payload: {
+  name: string;
+  prompt: string;
+}): Promise<{ prompts: SavedLLMPrompt[] }> {
+  return request("/config/llm-saved-prompts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getConfig(): Promise<{

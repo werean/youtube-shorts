@@ -222,6 +222,7 @@ export default function App() {
   const [pendingDeleteCutId, setPendingDeleteCutId] = useState<string | null>(null);
   const [dontAskDeleteCutAgain, setDontAskDeleteCutAgain] = useState(false);
   const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
+  const [showHowToUseDialog, setShowHowToUseDialog] = useState(false);
   const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
   const [batchPipelineOptions, setBatchPipelineOptions] = useState({
     transcription: true,
@@ -244,8 +245,6 @@ export default function App() {
   const [ollamaLocalAvailable, setOllamaLocalAvailable] = useState(false);
   const [ollamaRemoteAvailable, setOllamaRemoteAvailable] = useState(false);
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
-  const [llmAverageCutMinutes, setLlmAverageCutMinutes] = useState<number>(1);
-  const [llmMaxExtraMinutes, setLlmMaxExtraMinutes] = useState<number>(0);
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
   const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
@@ -1605,8 +1604,6 @@ export default function App() {
     setLlmModel(configuredModel);
     setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
     setLlmSystemPrompt(active.llm.system_prompt || "");
-    setLlmAverageCutMinutes(Number(active.llm.average_cut_minutes || 1));
-    setLlmMaxExtraMinutes(Number(active.llm.max_extra_minutes || 0));
   }
 
   async function saveWhisperConfig(config: Partial<WhisperConfig>) {
@@ -1630,19 +1627,12 @@ export default function App() {
     }
   }
 
-  async function saveLLMConfig(
-    model: string,
-    prompt: string,
-    averageCutMinutes: number,
-    maxExtraMinutes: number,
-  ) {
+  async function saveLLMConfig(model: string, prompt: string) {
     try {
       const response = await saveToolConfigs({
         llm: {
           model,
           system_prompt: prompt,
-          average_cut_minutes: averageCutMinutes,
-          max_extra_minutes: maxExtraMinutes,
         },
       });
       applyToolConfigs(response);
@@ -1824,6 +1814,7 @@ export default function App() {
         }}
         onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
         onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
+        onShowHowToUse={() => setShowHowToUseDialog(true)}
       />
 
       {/* 1. Upload Section */}
@@ -2498,6 +2489,68 @@ export default function App() {
         </AppDialog>
       )}
 
+      {showHowToUseDialog && (
+        <AppDialog
+          title="Como utilizar"
+          onClose={() => setShowHowToUseDialog(false)}
+          footer={
+            <div className="ds-dialog-actions">
+              <AppButton variant="secondary" onClick={() => setShowHowToUseDialog(false)}>
+                Fechar
+              </AppButton>
+            </div>
+          }
+          wide
+          scrollable
+        >
+          <div style={{ display: "grid", gap: "10px", lineHeight: 1.7 }}>
+            <p style={{ margin: 0 }}>
+              Este aplicativo transforma vídeos longos em cortes verticais de forma guiada. Para
+              começar rápido e gerar seus primeiros cortes, siga este fluxo:
+            </p>
+            <p style={{ margin: 0 }}>
+              1. Abra "Gerenciar dependências" e confirme que Python, Whisper, FFmpeg e Ollama
+              estão instalados. Se faltar algo, use a instalação automática.
+            </p>
+            <p style={{ margin: 0 }}>
+              2. Faça login no Ollama se for usar modelo cloud. Sem login, a análise por IA pode
+              falhar por autenticação.
+            </p>
+            <p style={{ margin: 0 }}>
+              3. Em "Configurar LLM", escolha um modelo funcional. Se usar cloud, mantenha login e
+              chave válidos; se usar local, garanta que o modelo está baixado.
+            </p>
+            <p style={{ margin: 0 }}>
+              4. Em "Configurar Whisper", ajuste apenas o essencial (modelo/dispositivo/formato).
+              Não precisa configurar tudo para começar.
+            </p>
+            <p style={{ margin: 0 }}>
+              5. Envie um vídeo por URL ou arquivo na seção de upload e selecione esse vídeo na
+              lista.
+            </p>
+            <p style={{ margin: 0 }}>
+              6. Clique para transcrever o vídeo. Aguarde finalizar e confira se a transcrição foi
+              criada.
+            </p>
+            <p style={{ margin: 0 }}>
+              7. Gere os blocos semânticos e rode a análise. Essa etapa é a que cria as sugestões de
+              cortes.
+            </p>
+            <p style={{ margin: 0 }}>
+              8. Revise os cortes sugeridos, ajuste início/fim se necessário e aprove os melhores.
+            </p>
+            <p style={{ margin: 0 }}>
+              9. Renderize os cortes aprovados para gerar os arquivos finais e abra a pasta de saída
+              para validar o resultado.
+            </p>
+            <p style={{ margin: 0 }}>
+              Dica: depois que validar o fluxo com um vídeo, use o batch pipeline para processar
+              vários vídeos de uma vez.
+            </p>
+          </div>
+        </AppDialog>
+      )}
+
       {/* Transcription Format List */}
       {showTranscriptionFormatListDialog && activeVideo && (
         <TranscriptionFormatListDialog
@@ -2779,18 +2832,14 @@ export default function App() {
           localAvailable={ollamaLocalAvailable}
           remoteAvailable={ollamaRemoteAvailable}
           llmSystemPrompt={llmSystemPrompt}
-          llmAverageCutMinutes={llmAverageCutMinutes}
-          llmMaxExtraMinutes={llmMaxExtraMinutes}
           action={action}
           onRegisterModel={registerNewOllamaModel}
           onRemoveModel={removeRegisteredOllamaModel}
           onRefreshModels={() => refreshOllamaModelOptions(true)}
-          onSave={(model, prompt, averageCutMinutes, maxExtraMinutes) => {
+          onSave={(model, prompt) => {
             setLlmModel(model);
             setLlmSystemPrompt(prompt);
-            setLlmAverageCutMinutes(averageCutMinutes);
-            setLlmMaxExtraMinutes(maxExtraMinutes);
-            void saveLLMConfig(model, prompt, averageCutMinutes, maxExtraMinutes);
+            void saveLLMConfig(model, prompt);
           }}
           onCancel={() => setShowLLMConfigDialog(false)}
         />

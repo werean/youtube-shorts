@@ -19,6 +19,18 @@ interface ChatResponse {
   };
 }
 
+class OllamaHttpError extends Error {
+  status: number;
+  responseText: string;
+
+  constructor(status: number, responseText: string) {
+    super(`Ollama HTTP error: ${status} ${responseText}`.trim());
+    this.name = "OllamaHttpError";
+    this.status = status;
+    this.responseText = responseText;
+  }
+}
+
 export class OllamaClient {
   private baseUrl: string;
   private model: string;
@@ -57,8 +69,7 @@ export class OllamaClient {
       const message = response.message || {};
       return String(message.content || "");
     } catch (error: any) {
-      const message = String(error?.message || "");
-      const unauthorized = /\b401\b|unauthorized/i.test(message);
+      const unauthorized = this.isUnauthorizedError(error);
       const cloudModel = this.model.endsWith("-cloud");
 
       if (unauthorized && cloudModel) {
@@ -73,12 +84,63 @@ export class OllamaClient {
         }
 
         throw new Error(
-          "Ollama retornou 401 para um modelo cloud. Faça login no Ollama CLI (ollama signin), configure OLLAMA_API_KEY, ou selecione um modelo local instalado.",
+          "Você está usando um modelo cloud e o Ollama não autorizou a requisição. Faça login com 'ollama signin', configure OLLAMA_API_KEY, ou selecione um modelo local já baixado.",
         );
       }
 
-      throw error;
+      throw new Error(this.toUserFriendlyError(error));
     }
+  }
+
+  private isUnauthorizedError(error: unknown): boolean {
+    if (error instanceof OllamaHttpError) {
+      return error.status === 401 || error.status === 403;
+    }
+
+    const message = String((error as any)?.message || "");
+    return /\b401\b|\b403\b|unauthorized|forbidden|not\s+authenticated/i.test(message);
+  }
+
+  private toUserFriendlyError(error: unknown): string {
+    if (error instanceof OllamaHttpError) {
+      const detail = String(error.responseText || "").trim();
+      const modelLabel = this.model || "modelo configurado";
+
+      if (error.status === 401 || error.status === 403) {
+        if (this.model.endsWith("-cloud")) {
+          return `Falha de autenticação no Ollama Cloud para o modelo '${modelLabel}'. Faça login com 'ollama signin' ou configure OLLAMA_API_KEY.`;
+        }
+        return `Falha de autenticação ao acessar o Ollama para o modelo '${modelLabel}'. Verifique credenciais e permissões.`;
+      }
+
+      if (error.status === 404) {
+        return `Modelo '${modelLabel}' não encontrado no Ollama. Se for local, baixe com 'ollama pull ${modelLabel}'. Se for cloud, confirme o nome do modelo e login.`;
+      }
+
+      if (error.status === 429) {
+        return "Ollama retornou limite de requisições (429). Aguarde alguns instantes e tente novamente.";
+      }
+
+      if (error.status >= 500) {
+        return `Ollama retornou erro interno (${error.status}). ${detail || "Tente novamente em instantes."}`;
+      }
+
+      return `Falha na chamada ao Ollama (${error.status}). ${detail || "Sem detalhes."}`;
+    }
+
+    const message = String((error as any)?.message || "");
+
+    if (/timed out|timeout/i.test(message)) {
+      return "A requisição para o Ollama excedeu o tempo limite. Verifique se o modelo está disponível e tente novamente.";
+    }
+
+    if (
+      /Failed to reach Ollama server|fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(message)
+    ) {
+      return `Não foi possível conectar ao Ollama em ${this.baseUrl}. Confirme se o Ollama está em execução.`;
+    }
+
+    return message || "Falha inesperada ao comunicar com o Ollama.";
   }
 
   private async findLocalFallbackModel(): Promise<string | null> {
@@ -140,11 +202,14 @@ export class OllamaClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Ollama HTTP error: ${response.status} ${errorText}`);
+        throw new OllamaHttpError(response.status, errorText);
       }
 
       return (await response.json()) as ChatResponse;
     } catch (error: any) {
+      if (error instanceof OllamaHttpError) {
+        throw error;
+      }
       if (error.name === "AbortError") {
         throw new Error("Ollama request timed out");
       }

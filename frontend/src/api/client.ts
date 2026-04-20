@@ -14,7 +14,22 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (!response.ok) {
       const text = await response.text();
       console.error(`[API] Error response: ${text}`);
-      throw new Error(text || `Request failed: ${response.status}`);
+
+      let detail = "";
+      if (text) {
+        try {
+          const parsed = JSON.parse(text) as {
+            detail?: unknown;
+            message?: unknown;
+            error?: unknown;
+          };
+          detail = String(parsed.detail || parsed.message || parsed.error || "").trim();
+        } catch {
+          detail = text.trim();
+        }
+      }
+
+      throw new Error(detail || `Request failed: ${response.status}`);
     }
 
     const data = (await response.json()) as T;
@@ -24,6 +39,14 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     console.error(`[API] Fetch error:`, error.message);
     console.error(`[API] Error type:`, error.name);
     console.error(`[API] Full error:`, error);
+
+    const message = String(error?.message || "");
+    if (/Failed to fetch|fetch failed|NetworkError|network/i.test(message)) {
+      throw new Error(
+        "Não foi possível conectar ao backend da aplicação. Verifique se o servidor está em execução.",
+      );
+    }
+
     throw error;
   }
 }

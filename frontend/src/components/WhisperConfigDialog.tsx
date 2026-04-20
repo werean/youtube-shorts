@@ -283,7 +283,7 @@ export function WhisperConfigDialog({
         </div>
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
-          <ConfigSection title="Opções Básicas">
+          <ConfigSection title="Opções Básicas" showTopSeparator={false}>
             <ConfigField
               label="Modelo"
               description="Escolha entre modelos rápidos ou precisos"
@@ -864,4 +864,3 @@ export function WhisperConfigDialog({
     </div>
   );
 }
-

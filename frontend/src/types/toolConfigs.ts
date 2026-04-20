@@ -9,8 +9,6 @@ export interface ToolConfigs {
   llm: {
     model: string;
     system_prompt: string;
-    average_cut_minutes: number;
-    max_extra_minutes: number;
     registered_models?: Array<{
       name: string;
       source: "cloud" | "local";
@@ -24,8 +22,6 @@ export interface ToolConfigsPatch {
   llm?: Partial<{
     model: string;
     system_prompt: string;
-    average_cut_minutes: number;
-    max_extra_minutes: number;
     registered_models: Array<{
       name: string;
       source: "cloud" | "local";

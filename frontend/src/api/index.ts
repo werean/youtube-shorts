@@ -42,6 +42,9 @@ export {
 // Config API
 export {
   getLLMPrompt,
+  getDefaultLLMPrompt,
+  getSavedLLMPrompts,
+  saveLLMPrompt,
   getConfig,
   getOllamaModels,
   registerOllamaModel,
@@ -72,4 +75,5 @@ export {
   type RegisterOllamaModelRequest,
   type RegisterOllamaModelResponse,
   type RemoveOllamaModelResponse,
+  type SavedLLMPrompt,
 } from "./config";
