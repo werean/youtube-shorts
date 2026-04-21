@@ -237,7 +237,7 @@ describe("artifact and path lifecycle routes", () => {
     expect(body).toEqual({ ok: true });
     expect(openFolderCalls).toEqual([
       {
-        filePath: job.source_video_path,
+        filePath: job.source_video_path!,
         allowedRoots: [mediaBaseDir(), archivedVideosDir()],
       },
     ]);
