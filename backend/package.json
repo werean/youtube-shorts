@@ -11,6 +11,7 @@
     "start": "bun run dist/main.js",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "test:bun": "bun test tests/bun",
     "test:watch": "vitest"
   },
   "keywords": [

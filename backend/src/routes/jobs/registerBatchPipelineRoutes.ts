@@ -3,7 +3,9 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import * as fs from "fs";
 import * as metadata from "../../storage/metadata";
+import * as files from "../../storage/files";
 import { transcribeJob } from "../../pipeline/transcription";
 import { buildSemanticBlocks } from "../../pipeline/semantic_blocks";
 import { analyzeBlocks } from "../../pipeline/analysis";
@@ -194,13 +196,10 @@ async function processBatchPipeline(
           progress.waiting_for_approval = true;
 
           // Load cuts for approval
-          const cutsPath = require("path").join(
-            require("../../../core/paths").jobDir(jobId),
-            "cuts.json",
-          );
+          const cutsPath = files.cutsPath(jobId);
 
-          if (require("fs").existsSync(cutsPath)) {
-            const cuts = JSON.parse(require("fs").readFileSync(cutsPath, "utf-8"));
+          if (fs.existsSync(cutsPath)) {
+            const cuts = JSON.parse(fs.readFileSync(cutsPath, "utf-8"));
             progress.pending_cuts = cuts;
           }
 
