@@ -11,7 +11,7 @@
     "start": "bun run dist/main.js",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:bun": "bun test tests/bun/pipeline/orchestrator-analysis-prerequisites.test.ts && bun test tests/bun/pipeline/job-status-transitions.test.ts && bun test tests/bun/routes/analysis-route-prerequisites.test.ts && bun test tests/bun/routes/artifact-path-lifecycle.test.ts && bun test tests/bun/routes/batch-analysis-prerequisites.test.ts && bun test tests/bun/routes/batch-preapproval.test.ts && bun test tests/bun/routes/cuts-mutation.test.ts",
+    "test:bun": "bun test tests/bun/pipeline/orchestrator-analysis-prerequisites.test.ts && bun test tests/bun/pipeline/job-status-transitions.test.ts && bun test tests/bun/routes/analysis-route-prerequisites.test.ts && bun test tests/bun/routes/artifact-path-lifecycle.test.ts && bun test tests/bun/routes/batch-analysis-prerequisites.test.ts && bun test tests/bun/routes/batch-preapproval.test.ts && bun test tests/bun/routes/cuts-mutation.test.ts && bun test tests/bun/routes/dependencies-routes-bun.test.ts",
     "test:watch": "vitest"
   },
   "keywords": [
