@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { getCommonFolders } from "../../features/config/folders/commonFolders";
+import { getCommonFolders } from "../../config/folders/commonFolders";
 
 export function registerCommonFoldersRoutes(fastify: FastifyInstance) {
   fastify.get("/common-folders", async (request, reply) => {

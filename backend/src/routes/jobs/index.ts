@@ -3,19 +3,19 @@
  */
 
 import type { FastifyPluginAsync } from "fastify";
-import { registerCreateJobRoutes } from "./registerCreateJob";
-import { registerUploadJobRoutes } from "./registerUploadJob";
-import { registerGetJobRoutes } from "./registerGetJob";
-import { registerIngestJobRoutes } from "./registerIngestJob";
-import { registerTranscriptionRoutes } from "./registerTranscriptionRoutes";
-import { registerBlocksRoutes } from "./registerBlocksRoutes";
-import { registerAnalysisRoutes } from "./registerAnalysisRoutes";
-import { registerCutsRoutes } from "./registerCutsRoutes";
-import { registerRenderRoutes } from "./registerRenderRoutes";
-import { registerPipelineRoutes } from "./registerPipelineRoutes";
-import { registerBatchPipelineRoutes } from "./registerBatchPipelineRoutes";
-import { registerRenameRoutes } from "./registerRenameRoutes";
-import { registerLogsRoutes } from "./registerLogsRoutes";
+import { registerCreateJobRoutes } from "./lifecycle/registerCreateJob";
+import { registerUploadJobRoutes } from "./lifecycle/registerUploadJob";
+import { registerGetJobRoutes } from "./lifecycle/registerGetJob";
+import { registerIngestJobRoutes } from "./lifecycle/registerIngestJob";
+import { registerRenameRoutes } from "./lifecycle/registerRenameRoutes";
+import { registerLogsRoutes } from "./lifecycle/registerLogsRoutes";
+import { registerTranscriptionRoutes } from "./processing/registerTranscriptionRoutes";
+import { registerBlocksRoutes } from "./processing/registerBlocksRoutes";
+import { registerAnalysisRoutes } from "./processing/registerAnalysisRoutes";
+import { registerPipelineRoutes } from "./processing/registerPipelineRoutes";
+import { registerBatchPipelineRoutes } from "./processing/registerBatchPipelineRoutes";
+import { registerCutsRoutes } from "./curation/registerCutsRoutes";
+import { registerRenderRoutes } from "./rendering/registerRenderRoutes";
 
 const jobsRoutes: FastifyPluginAsync = async (fastify) => {
   registerCreateJobRoutes(fastify);
