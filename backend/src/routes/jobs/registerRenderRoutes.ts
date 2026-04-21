@@ -3,14 +3,9 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import * as fs from "fs";
-import * as path from "path";
-import { JobStatus } from "../../models/job";
-import * as metadata from "../../storage/metadata";
 import * as rendering from "../../pipeline/rendering";
-import * as files from "../../storage/files";
-import { loadSettings, archivedVideosDir } from "../../core/settings";
-import { openFolderInExplorerForFile } from "../../utils/openFolder";
+import { deleteRenderOutputFile, openRenderOutputFolder } from "./render/outputs";
+import { startRenderInBackground } from "./render/tasks";
 
 export function registerRenderRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/render", async (request, reply) => {
@@ -18,21 +13,7 @@ export function registerRenderRoutes(fastify: FastifyInstance) {
       const { job_id } = request.params;
       console.log(`[jobs] Rendering suggested cuts for job: ${job_id}`);
 
-      // Start rendering in background without blocking
-      void rendering.renderSuggestedCuts(job_id).catch((error) => {
-        console.error(`[jobs] Render failed for job ${job_id}:`, error);
-        // Status should already be set to ERROR by rendering.ts, but ensure it
-        try {
-          const job = metadata.loadJob(job_id);
-          if (job.status !== JobStatus.ERROR) {
-            job.status = JobStatus.ERROR;
-            job.updated_at = new Date().toISOString();
-            metadata.saveJob(job);
-          }
-        } catch (err) {
-          console.error(`[jobs] Failed to update job status to ERROR:`, err);
-        }
-      });
+      startRenderInBackground(job_id);
 
       return { started: true };
     } catch (error: any) {
@@ -68,20 +49,12 @@ export function registerRenderRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       try {
         const { job_id, file } = request.params;
-        const safeFile = path.basename(file);
-        console.log(`[jobs] Deleting render: ${job_id}/${safeFile}`);
-
-        const shortsDir = files.ensureShortsJobDir(job_id);
-        const filePath = path.join(shortsDir, safeFile);
-
-        if (!fs.existsSync(filePath)) {
+        const result = deleteRenderOutputFile(job_id, file);
+        if (result.status === "not-found") {
           return reply.code(404).send({ detail: "Render file not found" });
         }
 
-        fs.unlinkSync(filePath);
-        console.log(`[jobs] ✓ Render deleted: ${filePath}`);
-
-        return { ok: true, file: safeFile };
+        return { ok: true, file: result.safeFile };
       } catch (error: any) {
         console.error(`[jobs] Error deleting render:`, error);
         reply.code(500).send({ detail: error.message });
@@ -94,19 +67,9 @@ export function registerRenderRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       try {
         const { job_id, file } = request.params;
-        const safeFile = path.basename(file);
-
-        const shortsDir = files.ensureShortsJobDir(job_id);
-        const filePath = path.join(shortsDir, safeFile);
-
-        const settings = loadSettings();
-        const allowedRoots = [settings.media.base_dir, archivedVideosDir()];
-        const result = openFolderInExplorerForFile(filePath, allowedRoots);
-
+        const result = openRenderOutputFolder(job_id, file);
         if (!result.ok) {
-          const msg = result.detail || "Failed to open folder";
-          const status = msg === "File not found" ? 404 : msg === "Invalid path" ? 400 : 500;
-          return reply.code(status).send({ detail: msg });
+          return reply.code(result.statusCode).send({ detail: result.detail });
         }
 
         return { ok: true };

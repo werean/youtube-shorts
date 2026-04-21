@@ -4,9 +4,8 @@
 
 import type { FastifyInstance } from "fastify";
 import * as curation from "../../pipeline/curation";
-import * as fs from "fs";
-import * as files from "../../storage/files";
-import { Cut } from "../../models/cut";
+import type { Cut } from "../../models/cut";
+import { replaceCuts } from "./cuts/sync";
 
 export function registerCutsRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { job_id: string } }>("/:job_id/cuts", async (request, reply) => {
@@ -35,13 +34,7 @@ export function registerCutsRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ detail: "cuts must be an array" });
         }
 
-        const cutsPath = files.cutsPath(job_id);
-        const cutsJson = JSON.stringify(cuts, null, 2);
-        console.log(`[jobs] Writing to:`, cutsPath);
-        console.log(`[jobs] JSON string length:`, cutsJson.length);
-        fs.writeFileSync(cutsPath, cutsJson, "utf-8");
-
-        return { ok: true, cuts };
+        return replaceCuts(job_id, cuts);
       } catch (error: any) {
         console.error(`[jobs] Error updating cuts:`, error);
         reply.code(500).send({ detail: error.message });
