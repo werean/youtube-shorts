@@ -6,12 +6,10 @@ import type { FastifyInstance } from "fastify";
 import { INSTALLATION_GUIDES } from "../../config/installer";
 import { snapshotDependencies } from "./dependencies/dependencyDetection";
 import {
-  getDependencyTerminalCommand,
-  openSystemTerminal,
-  parsePytorchGpuTier,
   performDependencyInstall,
   performDependencyUninstall,
 } from "./dependencies/dependencyExecution";
+import { parsePytorchGpuTier } from "./dependencies/dependencyPytorchPolicy";
 import {
   cancelDependencyInstallSession,
   cleanupInstallSessions,
@@ -19,6 +17,10 @@ import {
   startDependencyInstallSession,
   startDependencyUninstallSession,
 } from "./dependencies/dependencySessions";
+import {
+  getDependencyTerminalCommand,
+  openSystemTerminal,
+} from "./dependencies/dependencyTerminal";
 import type { DependencyInstallOptions, DependencyOperationMode } from "./dependencies/dependencyTypes";
 
 const PYTORCH_GPU_TIER_REQUIRED_MESSAGE =

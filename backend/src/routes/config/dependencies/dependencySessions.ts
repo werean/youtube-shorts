@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { MAX_SESSION_LOG_LINES, SESSION_TTL_MS } from "./dependencyTypes";
+import { SESSION_TTL_MS } from "./dependencyTypes";
 import { performDependencyInstall, performDependencyUninstall } from "./dependencyExecution";
+import { appendSessionLog, nowIsoTimestamp } from "./dependencySessionLogs";
 import type {
   DependencyInstallOptions,
   DependencyInstallSession,
@@ -9,39 +10,6 @@ import type {
 
 const dependencyInstallSessions = new Map<string, DependencyInstallSession>();
 const dependencySessionControls = new Map<string, DependencySessionControl>();
-
-function nowIsoTimestamp(): string {
-  return new Date().toISOString();
-}
-
-function nowLogStamp(): string {
-  return new Date().toLocaleTimeString("pt-BR", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function appendSessionLog(session: DependencyInstallSession, message: string) {
-  const lines = message
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (lines.length === 0) {
-    return;
-  }
-
-  for (const line of lines) {
-    session.logs.push(`[${nowLogStamp()}] ${line}`);
-  }
-
-  if (session.logs.length > MAX_SESSION_LOG_LINES) {
-    session.logs.splice(0, session.logs.length - MAX_SESSION_LOG_LINES);
-  }
-}
 
 export function cleanupInstallSessions() {
   const now = Date.now();
