@@ -9,6 +9,8 @@ export interface ToolConfigs {
   llm: {
     model: string;
     system_prompt: string;
+    embedding_model?: string;
+    registered_embedding_models?: string[];
     registered_models?: Array<{
       name: string;
       source: "cloud" | "local";
@@ -22,6 +24,8 @@ export interface ToolConfigsPatch {
   llm?: Partial<{
     model: string;
     system_prompt: string;
+    embedding_model: string;
+    registered_embedding_models: string[];
     registered_models: Array<{
       name: string;
       source: "cloud" | "local";

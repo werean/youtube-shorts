@@ -65,7 +65,7 @@ describe("OllamaClient", () => {
     const client = new OllamaClient("http://localhost:11434", "gpt-oss:120b-cloud", "", 5);
 
     await expect(client.chat([{ role: "user", content: "hello" }])).rejects.toThrow(
-      "Ollama retornou 401 para um modelo cloud",
+      "Você está usando um modelo cloud e o Ollama não autorizou a requisição",
     );
   });
 });

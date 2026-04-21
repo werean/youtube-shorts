@@ -3,6 +3,7 @@
  */
 
 import { SemanticBlock } from "../models/semantic_block";
+import { TopicSegment } from "../models/topic_segment";
 
 export const PROMPT_VERSION = "v3";
 
@@ -74,4 +75,32 @@ export function buildCutSelectionPrompt(blocks: SemanticBlock[]): string {
 
 Semantic blocks:
 ${blocksText}`;
+}
+
+/**
+ * Build the Pass 1 candidacy prompt for a topic segment.
+ *
+ * Sends only topic metadata and the first/last block texts to the LLM —
+ * no full block list is included. The model must reply with JSON only:
+ * `{ "is_candidate": true }` or `{ "is_candidate": false }`.
+ *
+ * @param topic - The topic segment to evaluate.
+ * @param blocks - Full semantic block list for the job (used to resolve first/last blocks).
+ * @returns Prompt string ready to send as the user message.
+ */
+export function buildTopicCandidacyPrompt(topic: TopicSegment, blocks: SemanticBlock[]): string {
+  const blockMap = new Map(blocks.map((b) => [b.block_id, b]));
+  const firstBlock = blockMap.get(topic.block_ids[0]);
+  const lastBlock = blockMap.get(topic.block_ids[topic.block_ids.length - 1]);
+
+  const firstText = firstBlock?.text ?? "(unavailable)";
+  const lastText = lastBlock?.text ?? "(unavailable)";
+
+  return `You are evaluating whether a video segment is worth cutting into a highlight.
+Topic: ${topic.topic_id}
+Duration: ${topic.durationSeconds.toFixed(1)}s
+Block count: ${topic.blockCount}
+First block text: "${firstText}"
+Last block text: "${lastText}"
+Reply with JSON only: { "is_candidate": true } or { "is_candidate": false }`;
 }

@@ -8,6 +8,7 @@ export enum JobStatus {
   DOWNLOADED = "DOWNLOADED",
   TRANSCRIBING = "TRANSCRIBING",
   BUILDING_BLOCKS = "BUILDING_BLOCKS",
+  BUILDING_TOPICS = "BUILDING_TOPICS",
   ANALYZING = "ANALYZING",
   WAITING_APPROVAL = "WAITING_APPROVAL",
   RENDERING = "RENDERING",
@@ -32,4 +33,6 @@ export interface Job {
   source_file_name?: string;
   /** Display name for the video (used in folder organization) */
   video_name?: string;
+  /** Total video duration in seconds, set during ingest */
+  video_duration_seconds?: number;
 }

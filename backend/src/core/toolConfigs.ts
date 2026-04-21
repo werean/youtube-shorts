@@ -69,6 +69,8 @@ export type LlmToolConfig = {
   model: string;
   system_prompt: string;
   registered_models?: LlmRegisteredModel[];
+  embedding_model?: string;
+  registered_embedding_models?: string[];
 };
 
 export interface ToolConfigs {
@@ -125,6 +127,11 @@ function cloneToolConfigs(configs: ToolConfigs): ToolConfigs {
               }),
             )
             .filter((item) => item.name)
+        : [],
+      registered_embedding_models: Array.isArray(configs.llm.registered_embedding_models)
+        ? configs.llm.registered_embedding_models
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
         : [],
     },
   };
@@ -299,10 +306,41 @@ function normalizeRegisteredModels(value: unknown): LlmRegisteredModel[] {
   return models;
 }
 
+function normalizeRegisteredEmbeddingModels(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const models: string[] = [];
+
+  for (const item of value) {
+    const name = String(item || "").trim();
+    if (!name) {
+      continue;
+    }
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    models.push(name);
+  }
+
+  return models;
+}
+
 function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
   const model = String(llmConfig.model || config.OLLAMA_MODEL).trim() || config.OLLAMA_MODEL;
+  const embeddingModel =
+    String(llmConfig.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
   const prompt = String(llmConfig.system_prompt || SYSTEM_PROMPT_TEMPLATE);
   const registered = normalizeRegisteredModels(llmConfig.registered_models);
+  const registeredEmbeddingModels = normalizeRegisteredEmbeddingModels(
+    llmConfig.registered_embedding_models,
+  );
 
   if (!registered.some((item) => item.name.toLowerCase() === model.toLowerCase())) {
     registered.unshift({
@@ -311,10 +349,18 @@ function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
     });
   }
 
+  if (
+    !registeredEmbeddingModels.some((item) => item.toLowerCase() === embeddingModel.toLowerCase())
+  ) {
+    registeredEmbeddingModels.unshift(embeddingModel);
+  }
+
   return {
     model,
     system_prompt: prompt,
     registered_models: registered,
+    embedding_model: embeddingModel,
+    registered_embedding_models: registeredEmbeddingModels,
   };
 }
 
@@ -379,6 +425,8 @@ function defaultToolConfigs(): ToolConfigs {
           source: config.OLLAMA_MODEL.endsWith("-cloud") ? "cloud" : "local",
         },
       ],
+      embedding_model: "nomic-embed-text",
+      registered_embedding_models: ["nomic-embed-text"],
     },
   };
 }

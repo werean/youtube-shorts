@@ -19,6 +19,8 @@ interface OllamaModelCatalogItem {
 
 interface LLMConfigDialogProps {
   llmModel: string;
+  embeddingModel: string;
+  registeredEmbeddingModels?: string[];
   availableModels: string[];
   modelCatalog?: OllamaModelCatalogItem[];
   localAvailable?: boolean;
@@ -35,12 +37,46 @@ interface LLMConfigDialogProps {
   }>;
   onRemoveModel: (name: string) => Promise<{ success: boolean; message: string }>;
   onRefreshModels: () => Promise<void>;
-  onSave: (model: string, prompt: string) => void;
+  onSave: (
+    model: string,
+    prompt: string,
+    embeddingModel: string,
+    registeredEmbeddingModels: string[],
+  ) => void;
   onCancel: () => void;
 }
 
 type ModelFilter = "all" | "cloud" | "local";
 type RegisterStep = "form" | "verifying" | "success" | "error";
+
+const DEFAULT_EMBEDDING_MODELS = [
+  "nomic-embed-text",
+  "embeddinggemma",
+  "qwen3-embedding",
+  "all-minilm",
+];
+
+function normalizeUniqueNames(values: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    const next = String(value || "").trim();
+    if (!next) {
+      continue;
+    }
+
+    const key = next.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalized.push(next);
+  }
+
+  return normalized;
+}
 
 function isCloudModelName(name: string): boolean {
   return name.toLowerCase().includes("cloud");
@@ -56,6 +92,8 @@ function formatDisplayModelName(name: string, source: "cloud" | "local"): string
 
 export function LLMConfigDialog({
   llmModel: initialModel,
+  embeddingModel: initialEmbeddingModel,
+  registeredEmbeddingModels = [],
   availableModels,
   modelCatalog = [],
   llmSystemPrompt: initialPrompt,
@@ -67,6 +105,23 @@ export function LLMConfigDialog({
   onCancel,
 }: LLMConfigDialogProps) {
   const [model, setModel] = useState(initialModel);
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState(
+    initialEmbeddingModel || DEFAULT_EMBEDDING_MODELS[0],
+  );
+  const [customEmbeddingModels, setCustomEmbeddingModels] = useState<string[]>(() =>
+    normalizeUniqueNames(
+      registeredEmbeddingModels.filter(
+        (item) =>
+          !DEFAULT_EMBEDDING_MODELS.some(
+            (defaultModel) => defaultModel.toLowerCase() === item.toLowerCase(),
+          ),
+      ),
+    ),
+  );
+  const [showEmbeddingRegisterForm, setShowEmbeddingRegisterForm] = useState(false);
+  const [embeddingRegisterName, setEmbeddingRegisterName] = useState("");
+  const [isDownloadingEmbedding, setIsDownloadingEmbedding] = useState(false);
+  const [downloadedEmbeddingHints, setDownloadedEmbeddingHints] = useState<string[]>([]);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [modelFilter, setModelFilter] = useState<ModelFilter>("all");
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -157,6 +212,45 @@ export function LLMConfigDialog({
     });
   }, [orderedCatalog, modelFilter]);
 
+  const embeddingModelOptions = useMemo(
+    () =>
+      normalizeUniqueNames([
+        ...DEFAULT_EMBEDDING_MODELS,
+        ...customEmbeddingModels,
+        initialEmbeddingModel,
+        selectedEmbeddingModel,
+      ]),
+    [customEmbeddingModels, initialEmbeddingModel, selectedEmbeddingModel],
+  );
+
+  const selectedEmbeddingDownloaded = useMemo(() => {
+    const target = String(selectedEmbeddingModel || "")
+      .trim()
+      .toLowerCase();
+    if (!target) {
+      return false;
+    }
+
+    if (downloadedEmbeddingHints.some((item) => item.toLowerCase() === target)) {
+      return true;
+    }
+
+    return modelCatalog.some((item) => {
+      const catalogName = String(item?.name || "")
+        .trim()
+        .toLowerCase();
+      if (!catalogName.startsWith(target)) {
+        return false;
+      }
+
+      if (item.source === "cloud") {
+        return false;
+      }
+
+      return item.running || item.installed || !item.needsDownload;
+    });
+  }, [selectedEmbeddingModel, downloadedEmbeddingHints, modelCatalog]);
+
   function formatSize(bytes?: number): string {
     if (!bytes || bytes <= 0) {
       return "";
@@ -204,6 +298,11 @@ export function LLMConfigDialog({
     setRegisterMessage("");
   }
 
+  function openEmbeddingRegisterForm() {
+    setShowEmbeddingRegisterForm(true);
+    setEmbeddingRegisterName("");
+  }
+
   async function handleRegisterModel() {
     const nextName = registerName.trim();
     if (!nextName || !registerSource) {
@@ -222,6 +321,64 @@ export function LLMConfigDialog({
     } catch (error: any) {
       setRegisterMessage(String(error?.message || "Falha ao cadastrar ou verificar o modelo."));
       setRegisterStep("error");
+    }
+  }
+
+  function handleAddEmbeddingModel() {
+    const nextName = embeddingRegisterName.trim();
+    if (!nextName) {
+      return;
+    }
+
+    setCustomEmbeddingModels((prev) => normalizeUniqueNames([...prev, nextName]));
+    setSelectedEmbeddingModel(nextName);
+    setShowEmbeddingRegisterForm(false);
+    setEmbeddingRegisterName("");
+  }
+
+  async function handleDownloadEmbeddingModel() {
+    const nextModel = selectedEmbeddingModel.trim();
+    if (!nextModel) {
+      return;
+    }
+
+    setIsDownloadingEmbedding(true);
+    try {
+      const response = await fetch("http://localhost:11434/api/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: nextModel,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let detail = text.trim();
+
+        if (text) {
+          try {
+            const payload = JSON.parse(text) as {
+              error?: unknown;
+              message?: unknown;
+              detail?: unknown;
+            };
+            detail = String(payload.error || payload.message || payload.detail || text).trim();
+          } catch {
+            detail = text.trim();
+          }
+        }
+
+        throw new Error(detail || `Falha ao baixar modelo (${response.status}).`);
+      }
+
+      setDownloadedEmbeddingHints((prev) => normalizeUniqueNames([...prev, nextModel]));
+      await onRefreshModels();
+    } catch (error: any) {
+      alert(String(error?.message || "Falha ao baixar o modelo de embedding."));
+    } finally {
+      setIsDownloadingEmbedding(false);
     }
   }
 
@@ -338,6 +495,12 @@ export function LLMConfigDialog({
       setModel(modelOptions[0]);
     }
   }, [model, modelOptions]);
+
+  useEffect(() => {
+    if (!selectedEmbeddingModel && embeddingModelOptions.length > 0) {
+      setSelectedEmbeddingModel(embeddingModelOptions[0]);
+    }
+  }, [selectedEmbeddingModel, embeddingModelOptions]);
 
   return (
     <div className="dialog-overlay" onClick={onCancel}>
@@ -645,6 +808,129 @@ export function LLMConfigDialog({
             )}
           </div>
 
+          <div style={{ marginBottom: "14px" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "8px",
+                gap: "8px",
+              }}
+            >
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Modelo de Embedding
+              </label>
+              {!selectedEmbeddingDownloaded && (
+                <span style={{ fontSize: "12px", color: "var(--warning)", fontWeight: 600 }}>
+                  Modelo não baixado
+                </span>
+              )}
+            </div>
+
+            <AppSelect
+              value={selectedEmbeddingModel}
+              onChange={(event) => setSelectedEmbeddingModel(event.target.value)}
+              fullWidth
+              style={{
+                padding: "10px",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+                backgroundColor: "var(--bg-contrast)",
+                color: "var(--ink)",
+              }}
+            >
+              {embeddingModelOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </AppSelect>
+
+            <div
+              style={{
+                marginTop: "8px",
+                display: "flex",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {!selectedEmbeddingDownloaded && (
+                <AppButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void handleDownloadEmbeddingModel()}
+                  disabled={isDownloadingEmbedding || !selectedEmbeddingModel.trim()}
+                  style={{ padding: "8px 12px", fontSize: "12px" }}
+                >
+                  {isDownloadingEmbedding ? "Baixando..." : "Baixar modelo"}
+                </AppButton>
+              )}
+              <AppButton
+                type="button"
+                variant="primary"
+                onClick={openEmbeddingRegisterForm}
+                style={{ padding: "8px 12px", fontSize: "12px" }}
+              >
+                Adicionar modelo
+              </AppButton>
+            </div>
+
+            {showEmbeddingRegisterForm && (
+              <div
+                style={{
+                  marginTop: "10px",
+                  border: "1px solid var(--border)",
+                  borderRadius: "10px",
+                  padding: "12px",
+                  background: "var(--panel)",
+                }}
+              >
+                <p style={{ margin: "0 0 10px", fontSize: "12px", color: "var(--muted)" }}>
+                  Informe o nome exato do modelo de embedding para adicionar na lista.
+                </p>
+                <AppInput
+                  value={embeddingRegisterName}
+                  onChange={(event) => setEmbeddingRegisterName(event.target.value)}
+                  placeholder="Ex: nomic-embed-text"
+                  fullWidth
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "8px",
+                    marginTop: "10px",
+                  }}
+                >
+                  <AppButton
+                    type="button"
+                    variant="primary"
+                    onClick={() => setShowEmbeddingRegisterForm(false)}
+                  >
+                    Cancelar
+                  </AppButton>
+                  <AppButton
+                    type="button"
+                    variant="secondary"
+                    disabled={!embeddingRegisterName.trim()}
+                    onClick={handleAddEmbeddingModel}
+                  >
+                    Adicionar modelo
+                  </AppButton>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ marginBottom: "12px" }}>
             <div
               style={{
@@ -732,8 +1018,8 @@ export function LLMConfigDialog({
               Resetar prompt
             </AppButton>
             <AppButton
-              onClick={() => onSave(model, prompt)}
-              disabled={action.busy || !model}
+              onClick={() => onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels)}
+              disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
               variant="secondary"
               style={{
                 padding: "10px 20px",

@@ -239,6 +239,10 @@ export function semanticBlocksPath(jobId: string): string {
   return path.join(ensureJobDir(jobId), "semantic.blocks.json");
 }
 
+export function topicSegmentsPath(jobId: string): string {
+  return path.join(ensureJobDir(jobId), "topic.segments.json");
+}
+
 export function cutsPath(jobId: string): string {
   return path.join(ensureJobDir(jobId), "cuts.suggested.json");
 }

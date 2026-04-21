@@ -185,7 +185,7 @@ async function processBatchPipeline(
         progress.current_step = "analysis";
         console.log(`[batch] [${jobId}] Starting analysis...`);
 
-        const analysisResult = await analyzeBlocks(jobId);
+        const analysisResult = await analyzeBlocks(jobId, job.video_duration_seconds ?? 0);
         console.log(`[batch] [${jobId}] Analysis completed`);
 
         // If preApprove is enabled, wait for user approval

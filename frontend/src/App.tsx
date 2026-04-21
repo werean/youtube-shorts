@@ -240,6 +240,8 @@ export default function App() {
   const [batchWaitingForApproval, setBatchWaitingForApproval] = useState(false);
   const [batchPendingCuts, setBatchPendingCuts] = useState<any[]>([]);
   const [llmModel, setLlmModel] = useState<string>("");
+  const [embeddingModel, setEmbeddingModel] = useState<string>("nomic-embed-text");
+  const [registeredEmbeddingModels, setRegisteredEmbeddingModels] = useState<string[]>([]);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [ollamaModelCatalog, setOllamaModelCatalog] = useState<OllamaModelCatalogItem[]>([]);
   const [ollamaLocalAvailable, setOllamaLocalAvailable] = useState(false);
@@ -1601,7 +1603,20 @@ export default function App() {
     setWhisperFormats(formats);
     setFfmpegConfig(active.ffmpeg || null);
     const configuredModel = String(active.llm.model || "").trim();
+    const configuredEmbeddingModel =
+      String(active.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
+    const configuredEmbeddingModels = Array.isArray(active.llm.registered_embedding_models)
+      ? active.llm.registered_embedding_models
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+      : [];
+
+    const embeddingModelSet = new Set(configuredEmbeddingModels);
+    embeddingModelSet.add(configuredEmbeddingModel);
+
     setLlmModel(configuredModel);
+    setEmbeddingModel(configuredEmbeddingModel);
+    setRegisteredEmbeddingModels(Array.from(embeddingModelSet));
     setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
     setLlmSystemPrompt(active.llm.system_prompt || "");
   }
@@ -1627,12 +1642,19 @@ export default function App() {
     }
   }
 
-  async function saveLLMConfig(model: string, prompt: string) {
+  async function saveLLMConfig(
+    model: string,
+    prompt: string,
+    nextEmbeddingModel: string,
+    nextRegisteredEmbeddingModels: string[],
+  ) {
     try {
       const response = await saveToolConfigs({
         llm: {
           model,
           system_prompt: prompt,
+          embedding_model: nextEmbeddingModel,
+          registered_embedding_models: nextRegisteredEmbeddingModels,
         },
       });
       applyToolConfigs(response);
@@ -2068,11 +2090,16 @@ export default function App() {
                             return startTranscriptionFlow();
                           }}
                         >
-                          {activeVideo.isTranscribing
-                            ? "Transcrevendo..."
-                            : hasAnyTranscription
-                              ? "Gerar nova transcrição"
-                              : "Transcrever"}
+                          {activeVideo.isTranscribing ? (
+                            <span className="config-card-button-content">
+                              <span className="button-spinner" aria-hidden="true" />
+                              <span>Transcrevendo...</span>
+                            </span>
+                          ) : hasAnyTranscription ? (
+                            "Gerar nova transcrição"
+                          ) : (
+                            "Transcrever"
+                          )}
                         </button>
                       </ActionCard>
                       <ActionCard description="Abre a transcrição nos formatos disponíveis.">
@@ -2132,11 +2159,16 @@ export default function App() {
                             );
                           }}
                         >
-                          {isAnalyzing
-                            ? "Analisando..."
-                            : suggestedCuts.length > 0
-                              ? "Gerar nova análise"
-                              : "Análise"}
+                          {isAnalyzing ? (
+                            <span className="config-card-button-content">
+                              <span className="button-spinner" aria-hidden="true" />
+                              <span>Analisando...</span>
+                            </span>
+                          ) : suggestedCuts.length > 0 ? (
+                            "Gerar nova análise"
+                          ) : (
+                            "Análise"
+                          )}
                         </button>
                         <p className="config-card-description">
                           Analisa com IA para encontrar hooks.
@@ -2183,7 +2215,14 @@ export default function App() {
                             });
                           }}
                         >
-                          {isRendering ? "Renderizando..." : "Renderizar"}
+                          {isRendering ? (
+                            <span className="config-card-button-content">
+                              <span className="button-spinner" aria-hidden="true" />
+                              <span>Renderizando...</span>
+                            </span>
+                          ) : (
+                            "Renderizar"
+                          )}
                         </button>
                         {isRendering && (
                           <p
@@ -2509,8 +2548,8 @@ export default function App() {
               começar rápido e gerar seus primeiros cortes, siga este fluxo:
             </p>
             <p style={{ margin: 0 }}>
-              1. Abra "Gerenciar dependências" e confirme que Python, Whisper, FFmpeg e Ollama
-              estão instalados. Se faltar algo, use a instalação automática.
+              1. Abra "Gerenciar dependências" e confirme que Python, Whisper, FFmpeg e Ollama estão
+              instalados. Se faltar algo, use a instalação automática.
             </p>
             <p style={{ margin: 0 }}>
               2. Faça login no Ollama se for usar modelo cloud. Sem login, a análise por IA pode
@@ -2827,6 +2866,8 @@ export default function App() {
       {showLLMConfigDialog && (
         <LLMConfigDialog
           llmModel={llmModel}
+          embeddingModel={embeddingModel}
+          registeredEmbeddingModels={registeredEmbeddingModels}
           availableModels={ollamaModels}
           modelCatalog={ollamaModelCatalog}
           localAvailable={ollamaLocalAvailable}
@@ -2836,10 +2877,12 @@ export default function App() {
           onRegisterModel={registerNewOllamaModel}
           onRemoveModel={removeRegisteredOllamaModel}
           onRefreshModels={() => refreshOllamaModelOptions(true)}
-          onSave={(model, prompt) => {
+          onSave={(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels) => {
             setLlmModel(model);
             setLlmSystemPrompt(prompt);
-            void saveLLMConfig(model, prompt);
+            setEmbeddingModel(nextEmbeddingModel);
+            setRegisteredEmbeddingModels(nextRegisteredEmbeddingModels);
+            void saveLLMConfig(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels);
           }}
           onCancel={() => setShowLLMConfigDialog(false)}
         />
