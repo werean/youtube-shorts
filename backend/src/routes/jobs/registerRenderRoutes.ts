@@ -4,8 +4,8 @@
 
 import type { FastifyInstance } from "fastify";
 import * as rendering from "../../pipeline/rendering";
-import { deleteRenderOutputFile, openRenderOutputFolder } from "./render/outputs";
-import { startRenderInBackground } from "./render/tasks";
+import { deleteRenderOutputFile, openRenderOutputFolder } from "../../features/jobs/render/outputs";
+import { startRenderInBackground } from "../../features/jobs/render/tasks";
 
 export function registerRenderRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/render", async (request, reply) => {

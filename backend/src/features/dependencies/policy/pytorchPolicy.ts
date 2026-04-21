@@ -1,4 +1,4 @@
-import type { PytorchGpuTier } from "./dependencyTypes";
+import type { PytorchGpuTier } from "../shared/dependencyTypes";
 
 export function parsePytorchGpuTier(value: unknown): PytorchGpuTier | null {
   if (value === "rtx_4000_or_lower" || value === "rtx_5000") {

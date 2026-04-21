@@ -3,8 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
+import { renameJobVideo } from "../../features/jobs/rename/renameJob";
 
 export function registerRenameRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string }; Body: { new_name: string } }>(
@@ -18,14 +17,11 @@ export function registerRenameRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ detail: "new_name is required" });
         }
 
-        console.log(`[jobs] Renaming job ${job_id} to "${new_name}"`);
-        const success = files.renameVideo(job_id, new_name.trim());
-
-        if (!success) {
+        const job = renameJobVideo(job_id, new_name.trim());
+        if (!job) {
           return reply.code(500).send({ detail: "Failed to rename video" });
         }
 
-        const job = metadata.loadJob(job_id);
         return job;
       } catch (error: any) {
         reply.code(500).send({ detail: error.message });

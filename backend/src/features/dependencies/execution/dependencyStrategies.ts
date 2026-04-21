@@ -1,4 +1,4 @@
-import type { InstallStrategy, PythonRuntime } from "./dependencyTypes";
+import type { InstallStrategy, PythonRuntime } from "../shared/dependencyTypes";
 
 export function buildInstallStrategies(
   name: string,

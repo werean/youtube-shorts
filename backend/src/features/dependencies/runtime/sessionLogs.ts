@@ -1,5 +1,5 @@
-import { MAX_SESSION_LOG_LINES } from "./dependencyTypes";
-import type { DependencyInstallSession } from "./dependencyTypes";
+import { MAX_SESSION_LOG_LINES } from "../shared/dependencyTypes";
+import type { DependencyInstallSession } from "../shared/dependencyTypes";
 
 export function nowIsoTimestamp(): string {
   return new Date().toISOString();

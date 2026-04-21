@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "child_process";
-import { MAX_OUTPUT_LEN } from "./dependencyTypes";
-import type { CommandExecutionControl, CommandResult } from "./dependencyTypes";
+import { MAX_OUTPUT_LEN } from "../shared/dependencyTypes";
+import type { CommandExecutionControl, CommandResult } from "../shared/dependencyTypes";
 
 export function trimOutput(value: string): string {
   if (value.length <= MAX_OUTPUT_LEN) {

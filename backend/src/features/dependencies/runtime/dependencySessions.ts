@@ -1,12 +1,12 @@
 import { randomUUID } from "crypto";
-import { SESSION_TTL_MS } from "./dependencyTypes";
-import { performDependencyInstall, performDependencyUninstall } from "./dependencyExecution";
-import { appendSessionLog, nowIsoTimestamp } from "./dependencySessionLogs";
+import { SESSION_TTL_MS } from "../shared/dependencyTypes";
+import { performDependencyInstall, performDependencyUninstall } from "../execution/dependencyExecution";
+import { appendSessionLog, nowIsoTimestamp } from "./sessionLogs";
 import type {
   DependencyInstallOptions,
   DependencyInstallSession,
   DependencySessionControl,
-} from "./dependencyTypes";
+} from "../shared/dependencyTypes";
 
 const dependencyInstallSessions = new Map<string, DependencyInstallSession>();
 const dependencySessionControls = new Map<string, DependencySessionControl>();

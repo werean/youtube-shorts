@@ -3,9 +3,13 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { processBatchPipeline } from "./batch/runner";
-import { createBatchProgress, getBatchProgress, markBatchNotRunning } from "./batch/state";
-import type { BatchPipelineRequest } from "./batch/types";
+import { processBatchPipeline } from "../../features/jobs/batch/runner";
+import {
+  createBatchProgress,
+  getBatchProgress,
+  markBatchNotRunning,
+} from "../../features/jobs/batch/state";
+import type { BatchPipelineRequest } from "../../features/jobs/batch/types";
 
 export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
   // Start batch pipeline

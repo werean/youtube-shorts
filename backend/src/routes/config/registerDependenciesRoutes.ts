@@ -4,24 +4,27 @@
 
 import type { FastifyInstance } from "fastify";
 import { INSTALLATION_GUIDES } from "../../config/installer";
-import { snapshotDependencies } from "./dependencies/dependencyDetection";
+import { snapshotDependencies } from "../../features/dependencies/detection/dependencyDetection";
 import {
   performDependencyInstall,
   performDependencyUninstall,
-} from "./dependencies/dependencyExecution";
-import { parsePytorchGpuTier } from "./dependencies/dependencyPytorchPolicy";
+} from "../../features/dependencies/execution/dependencyExecution";
+import { parsePytorchGpuTier } from "../../features/dependencies/policy/pytorchPolicy";
 import {
   cancelDependencyInstallSession,
   cleanupInstallSessions,
   getDependencyInstallSessionPayload,
   startDependencyInstallSession,
   startDependencyUninstallSession,
-} from "./dependencies/dependencySessions";
+} from "../../features/dependencies/runtime/dependencySessions";
 import {
   getDependencyTerminalCommand,
   openSystemTerminal,
-} from "./dependencies/dependencyTerminal";
-import type { DependencyInstallOptions, DependencyOperationMode } from "./dependencies/dependencyTypes";
+} from "../../features/dependencies/terminal/dependencyTerminal";
+import type {
+  DependencyInstallOptions,
+  DependencyOperationMode,
+} from "../../features/dependencies/shared/dependencyTypes";
 
 const PYTORCH_GPU_TIER_REQUIRED_MESSAGE =
   "Selecione o tipo de GPU (RTX 4000 ou inferior / RTX 5000) antes de instalar o PyTorch automaticamente.";

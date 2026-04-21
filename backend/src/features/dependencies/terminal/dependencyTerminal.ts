@@ -1,21 +1,25 @@
 import { spawn } from "child_process";
 
 import { INSTALLATION_GUIDES } from "../../../config/installer";
-import { snapshotDependencies } from "./dependencyDetection";
+import { snapshotDependencies } from "../detection/dependencyDetection";
 import {
   buildPytorchCudaValidationArgs,
   buildPytorchPipInstallArgs,
   buildPytorchPipUninstallArgs,
   expectedCudaPrefixForPytorchTier,
-} from "./dependencyPytorchPolicy";
-import { buildInstallStrategies, buildUninstallStrategies, strategyToCommand } from "./dependencyStrategies";
+} from "../policy/pytorchPolicy";
+import {
+  buildInstallStrategies,
+  buildUninstallStrategies,
+  strategyToCommand,
+} from "../execution/dependencyStrategies";
 import type {
   DependencyInstallOptions,
   DependencyOperationMode,
   InstallStrategy,
   PythonRuntime,
   PytorchGpuTier,
-} from "./dependencyTypes";
+} from "../shared/dependencyTypes";
 
 function buildPytorchTerminalInstallScript(runtime: PythonRuntime, tier: PytorchGpuTier): string {
   const expectedCudaPrefix = expectedCudaPrefixForPytorchTier(tier);
