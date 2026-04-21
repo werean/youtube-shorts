@@ -4,6 +4,7 @@ export type JobStatus =
   | "DOWNLOADED"
   | "TRANSCRIBING"
   | "BUILDING_BLOCKS"
+  | "BUILDING_TOPICS"
   | "ANALYZING"
   | "WAITING_APPROVAL"
   | "RENDERING"

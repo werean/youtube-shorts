@@ -7,7 +7,7 @@ import * as fs from "fs";
 import * as metadata from "../../storage/metadata";
 import * as files from "../../storage/files";
 import { transcribeJob } from "../../pipeline/transcription";
-import { buildSemanticBlocks } from "../../pipeline/semantic_blocks";
+import { buildSemanticBlocksForAnalysis } from "../../pipeline/analysis_prerequisites";
 import { analyzeBlocks } from "../../pipeline/analysis";
 import { renderSuggestedCuts } from "../../pipeline/rendering";
 import { JobStatus } from "../../models/job";
@@ -176,7 +176,7 @@ async function processBatchPipeline(
         progress.current_step = "semantic_blocks";
         console.log(`[batch] [${jobId}] Building semantic blocks...`);
 
-        await buildSemanticBlocks(jobId);
+        await buildSemanticBlocksForAnalysis(jobId);
         console.log(`[batch] [${jobId}] Semantic blocks completed`);
       }
 

@@ -6,12 +6,12 @@ import { Job, JobStatus } from "../models/job";
 import * as metadata from "../storage/metadata";
 import { ingestVideo } from "./ingest";
 import { transcribeJob } from "./transcription";
-import { buildSemanticBlocks } from "./semantic_blocks";
-import { buildTopicSegments } from "./topic_segmentation";
+import {
+  buildSemanticBlocksForAnalysis,
+  buildTopicSegmentsForAnalysis,
+} from "./analysis_prerequisites";
 import { analyzeBlocks } from "./analysis";
 import { renderSuggestedCuts } from "./rendering";
-import { selectStrategy } from "./strategy";
-import { loadActiveToolConfigs } from "../core/toolConfigs";
 
 type Step = [JobStatus, (job: Job) => Promise<any> | any];
 
@@ -38,17 +38,8 @@ export async function runPipeline(
   const steps: Step[] = [
     [JobStatus.DOWNLOADING, async (job: Job) => ingestVideo(job)],
     [JobStatus.TRANSCRIBING, (job: Job) => transcribeJob(job.job_id)],
-    [JobStatus.BUILDING_BLOCKS, (job: Job) => buildSemanticBlocks(job.job_id)],
-    [
-      JobStatus.BUILDING_TOPICS,
-      (job: Job) => {
-        const strategy = selectStrategy(job.video_duration_seconds ?? 0);
-        const configs = loadActiveToolConfigs();
-        const embeddingModel =
-          String(configs.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
-        return buildTopicSegments(job.job_id, strategy.useEmbeddings, embeddingModel);
-      },
-    ],
+    [JobStatus.BUILDING_BLOCKS, (job: Job) => buildSemanticBlocksForAnalysis(job.job_id)],
+    [JobStatus.BUILDING_TOPICS, (job: Job) => buildTopicSegmentsForAnalysis(job)],
     [JobStatus.ANALYZING, (job: Job) => analyzeBlocks(job.job_id, job.video_duration_seconds ?? 0)],
   ];
 

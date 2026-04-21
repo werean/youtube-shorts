@@ -52,6 +52,7 @@ mock.module("../../../src/storage/metadata", () => ({
 
 mock.module("../../../src/storage/files", () => ({
   cutsPath: canonicalCutsPath,
+  semanticBlocksPath: () => "unused-semantic-blocks-path.json",
 }));
 
 mock.module("../../../src/pipeline/transcription", () => ({
