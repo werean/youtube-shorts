@@ -1,7 +1,7 @@
-import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { IngestResult } from "./types";
 
 export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult | null {
@@ -16,7 +16,11 @@ export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult
   }
 
   console.log(`[ingest] ✓ Video já existe, pulando download...`);
-  appendTaskLog(job.job_id, "ingest", "[ingest] Video already exists. Skipping download.");
+  operationRuntimeService.appendTaskLog(
+    job.job_id,
+    "ingest",
+    "[ingest] Video already exists. Skipping download.",
+  );
   const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
   updatedJob.status = JobStatus.DOWNLOADED;

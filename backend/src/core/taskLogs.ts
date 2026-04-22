@@ -2,7 +2,7 @@
  * In-memory task logs for transcription and rendering.
  */
 
-type TaskName = "transcription" | "render" | "ingest";
+export type TaskName = "transcription" | "render" | "ingest";
 
 type TaskLogStore = {
   transcription: string[];

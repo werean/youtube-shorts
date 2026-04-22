@@ -1,9 +1,8 @@
-import { appendTaskLog, appendTaskLogs } from "../../core/taskLogs";
 import type { FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { runFfmpegAsync } from "../../video/ffmpeg";
 import { buildRenderCommand } from "./commands";
-import { isRenderingCancelled, trackChildProcess } from "./state";
 
 export async function runWithConcurrency(
   tasks: Array<() => Promise<void>>,
@@ -39,14 +38,14 @@ export async function renderCut(params: {
   ffmpegConfig: FFmpegToolConfig;
   orderedOutputs: string[];
 }): Promise<void> {
-  if (isRenderingCancelled(params.jobId)) {
+  if (operationRuntimeService.isRenderingCancelled(params.jobId)) {
     return;
   }
 
   console.log(
     `[rendering] Rendering cut ${params.cut.cut_id} (${params.cut.start.toFixed(2)}s-${params.cut.end.toFixed(2)}s)`,
   );
-  appendTaskLog(
+  operationRuntimeService.appendTaskLog(
     params.jobId,
     "render",
     `[rendering] Cut ${params.cut.cut_id} ${params.cut.start.toFixed(2)}-${params.cut.end.toFixed(2)}`,
@@ -59,20 +58,24 @@ export async function renderCut(params: {
     ffmpegConfig: params.ffmpegConfig,
   });
 
-  appendTaskLog(params.jobId, "render", `[rendering] Command: ${command.join(" ")}`);
+  operationRuntimeService.appendTaskLog(
+    params.jobId,
+    "render",
+    `[rendering] Command: ${command.join(" ")}`,
+  );
 
   try {
     await runFfmpegAsync(
       command,
       (lines) => {
-        appendTaskLogs(params.jobId, "render", lines);
+        operationRuntimeService.appendTaskLogs(params.jobId, "render", lines);
       },
       (child) => {
-        trackChildProcess(params.jobId, child);
+        operationRuntimeService.trackChildProcess(params.jobId, child);
       },
     );
   } catch (error) {
-    if (isRenderingCancelled(params.jobId)) {
+    if (operationRuntimeService.isRenderingCancelled(params.jobId)) {
       return;
     }
     throw error;

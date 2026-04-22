@@ -1,9 +1,8 @@
 import { config } from "../../core/config";
-import { appendTaskLog, appendTaskLogs, clearTaskLogs } from "../../core/taskLogs";
 import { JobStatus } from "../../models/job";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import { activeTranscriptionJobIds } from "./process";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 
 export type PreparedTranscriptionSource = {
   videoPath: string;
@@ -11,22 +10,22 @@ export type PreparedTranscriptionSource = {
 };
 
 export function ensureTranscriptionCanStart(jobId: string): void {
-  const activeJobIds = activeTranscriptionJobIds();
+  const activeJobIds = operationRuntimeService.activeTranscriptionJobIds();
   if (activeJobIds.length > 0 && !activeJobIds.includes(jobId)) {
     const errorMsg = `Transcrição já em andamento para outro vídeo (${activeJobIds[0]}). Cancele a transcrição anterior para começar uma nova.`;
     console.error(`[transcription] ✗ ${errorMsg}`);
-    appendTaskLog(jobId, "transcription", `[transcription] ✗ ${errorMsg}`);
+    operationRuntimeService.appendTaskLog(jobId, "transcription", `[transcription] ✗ ${errorMsg}`);
     throw new Error(errorMsg);
   }
 }
 
 export function prepareTranscriptionSource(jobId: string): PreparedTranscriptionSource {
-  clearTaskLogs(jobId, "render");
-  clearTaskLogs(jobId, "transcription");
+  operationRuntimeService.clearTaskLogs(jobId, "render");
+  operationRuntimeService.clearTaskLogs(jobId, "transcription");
   console.log(`\n[transcription] ============================================`);
   console.log(`[transcription] Starting transcription for job ${jobId}`);
   console.log(`[transcription] ============================================`);
-  appendTaskLog(jobId, "transcription", "[transcription] Starting transcription");
+  operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Starting transcription");
   jobLifecycleService.updateJobStatus(jobId, JobStatus.TRANSCRIBING);
 
   console.log(`[transcription] Procurando arquivo de vídeo...`);
@@ -41,11 +40,11 @@ export function prepareTranscriptionSource(jobId: string): PreparedTranscription
   }
 
   console.log(`[transcription] ✓ Usando arquivo: ${videoPath}`);
-  appendTaskLog(jobId, "transcription", `[transcription] Using file: ${videoPath}`);
+  operationRuntimeService.appendTaskLog(jobId, "transcription", `[transcription] Using file: ${videoPath}`);
 
   const clearedDir = artifactService.removeTranscriptionsJobDir(jobId);
   console.log(`[transcription] 🧹 Limpando pasta de transcrição: ${clearedDir}`);
-  appendTaskLog(jobId, "transcription", `[transcription] Cleared dir: ${clearedDir}`);
+  operationRuntimeService.appendTaskLog(jobId, "transcription", `[transcription] Cleared dir: ${clearedDir}`);
 
   const tempDir = artifactService.ensureTranscriptionsJobDir(jobId);
 
@@ -53,7 +52,7 @@ export function prepareTranscriptionSource(jobId: string): PreparedTranscription
   console.log(`[transcription] 🎤 Modelo Whisper: ${config.WHISPER_MODEL_NAME}`);
   console.log(`[transcription] 🎬 Vídeo de entrada: ${videoPath}`);
   console.log(`[transcription] 🎯 Iniciando transcrição com Whisper...`);
-  appendTaskLogs(jobId, "transcription", [
+  operationRuntimeService.appendTaskLogs(jobId, "transcription", [
     `[transcription] Output dir: ${tempDir}`,
     `[transcription] Input: ${videoPath}`,
   ]);

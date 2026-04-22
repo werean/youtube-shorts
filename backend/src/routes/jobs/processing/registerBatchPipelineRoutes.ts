@@ -4,11 +4,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { processBatchPipeline } from "../../../features/jobs/batch/runner";
-import {
-  createBatchProgress,
-  getBatchProgress,
-  markBatchNotRunning,
-} from "../../../features/jobs/batch/state";
+import * as operationRuntimeService from "../../../services/operationRuntimeService";
 import type { BatchPipelineRequest } from "../../../features/jobs/batch/types";
 
 export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
@@ -25,12 +21,12 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
       console.log(`[batch] Options:`, options);
 
       const batchId = `batch_${Date.now()}`;
-      createBatchProgress(batchId, job_ids);
+      operationRuntimeService.createBatchProgress(batchId, job_ids);
 
       // Start processing in background
       processBatchPipeline(batchId, job_ids, options).catch((error) => {
         console.error(`[batch] Fatal error in batch ${batchId}:`, error);
-        markBatchNotRunning(batchId);
+        operationRuntimeService.markBatchNotRunning(batchId);
       });
 
       return { batch_id: batchId, status: "started" };
@@ -45,7 +41,7 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
     "/batch/:batch_id/status",
     async (request, reply) => {
       const { batch_id } = request.params;
-      const progress = getBatchProgress(batch_id);
+      const progress = operationRuntimeService.getBatchProgress(batch_id);
 
       if (!progress) {
         return reply.code(404).send({ detail: "Batch process not found" });
@@ -60,7 +56,7 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
     "/batch/:batch_id/cancel",
     async (request, reply) => {
       const { batch_id } = request.params;
-      const progress = getBatchProgress(batch_id);
+      const progress = operationRuntimeService.getBatchProgress(batch_id);
 
       if (!progress) {
         return reply.code(404).send({ detail: "Batch process not found" });
@@ -78,7 +74,7 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
     "/batch/:batch_id/continue",
     async (request, reply) => {
       const { batch_id } = request.params;
-      const progress = getBatchProgress(batch_id);
+      const progress = operationRuntimeService.getBatchProgress(batch_id);
 
       if (!progress) {
         return reply.code(404).send({ detail: "Batch process not found" });

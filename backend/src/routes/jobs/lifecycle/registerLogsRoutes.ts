@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { getTaskLogs } from "../../../core/taskLogs";
+import * as operationRuntimeService from "../../../services/operationRuntimeService";
 
 export function registerLogsRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { job_id: string; task: string } }>(
@@ -14,7 +14,7 @@ export function registerLogsRoutes(fastify: FastifyInstance) {
         if (task !== "transcription" && task !== "render" && task !== "ingest") {
           return reply.code(400).send({ detail: "Invalid task" });
         }
-        const logs = getTaskLogs(job_id, task);
+        const logs = operationRuntimeService.getTaskLogs(job_id, task);
         return { task, logs };
       } catch (error: any) {
         reply.code(500).send({ detail: error.message });

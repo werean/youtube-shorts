@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getVideoDir } from "../../core/settings";
-import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { IngestResult } from "./types";
 
 export function handleDownloadedArtifacts(
@@ -22,7 +22,7 @@ export function handleDownloadedArtifacts(
 
   let downloadedPath = path.join(outputDir, downloadedFile);
   console.log(`[ingest] ✓ Arquivo baixado: ${downloadedFile}`);
-  appendTaskLog(job.job_id, "ingest", `[ingest] File: ${downloadedFile}`);
+  operationRuntimeService.appendTaskLog(job.job_id, "ingest", `[ingest] File: ${downloadedFile}`);
 
   const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
@@ -59,7 +59,7 @@ export function handleDownloadedArtifacts(
 
   console.log(`[ingest] ✓ Video pronto para reprodução: ${downloadedFile}`);
   console.log(`[ingest] ============================================\n`);
-  appendTaskLog(job.job_id, "ingest", "[ingest] Video ready for playback");
+  operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Video ready for playback");
 
   return {
     video_path: downloadedPath,

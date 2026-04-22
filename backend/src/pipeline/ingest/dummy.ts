@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getVideoDir, getVideoFilePath } from "../../core/settings";
-import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { createDummyMP4 } from "../../utils/mp4";
 import { IngestResult } from "./types";
 
@@ -14,7 +14,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
   let dummyPath = artifactService.sourceVideoPathForJob(job.job_id, "mp4");
   fs.writeFileSync(dummyPath, mp4Buffer);
   console.log(`[ingest] ✓ Vídeo dummy criado em: ${dummyPath} (${mp4Buffer.length} bytes)`);
-  appendTaskLog(job.job_id, "ingest", "[ingest] Dummy video created");
+  operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Dummy video created");
 
   // Criar info JSON também
   const infoData = {
@@ -25,7 +25,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
   };
   artifactService.writeJsonArtifact(infoPath, infoData);
   console.log(`[ingest] ✓ Info JSON criado em: ${infoPath}`);
-  appendTaskLog(job.job_id, "ingest", "[ingest] Info JSON created");
+  operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Info JSON created");
 
   const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
@@ -43,7 +43,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
   jobLifecycleService.saveJob(updatedJob);
 
   console.log(`[ingest] ============================================\n`);
-  appendTaskLog(job.job_id, "ingest", "[ingest] Dummy flow completed");
+  operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Dummy flow completed");
 
   return {
     video_path: dummyPath,

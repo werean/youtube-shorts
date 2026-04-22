@@ -2,11 +2,11 @@
  * Pipeline step: transcribe audio with Whisper (local installation).
  */
 
-import { appendTaskLog, appendTaskLogs } from "../core/taskLogs";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
 import { JobStatus } from "../models/job";
 import { Segment } from "../models/segment";
 import * as jobLifecycleService from "../services/jobLifecycleService";
+import * as operationRuntimeService from "../services/operationRuntimeService";
 import {
   readWhisperSegments,
   type TranscriptionFormats,
@@ -15,25 +15,26 @@ import {
   writeTranscriptionSegments,
 } from "./transcription/artifacts";
 import { buildWhisperCommand, resolveTranscriptionFormats } from "./transcription/command";
-import {
-  cancelActiveTranscriptionProcess,
-  runWhisperProcess,
-} from "./transcription/process";
+import { runWhisperProcess } from "./transcription/process";
 import {
   ensureTranscriptionCanStart,
   prepareTranscriptionSource,
 } from "./transcription/preconditions";
 
 export function cancelTranscription(jobId: string): boolean {
-  const cancelled = cancelActiveTranscriptionProcess(jobId, () =>
-    appendTaskLog(jobId, "transcription", "[transcription] Cancel requested"),
+  const cancelled = operationRuntimeService.cancelActiveTranscriptionProcess(jobId, () =>
+    operationRuntimeService.appendTaskLog(
+      jobId,
+      "transcription",
+      "[transcription] Cancel requested",
+    ),
   );
   if (!cancelled) {
     return false;
   }
 
   jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
-  appendTaskLog(jobId, "transcription", "[transcription] Cancelled");
+  operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Cancelled");
   return true;
 }
 
@@ -51,12 +52,16 @@ export async function transcribeJob(
 
     const command = buildWhisperCommand(videoPath, tempDir, toolConfigs);
     console.log(`[transcription] 💻 Command: ${command}`);
-    appendTaskLog(jobId, "transcription", `[transcription] Command: ${command}`);
+    operationRuntimeService.appendTaskLog(jobId, "transcription", `[transcription] Command: ${command}`);
 
     console.log(`[transcription] ⏳ Executando Whisper com ${device.toUpperCase()}...`);
     await runWhisperProcess(jobId, command);
     console.log(`[transcription] ✓ Whisper completado com sucesso`);
-    appendTaskLog(jobId, "transcription", "[transcription] Whisper completed successfully");
+    operationRuntimeService.appendTaskLog(
+      jobId,
+      "transcription",
+      "[transcription] Whisper completed successfully",
+    );
 
     // Verificar arquivo de saída
     const outputPath = whisperOutputPath(videoPath, tempDir);
@@ -66,7 +71,7 @@ export async function transcribeJob(
 
     writeTranscriptionSegments(jobId, segments);
     console.log(`[transcription] ✓ Transcription saved for job ${jobId}`);
-    appendTaskLog(jobId, "transcription", "[transcription] Transcription saved");
+    operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Transcription saved");
     writeTranscriptionArtifacts(jobId, segments, formats);
 
     const job = jobLifecycleService.loadJob(jobId);
@@ -83,7 +88,7 @@ export async function transcribeJob(
     console.error(`[transcription] ✗ Mensagem: ${error.message}`);
     console.error(`[transcription] ✗ Código: ${error.code}`);
     console.error(`[transcription] ✗ Stack: ${error.stack}`);
-    appendTaskLogs(jobId, "transcription", [
+    operationRuntimeService.appendTaskLogs(jobId, "transcription", [
       "[transcription] ERROR executing Whisper",
       `[transcription] ${error.message}`,
     ]);
@@ -95,7 +100,7 @@ export async function transcribeJob(
         `[transcription] 🎯 Parece que o Whisper não está instalado ou não foi encontrado no PATH`,
       );
       console.error(`[transcription] Tente instalar com: pip install openai-whisper`);
-      appendTaskLog(
+      operationRuntimeService.appendTaskLog(
         jobId,
         "transcription",
         "[transcription] Whisper not found. Install with: pip install openai-whisper",

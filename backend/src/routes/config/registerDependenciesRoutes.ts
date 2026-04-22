@@ -10,13 +10,7 @@ import {
   performDependencyUninstall,
 } from "../../features/dependencies/execution/dependencyExecution";
 import { parsePytorchGpuTier } from "../../features/dependencies/policy/pytorchPolicy";
-import {
-  cancelDependencyInstallSession,
-  cleanupInstallSessions,
-  getDependencyInstallSessionPayload,
-  startDependencyInstallSession,
-  startDependencyUninstallSession,
-} from "../../features/dependencies/runtime/dependencySessions";
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 import {
   getDependencyTerminalCommand,
   openSystemTerminal,
@@ -92,7 +86,7 @@ export function registerDependenciesRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/dependencies/:name/install/start", async (request: any, reply) => {
-    cleanupInstallSessions();
+    await operationRuntimeService.cleanupInstallSessions();
 
     const { name } = request.params;
 
@@ -102,21 +96,25 @@ export function registerDependenciesRoutes(fastify: FastifyInstance) {
       return sendPytorchGpuTierRequired(reply);
     }
 
-    return reply.status(202).send(startDependencyInstallSession(name, options));
+    return reply
+      .status(202)
+      .send(await operationRuntimeService.startDependencyInstallSession(name, options));
   });
 
   fastify.post("/dependencies/:name/uninstall/start", async (request: any, reply) => {
-    cleanupInstallSessions();
+    await operationRuntimeService.cleanupInstallSessions();
 
     const { name } = request.params;
-    return reply.status(202).send(startDependencyUninstallSession(name));
+    return reply
+      .status(202)
+      .send(await operationRuntimeService.startDependencyUninstallSession(name));
   });
 
   fastify.get("/dependencies/install-sessions/:sessionId", async (request: any, reply) => {
-    cleanupInstallSessions();
+    await operationRuntimeService.cleanupInstallSessions();
 
     const { sessionId } = request.params;
-    const session = getDependencyInstallSessionPayload(sessionId);
+    const session = await operationRuntimeService.getDependencyInstallSessionPayload(sessionId);
 
     if (!session) {
       return sendMissingInstallSession(reply, sessionId);
@@ -126,10 +124,10 @@ export function registerDependenciesRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/dependencies/install-sessions/:sessionId/cancel", async (request: any, reply) => {
-    cleanupInstallSessions();
+    await operationRuntimeService.cleanupInstallSessions();
 
     const { sessionId } = request.params;
-    const result = cancelDependencyInstallSession(sessionId);
+    const result = await operationRuntimeService.cancelDependencyInstallSession(sessionId);
 
     return reply.status(result.statusCode).send(result.payload);
   });

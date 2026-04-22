@@ -1,12 +1,6 @@
 import { spawn } from "child_process";
 import type { ChildProcess } from "child_process";
-import { appendTaskLogs } from "../../core/taskLogs";
-
-const activeTranscriptions = new Map<string, ChildProcess>();
-
-export function activeTranscriptionJobIds(): string[] {
-  return Array.from(activeTranscriptions.keys());
-}
+import * as operationRuntimeService from "../../services/operationRuntimeService";
 
 function flushLines(buffer: { value: string }, onLines: (lines: string[]) => void): void {
   const parts = buffer.value.split(/[\r\n]+/);
@@ -76,30 +70,8 @@ function runCommand(
 export async function runWhisperProcess(jobId: string, command: string): Promise<void> {
   await runCommand(
     command,
-    (lines) => appendTaskLogs(jobId, "transcription", lines),
-    (child) => activeTranscriptions.set(jobId, child),
-    () => activeTranscriptions.delete(jobId),
+    (lines) => operationRuntimeService.appendTaskLogs(jobId, "transcription", lines),
+    (child) => operationRuntimeService.trackActiveTranscription(jobId, child),
+    () => operationRuntimeService.clearActiveTranscription(jobId),
   );
-}
-
-export function cancelActiveTranscriptionProcess(jobId: string, onCancel?: () => void): boolean {
-  const child = activeTranscriptions.get(jobId);
-  if (!child || !child.pid) {
-    return false;
-  }
-
-  onCancel?.();
-
-  try {
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
-    } else {
-      child.kill("SIGTERM");
-    }
-  } catch (error) {
-    console.error(`[transcription] Failed to cancel process for job ${jobId}:`, error);
-  }
-
-  activeTranscriptions.delete(jobId);
-  return true;
 }

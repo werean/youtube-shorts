@@ -1,10 +1,10 @@
 import * as jobLifecycleService from "../../../services/jobLifecycleService";
+import * as operationRuntimeService from "../../../services/operationRuntimeService";
 import { transcribeJob } from "../../../pipeline/transcription";
 import { prepareAnalysisPrerequisites } from "../../../pipeline/analysis_prerequisites";
 import { analyzeBlocks } from "../../../pipeline/analysis";
 import { renderSuggestedCuts } from "../../../pipeline/rendering";
 import { loadPendingCutsForApproval, waitForApproval } from "./approval";
-import { getBatchProgress } from "./state";
 import type { BatchPipelineOptions } from "./types";
 
 export async function processBatchPipeline(
@@ -12,7 +12,7 @@ export async function processBatchPipeline(
   jobIds: string[],
   options: BatchPipelineOptions,
 ) {
-  const progress = getBatchProgress(batchId);
+  const progress = operationRuntimeService.getBatchProgress(batchId);
   if (!progress) return;
 
   for (let i = 0; i < jobIds.length; i++) {
