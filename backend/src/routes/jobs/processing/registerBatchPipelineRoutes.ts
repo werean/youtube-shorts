@@ -5,39 +5,51 @@
 import type { FastifyInstance } from "fastify";
 import { processBatchPipeline } from "../../../features/jobs/batch/runner";
 import * as operationRuntimeService from "../../../services/operationRuntimeService";
-import type { BatchPipelineRequest } from "../../../features/jobs/batch/types";
+import {
+  getBatchOptions,
+  hasBatchJobIds,
+  type BatchActionResponseDto,
+  type BatchIdParamsDto,
+  type BatchRunRequestDto,
+  type BatchRunResponseDto,
+  type BatchStatusResponseDto,
+  type ErrorDetailResponseDto,
+} from "../../contracts/jobContracts";
 
 export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
   // Start batch pipeline
-  fastify.post<{ Body: BatchPipelineRequest }>("/batch/run", async (request, reply) => {
-    try {
-      const { job_ids, options } = request.body;
+  fastify.post<{ Body: BatchRunRequestDto; Reply: BatchRunResponseDto | ErrorDetailResponseDto }>(
+    "/batch/run",
+    async (request, reply) => {
+      try {
+        const { job_ids, options } = request.body;
 
-      if (!job_ids || job_ids.length === 0) {
-        return reply.code(400).send({ detail: "No job IDs provided" });
+        if (!hasBatchJobIds(job_ids)) {
+          return reply.code(400).send({ detail: "No job IDs provided" });
+        }
+
+        console.log(`[batch] Starting batch pipeline for ${job_ids.length} jobs`);
+        console.log(`[batch] Options:`, options);
+
+        const batchId = `batch_${Date.now()}`;
+        operationRuntimeService.createBatchProgress(batchId, job_ids);
+
+        // Start processing in background
+        processBatchPipeline(batchId, job_ids, getBatchOptions(options)).catch((error) => {
+          console.error(`[batch] Fatal error in batch ${batchId}:`, error);
+          operationRuntimeService.markBatchNotRunning(batchId);
+        });
+
+        return { batch_id: batchId, status: "started" };
+      } catch (error: any) {
+        console.error("[batch] Error starting batch pipeline:", error);
+        return reply.code(500).send({ detail: error.message });
       }
-
-      console.log(`[batch] Starting batch pipeline for ${job_ids.length} jobs`);
-      console.log(`[batch] Options:`, options);
-
-      const batchId = `batch_${Date.now()}`;
-      operationRuntimeService.createBatchProgress(batchId, job_ids);
-
-      // Start processing in background
-      processBatchPipeline(batchId, job_ids, options).catch((error) => {
-        console.error(`[batch] Fatal error in batch ${batchId}:`, error);
-        operationRuntimeService.markBatchNotRunning(batchId);
-      });
-
-      return { batch_id: batchId, status: "started" };
-    } catch (error: any) {
-      console.error("[batch] Error starting batch pipeline:", error);
-      return reply.code(500).send({ detail: error.message });
-    }
-  });
+    },
+  );
 
   // Get batch pipeline status
-  fastify.get<{ Params: { batch_id: string } }>(
+  fastify.get<{ Params: BatchIdParamsDto; Reply: BatchStatusResponseDto | ErrorDetailResponseDto }>(
     "/batch/:batch_id/status",
     async (request, reply) => {
       const { batch_id } = request.params;
@@ -52,7 +64,7 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
   );
 
   // Cancel batch pipeline
-  fastify.post<{ Params: { batch_id: string } }>(
+  fastify.post<{ Params: BatchIdParamsDto; Reply: BatchActionResponseDto | ErrorDetailResponseDto }>(
     "/batch/:batch_id/cancel",
     async (request, reply) => {
       const { batch_id } = request.params;
@@ -70,7 +82,7 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
   );
 
   // Continue batch pipeline after approval
-  fastify.post<{ Params: { batch_id: string } }>(
+  fastify.post<{ Params: BatchIdParamsDto; Reply: BatchActionResponseDto | ErrorDetailResponseDto }>(
     "/batch/:batch_id/continue",
     async (request, reply) => {
       const { batch_id } = request.params;

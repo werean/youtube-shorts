@@ -9,6 +9,11 @@ import {
   getOllamaModelsPayload,
   registerOllamaModel,
 } from "../../features/config/ollama/models";
+import {
+  parseOllamaModelRegistrationRequest,
+  type ConfigParamModelNameDto,
+  type OllamaModelRegistrationRequestDto,
+} from "../contracts/configContracts";
 
 export function registerConfigInfoRoutes(fastify: FastifyInstance) {
   fastify.get("/", async () => {
@@ -19,14 +24,20 @@ export function registerConfigInfoRoutes(fastify: FastifyInstance) {
     return getOllamaModelsPayload();
   });
 
-  fastify.post("/ollama-models/register", async (request: any, reply) => {
-    const body = (request.body || {}) as { name?: unknown; source?: unknown };
-    const result = await registerOllamaModel(body.name, body.source);
-    return reply.code(result.statusCode).send(result.payload);
-  });
+  fastify.post<{ Body: OllamaModelRegistrationRequestDto }>(
+    "/ollama-models/register",
+    async (request, reply) => {
+      const body = parseOllamaModelRegistrationRequest(request.body);
+      const result = await registerOllamaModel(body.name, body.source);
+      return reply.code(result.statusCode).send(result.payload);
+    },
+  );
 
-  fastify.delete("/ollama-models/:modelName", async (request: any, reply) => {
-    const result = await deleteOllamaModel(request.params?.modelName);
-    return reply.code(result.statusCode).send(result.payload);
-  });
+  fastify.delete<{ Params: ConfigParamModelNameDto }>(
+    "/ollama-models/:modelName",
+    async (request, reply) => {
+      const result = await deleteOllamaModel(request.params?.modelName);
+      return reply.code(result.statusCode).send(result.payload);
+    },
+  );
 }

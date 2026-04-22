@@ -1,4 +1,5 @@
 import type React from "react";
+import type { BatchPipelineOptions } from "@youtube-shorts/contracts";
 import { AppButton, AppDialog } from "./shared";
 
 interface VideoItem {
@@ -9,13 +10,6 @@ interface VideoItem {
   };
   hasTranscription?: boolean;
   hasAnalysis?: boolean;
-}
-
-interface BatchPipelineOptions {
-  transcription: boolean;
-  analysis: boolean;
-  render: boolean;
-  preApprove: boolean;
 }
 
 interface BatchPipelineDialogProps {

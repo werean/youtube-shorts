@@ -4,18 +4,21 @@
     "module": "ESNext",
     "lib": ["ES2022"],
     "outDir": "./dist",
-    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@youtube-shorts/contracts": ["../shared/contracts.ts"]
+    },
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../shared/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

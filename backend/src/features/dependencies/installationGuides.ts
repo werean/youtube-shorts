@@ -2,26 +2,9 @@
  * Dependency installation instructions and utilities.
  */
 
-export interface InstallationInstructions {
-  name: string;
-  installed: boolean;
-  version?: string | null;
-  manual: {
-    title: string;
-    description: string;
-    steps: string[];
-    links?: { text: string; url: string }[];
-  };
-  automatic?: {
-    command: string;
-    description: string;
-  };
-}
+import type { InstallationGuide } from "@youtube-shorts/contracts";
 
-export const INSTALLATION_GUIDES: Record<
-  string,
-  Omit<InstallationInstructions, "installed" | "version">
-> = {
+export const INSTALLATION_GUIDES: Record<string, InstallationGuide> = {
   python: {
     name: "Python",
     manual: {

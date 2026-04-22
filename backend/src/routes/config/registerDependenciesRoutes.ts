@@ -19,12 +19,22 @@ import type {
   DependencyInstallOptions,
   DependencyOperationMode,
 } from "../../features/dependencies/shared/dependencyTypes";
+import {
+  emptyDependencyInstallOptions,
+  getDependencyOperationMode,
+  type ConfigParamNameDto,
+  type ConfigParamSessionIdDto,
+  type DependencyInstallRequestDto,
+  type DependencyTerminalRequestDto,
+} from "../contracts/configContracts";
 
 const PYTORCH_GPU_TIER_REQUIRED_MESSAGE =
   "Selecione o tipo de GPU (RTX 4000 ou inferior / RTX 5000) antes de instalar o PyTorch automaticamente.";
 
-function buildDependencyInstallOptions(body: any): DependencyInstallOptions {
-  const options: DependencyInstallOptions = {};
+function buildDependencyInstallOptions(
+  body: DependencyInstallRequestDto | undefined,
+): DependencyInstallOptions {
+  const options = emptyDependencyInstallOptions();
   const pytorchGpuTier = parsePytorchGpuTier(body?.pytorchGpuTier);
   if (pytorchGpuTier) {
     options.pytorchGpuTier = pytorchGpuTier;
@@ -55,116 +65,139 @@ export function registerDependenciesRoutes(fastify: FastifyInstance) {
     };
   });
 
-  fastify.get("/dependencies/:name/instructions", async (request: any, reply) => {
-    const { name } = request.params;
-    const guide = INSTALLATION_GUIDES[name];
+  fastify.get<{ Params: ConfigParamNameDto }>(
+    "/dependencies/:name/instructions",
+    async (request, reply) => {
+      const { name } = request.params;
+      const guide = INSTALLATION_GUIDES[name];
 
-    if (!guide) {
-      return reply.status(404).send({ error: "Dependency not found" });
-    }
+      if (!guide) {
+        return reply.status(404).send({ error: "Dependency not found" });
+      }
 
-    return guide;
-  });
+      return guide;
+    },
+  );
 
-  fastify.post("/dependencies/:name/install", async (request: any, reply) => {
-    const { name } = request.params;
+  fastify.post<{ Params: ConfigParamNameDto; Body: DependencyInstallRequestDto }>(
+    "/dependencies/:name/install",
+    async (request, reply) => {
+      const { name } = request.params;
 
-    const options = buildDependencyInstallOptions(request.body);
+      const options = buildDependencyInstallOptions(request.body);
 
-    if (name === "pytorch" && !options.pytorchGpuTier) {
-      return sendPytorchGpuTierRequired(reply);
-    }
+      if (name === "pytorch" && !options.pytorchGpuTier) {
+        return sendPytorchGpuTierRequired(reply);
+      }
 
-    const result = await performDependencyInstall(name, undefined, undefined, options);
-    return reply.status(result.statusCode).send(result.payload);
-  });
+      const result = await performDependencyInstall(name, undefined, undefined, options);
+      return reply.status(result.statusCode).send(result.payload);
+    },
+  );
 
-  fastify.post("/dependencies/:name/uninstall", async (request: any, reply) => {
-    const { name } = request.params;
-    const result = await performDependencyUninstall(name);
-    return reply.status(result.statusCode).send(result.payload);
-  });
+  fastify.post<{ Params: ConfigParamNameDto }>(
+    "/dependencies/:name/uninstall",
+    async (request, reply) => {
+      const { name } = request.params;
+      const result = await performDependencyUninstall(name);
+      return reply.status(result.statusCode).send(result.payload);
+    },
+  );
 
-  fastify.post("/dependencies/:name/install/start", async (request: any, reply) => {
-    await operationRuntimeService.cleanupInstallSessions();
+  fastify.post<{ Params: ConfigParamNameDto; Body: DependencyInstallRequestDto }>(
+    "/dependencies/:name/install/start",
+    async (request, reply) => {
+      await operationRuntimeService.cleanupInstallSessions();
 
-    const { name } = request.params;
+      const { name } = request.params;
 
-    const options = buildDependencyInstallOptions(request.body);
+      const options = buildDependencyInstallOptions(request.body);
 
-    if (name === "pytorch" && !options.pytorchGpuTier) {
-      return sendPytorchGpuTierRequired(reply);
-    }
+      if (name === "pytorch" && !options.pytorchGpuTier) {
+        return sendPytorchGpuTierRequired(reply);
+      }
 
-    return reply
-      .status(202)
-      .send(await operationRuntimeService.startDependencyInstallSession(name, options));
-  });
+      return reply
+        .status(202)
+        .send(await operationRuntimeService.startDependencyInstallSession(name, options));
+    },
+  );
 
-  fastify.post("/dependencies/:name/uninstall/start", async (request: any, reply) => {
-    await operationRuntimeService.cleanupInstallSessions();
+  fastify.post<{ Params: ConfigParamNameDto }>(
+    "/dependencies/:name/uninstall/start",
+    async (request, reply) => {
+      await operationRuntimeService.cleanupInstallSessions();
 
-    const { name } = request.params;
-    return reply
-      .status(202)
-      .send(await operationRuntimeService.startDependencyUninstallSession(name));
-  });
+      const { name } = request.params;
+      return reply
+        .status(202)
+        .send(await operationRuntimeService.startDependencyUninstallSession(name));
+    },
+  );
 
-  fastify.get("/dependencies/install-sessions/:sessionId", async (request: any, reply) => {
-    await operationRuntimeService.cleanupInstallSessions();
+  fastify.get<{ Params: ConfigParamSessionIdDto }>(
+    "/dependencies/install-sessions/:sessionId",
+    async (request, reply) => {
+      await operationRuntimeService.cleanupInstallSessions();
 
-    const { sessionId } = request.params;
-    const session = await operationRuntimeService.getDependencyInstallSessionPayload(sessionId);
+      const { sessionId } = request.params;
+      const session = await operationRuntimeService.getDependencyInstallSessionPayload(sessionId);
 
-    if (!session) {
-      return sendMissingInstallSession(reply, sessionId);
-    }
+      if (!session) {
+        return sendMissingInstallSession(reply, sessionId);
+      }
 
-    return session;
-  });
+      return session;
+    },
+  );
 
-  fastify.post("/dependencies/install-sessions/:sessionId/cancel", async (request: any, reply) => {
-    await operationRuntimeService.cleanupInstallSessions();
+  fastify.post<{ Params: ConfigParamSessionIdDto }>(
+    "/dependencies/install-sessions/:sessionId/cancel",
+    async (request, reply) => {
+      await operationRuntimeService.cleanupInstallSessions();
 
-    const { sessionId } = request.params;
-    const result = await operationRuntimeService.cancelDependencyInstallSession(sessionId);
+      const { sessionId } = request.params;
+      const result = await operationRuntimeService.cancelDependencyInstallSession(sessionId);
 
-    return reply.status(result.statusCode).send(result.payload);
-  });
+      return reply.status(result.statusCode).send(result.payload);
+    },
+  );
 
-  fastify.post("/dependencies/:name/open-terminal", async (request: any, reply) => {
-    const { name } = request.params;
-    const mode: DependencyOperationMode =
-      request.body && request.body.mode === "uninstall" ? "uninstall" : "install";
+  fastify.post<{ Params: ConfigParamNameDto; Body: DependencyTerminalRequestDto }>(
+    "/dependencies/:name/open-terminal",
+    async (request, reply) => {
+      const { name } = request.params;
+      const mode: DependencyOperationMode = getDependencyOperationMode(request.body);
 
-    const options = buildDependencyInstallOptions(request.body);
+      const options = buildDependencyInstallOptions(request.body);
 
-    if (name === "pytorch" && mode === "install" && !options.pytorchGpuTier) {
-      return sendPytorchGpuTierRequired(reply);
-    }
+      if (name === "pytorch" && mode === "install" && !options.pytorchGpuTier) {
+        return sendPytorchGpuTierRequired(reply);
+      }
 
-    const command = await getDependencyTerminalCommand(name, mode, options);
+      const command = await getDependencyTerminalCommand(name, mode, options);
 
-    if (!command) {
-      return reply.status(400).send({
-        success: false,
-        message: `No terminal command available for ${name} (${mode})`,
-      });
-    }
+      if (!command) {
+        return reply.status(400).send({
+          success: false,
+          message: `No terminal command available for ${name} (${mode})`,
+        });
+      }
 
-    const opened = openSystemTerminal(command);
-    if (!opened.success) {
-      return reply.status(500).send({
-        success: false,
-        message: opened.error || "Failed to open terminal",
+      const opened = openSystemTerminal(command);
+      if (!opened.success) {
+        return reply.status(500).send({
+          success: false,
+          message: opened.error || "Failed to open terminal",
+          command,
+        });
+      }
+
+      return {
+        success: true,
+        message: `Opened the default system terminal with the ${mode} command.`,
         command,
-      });
-    }
-
-    return {
-      success: true,
-      message: `Opened the default system terminal with the ${mode} command.`,
-      command,
-    };
-  });
+      };
+    },
+  );
 }

@@ -13,6 +13,7 @@ Fastify route layer for the backend HTTP API. Route files translate requests int
 
 - `healthRoutes.ts` exposes `/health`.
 - `jobs/` registers `/jobs` lifecycle, processing, curation, render, pipeline, batch, rename, and log endpoints.
+- `contracts/` contains route-layer DTOs and low-risk request parsing helpers for critical job and config routes.
 - `videosRoutes.ts` exposes video library and archive/lifecycle operations.
 - `mediaRoutes.ts` serves source videos and rendered shorts.
 - `configRoutes.ts` mounts config subroutes under `/config`.
@@ -29,5 +30,5 @@ Fastify route layer for the backend HTTP API. Route files translate requests int
 
 - Route URLs are frontend contracts; do not change them during structural cleanup.
 - Response shapes for jobs, cuts, render outputs, logs, batch, and config are frontend contracts.
+- Keep DTOs aligned with current public JSON shapes; do not use automatic validation when it would change error payloads.
 - Keep HTTP handlers thin; avoid embedding pipeline or storage logic directly in routes when it can live in features/pipeline/storage.
-

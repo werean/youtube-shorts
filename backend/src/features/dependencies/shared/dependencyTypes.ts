@@ -1,9 +1,15 @@
 import type { ChildProcess } from "child_process";
+import type {
+  DependenciesSnapshot,
+  DependencyInstallOptions,
+  DependencyInstallSessionStatus,
+  DependencyOperationMode,
+  DependencyStatusInfo,
+  InstallDependencyResult,
+  PytorchGpuTier,
+} from "@youtube-shorts/contracts";
 
-export interface DependencyStatus {
-  installed: boolean;
-  version: string | null;
-}
+export interface DependencyStatus extends DependencyStatusInfo {}
 
 export interface CommandResult {
   ok: boolean;
@@ -24,15 +30,7 @@ export interface PythonRuntime {
   source: string;
 }
 
-export interface DependencyChecks {
-  python: DependencyStatus;
-  whisper: DependencyStatus;
-  ytdlp: DependencyStatus;
-  ffmpeg: DependencyStatus;
-  cuda: DependencyStatus;
-  pytorch: DependencyStatus;
-  ollama: DependencyStatus;
-}
+export interface DependencyChecks extends DependenciesSnapshot {}
 
 export interface DependencySnapshot {
   checks: DependencyChecks;
@@ -40,15 +38,9 @@ export interface DependencySnapshot {
   diagnostics: string[];
 }
 
-export interface InstallDependencyPayload {
-  success: boolean;
-  message: string;
-  output?: string;
-  error?: string;
-  failureCategory?: string;
-  installer?: string;
+export interface InstallDependencyPayload
+  extends Omit<InstallDependencyResult, "dependencies"> {
   dependencies?: DependencyChecks;
-  diagnostics?: string[];
 }
 
 export interface InstallExecutionResult {
@@ -56,14 +48,12 @@ export interface InstallExecutionResult {
   payload: InstallDependencyPayload;
 }
 
-export type DependencyInstallSessionStatus = "running" | "success" | "failed" | "cancelled";
-export type DependencyOperationMode = "install" | "uninstall";
-
-export type PytorchGpuTier = "rtx_4000_or_lower" | "rtx_5000";
-
-export interface DependencyInstallOptions {
-  pytorchGpuTier?: PytorchGpuTier;
-}
+export type {
+  DependencyInstallOptions,
+  DependencyInstallSessionStatus,
+  DependencyOperationMode,
+  PytorchGpuTier,
+};
 
 export interface DependencyInstallSession {
   id: string;

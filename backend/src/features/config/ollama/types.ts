@@ -1,12 +1,4 @@
-export type OllamaCatalogEntry = {
-  name: string;
-  model: string;
-  source: "cloud" | "local";
-  installed: boolean;
-  running: boolean;
-  needsDownload: boolean;
-  size?: number;
-};
+export type { OllamaCatalogEntry } from "@youtube-shorts/contracts";
 
 export type OllamaCommandResult = {
   ok: boolean;

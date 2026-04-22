@@ -10,8 +10,11 @@ import {
   resetAllToolConfigsPayload,
   resetToolConfigSectionPayload,
   updateToolConfigsPayload,
-  type ToolConfigs,
 } from "../../features/config/toolConfigs/toolConfigOperations";
+import type {
+  ToolConfigSectionParamsDto,
+  ToolConfigsUpdateRequestDto,
+} from "../contracts/configContracts";
 
 export function registerToolConfigsRoutes(fastify: FastifyInstance) {
   fastify.get("/tool-configs", async (request, reply) => {
@@ -22,10 +25,9 @@ export function registerToolConfigsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.post("/tool-configs", async (request: any, reply) => {
+  fastify.post<{ Body: ToolConfigsUpdateRequestDto }>("/tool-configs", async (request, reply) => {
     try {
-      const body = request.body as Partial<ToolConfigs>;
-      return updateToolConfigsPayload(body);
+      return updateToolConfigsPayload(request.body);
     } catch (error: any) {
       reply.code(500).send({ detail: error.message });
     }
@@ -39,24 +41,29 @@ export function registerToolConfigsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.post("/tool-configs/reset/:section", async (request: any, reply) => {
-    try {
-      const section = String(request.params.section || "");
-      if (!section || !isResettableToolConfigSection(section)) {
-        return reply.code(400).send({ detail: "Invalid section" });
+  fastify.post<{ Params: ToolConfigSectionParamsDto }>(
+    "/tool-configs/reset/:section",
+    async (request, reply) => {
+      try {
+        const section = String(request.params.section || "");
+        if (!section || !isResettableToolConfigSection(section)) {
+          return reply.code(400).send({ detail: "Invalid section" });
+        }
+        return resetToolConfigSectionPayload(section);
+      } catch (error: any) {
+        reply.code(500).send({ detail: error.message });
       }
-      return resetToolConfigSectionPayload(section);
-    } catch (error: any) {
-      reply.code(500).send({ detail: error.message });
-    }
-  });
+    },
+  );
 
-  fastify.post("/tool-configs/import", async (request: any, reply) => {
-    try {
-      const body = request.body as Partial<ToolConfigs>;
-      return importToolConfigsPayload(body);
-    } catch (error: any) {
-      reply.code(500).send({ detail: error.message });
-    }
-  });
+  fastify.post<{ Body: ToolConfigsUpdateRequestDto }>(
+    "/tool-configs/import",
+    async (request, reply) => {
+      try {
+        return importToolConfigsPayload(request.body);
+      } catch (error: any) {
+        reply.code(500).send({ detail: error.message });
+      }
+    },
+  );
 }

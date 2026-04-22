@@ -3,28 +3,19 @@
  */
 
 import { apiBaseUrl } from "./client";
+import type {
+  BatchActionResponse,
+  BatchPipelineOptions,
+  BatchPipelineProgress,
+  BatchRunResponse,
+} from "@youtube-shorts/contracts";
 
-export interface BatchPipelineOptions {
-  transcription: boolean;
-  analysis: boolean;
-  render: boolean;
-}
-
-export interface BatchPipelineProgress {
-  current_job_index: number;
-  current_job_id: string;
-  current_step: string;
-  completed_jobs: string[];
-  failed_jobs: { job_id: string; error: string }[];
-  is_running: boolean;
-  waiting_for_approval?: boolean;
-  pending_cuts?: any[];
-}
+export type { BatchPipelineOptions, BatchPipelineProgress };
 
 export async function startBatchPipeline(
   jobIds: string[],
   options: BatchPipelineOptions,
-): Promise<{ batch_id: string; status: string }> {
+): Promise<BatchRunResponse> {
   const response = await fetch(`${apiBaseUrl}/jobs/batch/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -53,7 +44,7 @@ export async function getBatchPipelineStatus(batchId: string): Promise<BatchPipe
   return response.json();
 }
 
-export async function cancelBatchPipeline(batchId: string): Promise<{ status: string }> {
+export async function cancelBatchPipeline(batchId: string): Promise<BatchActionResponse> {
   const response = await fetch(`${apiBaseUrl}/jobs/batch/${batchId}/cancel`, {
     method: "POST",
   });
@@ -66,7 +57,7 @@ export async function cancelBatchPipeline(batchId: string): Promise<{ status: st
   return response.json();
 }
 
-export async function continueBatchPipeline(batchId: string): Promise<{ status: string }> {
+export async function continueBatchPipeline(batchId: string): Promise<BatchActionResponse> {
   const response = await fetch(`${apiBaseUrl}/jobs/batch/${batchId}/continue`, {
     method: "POST",
   });

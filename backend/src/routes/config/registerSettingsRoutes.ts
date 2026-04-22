@@ -6,8 +6,8 @@ import type { FastifyInstance } from "fastify";
 import {
   getAppSettings,
   updateAppSettings,
-  type AppSettings,
 } from "../../features/config/settings/settingsOperations";
+import type { SettingsUpdateRequestDto } from "../contracts/configContracts";
 
 export function registerSettingsRoutes(fastify: FastifyInstance) {
   fastify.get("/settings", async (request, reply) => {
@@ -18,10 +18,9 @@ export function registerSettingsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.post("/settings", async (request: any, reply) => {
+  fastify.post<{ Body: SettingsUpdateRequestDto }>("/settings", async (request, reply) => {
     try {
-      const body = request.body as Partial<AppSettings>;
-      return updateAppSettings(body);
+      return updateAppSettings(request.body);
     } catch (error: any) {
       console.error(`[config] ✗ Erro ao atualizar settings:`, error.message);
       reply.code(500).send({ detail: error.message });

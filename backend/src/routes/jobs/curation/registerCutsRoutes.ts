@@ -6,20 +6,35 @@ import type { FastifyInstance } from "fastify";
 import * as curation from "../../../pipeline/curation";
 import type { Cut } from "../../../models/cut";
 import { replaceCuts } from "../../../features/jobs/cuts";
+import {
+  isCutsArray,
+  type CutIdParamsDto,
+  type ErrorDetailResponseDto,
+  type JobIdParamsDto,
+  type UpdateCutsRequestDto,
+  type UpdateCutsResponseDto,
+} from "../../contracts/jobContracts";
 
 export function registerCutsRoutes(fastify: FastifyInstance) {
-  fastify.get<{ Params: { job_id: string } }>("/:job_id/cuts", async (request, reply) => {
-    try {
-      const { job_id } = request.params;
-      console.log(`[jobs] Listing cuts for job: ${job_id}`);
-      const cuts = curation.listSuggestions(job_id);
-      return cuts;
-    } catch (error: any) {
-      reply.code(500).send({ detail: error.message });
-    }
-  });
+  fastify.get<{ Params: JobIdParamsDto; Reply: Cut[] | ErrorDetailResponseDto }>(
+    "/:job_id/cuts",
+    async (request, reply) => {
+      try {
+        const { job_id } = request.params;
+        console.log(`[jobs] Listing cuts for job: ${job_id}`);
+        const cuts = curation.listSuggestions(job_id);
+        return cuts;
+      } catch (error: any) {
+        reply.code(500).send({ detail: error.message });
+      }
+    },
+  );
 
-  fastify.put<{ Params: { job_id: string }; Body: { cuts: Cut[] } }>(
+  fastify.put<{
+    Params: JobIdParamsDto;
+    Body: UpdateCutsRequestDto;
+    Reply: UpdateCutsResponseDto | ErrorDetailResponseDto;
+  }>(
     "/:job_id/cuts",
     async (request, reply) => {
       try {
@@ -30,7 +45,7 @@ export function registerCutsRoutes(fastify: FastifyInstance) {
         console.log(`[jobs] Cuts type:`, typeof cuts);
         console.log(`[jobs] Is array:`, Array.isArray(cuts));
 
-        if (!cuts || !Array.isArray(cuts)) {
+        if (!isCutsArray(cuts)) {
           return reply.code(400).send({ detail: "cuts must be an array" });
         }
 
@@ -42,7 +57,7 @@ export function registerCutsRoutes(fastify: FastifyInstance) {
     },
   );
 
-  fastify.post<{ Params: { job_id: string; cut_id: string } }>(
+  fastify.post<{ Params: CutIdParamsDto; Reply: Cut | ErrorDetailResponseDto }>(
     "/:job_id/cuts/:cut_id/approve",
     async (request, reply) => {
       try {
@@ -56,7 +71,7 @@ export function registerCutsRoutes(fastify: FastifyInstance) {
     },
   );
 
-  fastify.post<{ Params: { job_id: string; cut_id: string } }>(
+  fastify.post<{ Params: CutIdParamsDto; Reply: Cut | ErrorDetailResponseDto }>(
     "/:job_id/cuts/:cut_id/reject",
     async (request, reply) => {
       try {

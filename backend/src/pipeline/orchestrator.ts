@@ -78,7 +78,7 @@ export async function runPipeline(
  * @returns true if the step should be executed.
  */
 function isStatusBefore(current: JobStatus, target: JobStatus): boolean {
-  const order = [
+  const order: JobStatus[] = [
     JobStatus.CREATED,
     JobStatus.DOWNLOADING,
     JobStatus.TRANSCRIBING,

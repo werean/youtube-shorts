@@ -6,6 +6,12 @@ import type { FastifyInstance } from "fastify";
 import { loadActiveToolConfigs } from "../../core/toolConfigs";
 import { loadSavedPrompts, upsertSavedPrompt } from "../../features/config/prompts/savedPrompts";
 import { PROMPT_VERSION, SYSTEM_PROMPT_TEMPLATE } from "../../llm/prompts";
+import {
+  parseSavePromptRequest,
+  type SavePromptRequestDto,
+  type SavePromptResponseDto,
+} from "../contracts/configContracts";
+import type { ErrorDetailResponseDto } from "../contracts/jobContracts";
 
 export function registerPromptRoutes(fastify: FastifyInstance) {
   fastify.get("/llm-prompt", async () => {
@@ -35,11 +41,12 @@ export function registerPromptRoutes(fastify: FastifyInstance) {
     return { prompts };
   });
 
-  fastify.post("/llm-saved-prompts", async (request: any, reply) => {
+  fastify.post<{
+    Body: SavePromptRequestDto;
+    Reply: SavePromptResponseDto | ErrorDetailResponseDto;
+  }>("/llm-saved-prompts", async (request, reply) => {
     try {
-      const body = (request.body || {}) as { name?: unknown; prompt?: unknown };
-      const name = String(body.name || "").trim();
-      const prompt = String(body.prompt || "").trim();
+      const { name, prompt } = parseSavePromptRequest(request.body);
 
       if (!name) {
         return reply.code(400).send({ detail: "Nome do prompt é obrigatório." });

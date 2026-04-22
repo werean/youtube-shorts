@@ -11,25 +11,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { homedir } from "os";
 import { dataDir, jobsDir, projectRoot } from "./paths";
+import type { AppSettings as SharedAppSettings } from "@youtube-shorts/contracts";
 
-export interface AppSettings {
-  media: {
-    base_dir: string;
-    download_resolution: "1080p" | "1440p" | "4k";
-  };
-  preferences: {
-    ask_move_on_upload: boolean;
-    move_uploads: boolean;
-    ask_delete_cut_confirm: boolean;
-  };
-  whisper: {
-    device: "cpu" | "cuda";
-    formats: string[];
-  };
-  llm: {
-    model: string;
-  };
-}
+export interface AppSettings extends SharedAppSettings {}
 
 const SETTINGS_FILE = path.join(dataDir(), "settings.json");
 const SETTINGS_CACHE_TTL_MS = resolveCacheTtl("SETTINGS_CACHE_TTL_MS", 3000);

@@ -6,6 +6,10 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@youtube-shorts/contracts": ["../shared/contracts.ts"]
+    },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -13,5 +17,5 @@
     "jsx": "react-jsx",
     "strict": false
   },
-  "include": ["src"]
+  "include": ["src", "../shared/**/*.ts"]
 }

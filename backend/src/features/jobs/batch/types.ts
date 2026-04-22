@@ -1,22 +1,11 @@
-export interface BatchPipelineRequest {
-  job_ids: string[];
-  options: BatchPipelineOptions;
-}
+import type {
+  BatchPipelineOptions as SharedBatchPipelineOptions,
+  BatchPipelineProgress as SharedBatchPipelineProgress,
+  BatchPipelineRequest as SharedBatchPipelineRequest,
+} from "@youtube-shorts/contracts";
 
-export interface BatchPipelineOptions {
-  transcription: boolean;
-  analysis: boolean;
-  render: boolean;
-  preApprove: boolean;
-}
+export interface BatchPipelineRequest extends SharedBatchPipelineRequest {}
 
-export interface BatchPipelineProgress {
-  current_job_index: number;
-  current_job_id: string;
-  current_step: string;
-  completed_jobs: string[];
-  failed_jobs: { job_id: string; error: string }[];
-  is_running: boolean;
-  waiting_for_approval?: boolean;
-  pending_cuts?: any[];
-}
+export interface BatchPipelineOptions extends SharedBatchPipelineOptions {}
+
+export interface BatchPipelineProgress extends SharedBatchPipelineProgress {}

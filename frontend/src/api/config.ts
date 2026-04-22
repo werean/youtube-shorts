@@ -1,141 +1,41 @@
 import { apiBaseUrl, request } from "./client";
 import type { ToolConfigs, ToolConfigsPatch, ToolConfigsResponse } from "../types/toolConfigs";
+import type {
+  AppSettings,
+  CancelDependencyInstallSessionResponse,
+  DependenciesSnapshot,
+  DependencyInstallOptions,
+  DependencyInstallSession,
+  DependencyInstallSessionStatus,
+  DependencyOperationMode,
+  InstallationGuide,
+  InstallDependencyResult,
+  OllamaModelsResponse,
+  PytorchGpuTier,
+  RegisterOllamaModelRequest,
+  RegisterOllamaModelResponse,
+  RemoveOllamaModelResponse,
+  SavedLLMPrompt,
+  StartDependencyInstallSessionResult,
+} from "@youtube-shorts/contracts";
 
-export interface InstallationGuide {
-  name: string;
-  manual: {
-    title: string;
-    description: string;
-    steps: string[];
-    links?: { text: string; url: string }[];
-  };
-  automatic?: {
-    command: string;
-    description: string;
-  };
-}
-
-export interface DependencyStatusInfo {
-  installed: boolean;
-  version: string | null;
-}
-
-export interface DependenciesSnapshot {
-  python: DependencyStatusInfo;
-  whisper: DependencyStatusInfo;
-  ytdlp: DependencyStatusInfo;
-  ffmpeg: DependencyStatusInfo;
-  cuda: DependencyStatusInfo;
-  pytorch: DependencyStatusInfo;
-  ollama: DependencyStatusInfo;
-}
-
-export interface InstallDependencyResult {
-  success: boolean;
-  message: string;
-  output?: string;
-  error?: string;
-  failureCategory?: string;
-  installer?: string;
-  dependencies?: DependenciesSnapshot;
-  diagnostics?: string[];
-}
-
-export type DependencyOperationMode = "install" | "uninstall";
-
-export type PytorchGpuTier = "rtx_4000_or_lower" | "rtx_5000";
-
-export interface DependencyInstallOptions {
-  pytorchGpuTier?: PytorchGpuTier;
-}
-
-export type DependencyInstallSessionStatus = "running" | "success" | "failed" | "cancelled";
-
-export interface DependencyInstallSession {
-  sessionId: string;
-  operation: DependencyOperationMode;
-  dependencyName: string;
-  status: DependencyInstallSessionStatus;
-  cancelRequested?: boolean;
-  startedAt: string;
-  endedAt?: string;
-  logs: string[];
-  result?: InstallDependencyResult;
-}
-
-export interface StartDependencyInstallSessionResult {
-  sessionId: string;
-  operation: DependencyOperationMode;
-  dependencyName: string;
-  status: DependencyInstallSessionStatus;
-  startedAt: string;
-}
-
-export interface AppSettings {
-  media: {
-    base_dir: string;
-    download_resolution: "1080p" | "1440p" | "4k";
-  };
-  preferences: {
-    ask_move_on_upload: boolean;
-    move_uploads: boolean;
-    ask_delete_cut_confirm: boolean;
-  };
-  whisper: {
-    device: "cpu" | "cuda";
-    formats: string[];
-  };
-  llm: {
-    model: string;
-  };
-}
-
-export interface OllamaModelsResponse {
-  catalog?: Array<{
-    name: string;
-    model: string;
-    source: "cloud" | "local";
-    installed: boolean;
-    running: boolean;
-    needsDownload: boolean;
-    size?: number;
-  }>;
-  models: string[];
-  configuredModel: string;
-  online: boolean;
-  localAvailable?: boolean;
-  remoteAvailable?: boolean;
-}
-
-export interface RegisterOllamaModelRequest {
-  name: string;
-  source: "cloud" | "local";
-}
-
-export interface RegisterOllamaModelResponse {
-  success: boolean;
-  message: string;
-  model: {
-    name: string;
-    source: "cloud" | "local";
-  };
-  configuredModel: string;
-}
-
-export interface RemoveOllamaModelResponse {
-  success: boolean;
-  message: string;
-  removedModel: string;
-  removedFromLocal: boolean;
-}
-
-export interface SavedLLMPrompt {
-  id: string;
-  name: string;
-  prompt: string;
-  created_at: string;
-  updated_at: string;
-}
+export type {
+  AppSettings,
+  DependenciesSnapshot,
+  DependencyInstallOptions,
+  DependencyInstallSession,
+  DependencyInstallSessionStatus,
+  DependencyOperationMode,
+  InstallationGuide,
+  InstallDependencyResult,
+  OllamaModelsResponse,
+  PytorchGpuTier,
+  RegisterOllamaModelRequest,
+  RegisterOllamaModelResponse,
+  RemoveOllamaModelResponse,
+  SavedLLMPrompt,
+  StartDependencyInstallSessionResult,
+};
 
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
   return request("/config/llm-prompt");
@@ -264,12 +164,9 @@ export async function getDependencyInstallSession(
   return request(`/config/dependencies/install-sessions/${sessionId}`);
 }
 
-export async function cancelDependencyInstallSession(sessionId: string): Promise<{
-  success: boolean;
-  message: string;
-  sessionId: string;
-  status: DependencyInstallSessionStatus;
-}> {
+export async function cancelDependencyInstallSession(
+  sessionId: string,
+): Promise<CancelDependencyInstallSessionResponse> {
   return request(`/config/dependencies/install-sessions/${sessionId}/cancel`, {
     method: "POST",
   });
