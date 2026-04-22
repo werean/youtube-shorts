@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { selectFolderWithSystemPicker } from "../../config/folders/folderPicker";
+import { selectFolderWithSystemPicker } from "../../features/config/folders/folderPicker";
 
 export function registerFolderPickerRoutes(fastify: FastifyInstance) {
   fastify.post("/select-folder", async (request, reply) => {

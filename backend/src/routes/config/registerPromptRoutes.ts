@@ -4,7 +4,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { loadActiveToolConfigs } from "../../core/toolConfigs";
-import { loadSavedPrompts, upsertSavedPrompt } from "../../config/prompts/savedPrompts";
+import { loadSavedPrompts, upsertSavedPrompt } from "../../features/config/prompts/savedPrompts";
 import { PROMPT_VERSION, SYSTEM_PROMPT_TEMPLATE } from "../../llm/prompts";
 
 export function registerPromptRoutes(fastify: FastifyInstance) {

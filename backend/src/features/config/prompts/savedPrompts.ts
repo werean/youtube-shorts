@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import { dataDir } from "../../core/paths";
+import { dataDir } from "../../../core/paths";
 
 export type SavedLlmPrompt = {
   id: string;

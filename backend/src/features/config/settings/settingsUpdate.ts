@@ -1,7 +1,7 @@
 import * as fs from "fs";
 
-import { updateSettings } from "../../core/settings";
-import type { AppSettings } from "../../core/settings";
+import { updateSettings } from "../../../core/settings";
+import type { AppSettings } from "../../../core/settings";
 
 export function updateAppSettings(body: Partial<AppSettings>): AppSettings {
   console.log(`[config] Atualizando settings:`, body);
