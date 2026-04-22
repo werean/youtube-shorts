@@ -33,25 +33,33 @@ For a fast understanding of the project, read in this order:
    - Job route aggregation.
 8. `backend/src/features/README.md`
    - Feature-layer responsibilities after the recent routes/features split.
-9. `backend/src/features/jobs/directAnalysis.ts`
+9. `backend/src/services/jobLifecycleService.ts`
+   - Job metadata lifecycle boundary for loading, saving, updates, and status transitions.
+10. `backend/src/services/artifactService.ts`
+    - Backend-facing artifact/path boundary over storage helpers.
+11. `backend/src/services/operationRuntimeService.ts`
+    - Process-local runtime boundary for logs, active processes, cancellation, and batch progress.
+12. `backend/src/features/jobs/directAnalysis.ts`
    - Direct analysis route behavior and current analysis prerequisites.
-10. `backend/src/features/jobs/batch/runner.ts`
-   - Batch pipeline sequence and in-memory progress behavior.
-11. `backend/src/pipeline/orchestrator.ts`
+13. `backend/src/features/jobs/batch/runner.ts`
+   - Batch pipeline sequence and analysis prerequisite behavior.
+14. `backend/src/pipeline/analysis_prerequisites.ts`
+   - Shared strategy-aware analysis preparation for direct, batch, and orchestrator paths.
+15. `backend/src/pipeline/orchestrator.ts`
    - Full backend pipeline sequence.
-12. `backend/src/storage/files.ts`
-   - Artifact paths and source video lookup behavior.
-13. `backend/src/storage/metadata.ts`
+16. `backend/src/storage/files.ts`
+   - Low-level artifact paths and source video lookup implementation.
+17. `backend/src/storage/metadata.ts`
    - JSON-backed job persistence.
-14. `backend/src/core/settings.ts`
+18. `backend/src/core/settings.ts`
    - Media base directory and local settings behavior.
-15. `backend/src/core/toolConfigs.ts`
+19. `backend/src/core/toolConfigs.ts`
     - Whisper, FFmpeg, LLM, and embedding config behavior.
-16. `frontend/src/api/client.ts`
+20. `frontend/src/api/client.ts`
     - Frontend backend base URL and request wrapper.
-17. `frontend/src/components/UploadSection.tsx`
+21. `frontend/src/components/UploadSection.tsx`
     - YouTube URL and local upload entry flow.
-18. `frontend/src/App.tsx`
+22. `frontend/src/App.tsx`
     - Main UI coordinator and workflow state.
 
 For specific workflows:
@@ -60,10 +68,12 @@ For specific workflows:
 - Transcription: `backend/src/pipeline/transcription.ts`
 - Semantic blocks: `backend/src/pipeline/semantic_blocks.ts`
 - Topic segmentation: `backend/src/pipeline/topic_segmentation.ts`
+- Analysis prerequisites: `backend/src/pipeline/analysis_prerequisites.ts`
 - LLM analysis: `backend/src/pipeline/analysis.ts`
 - Rendering: `backend/src/pipeline/rendering.ts`, `backend/src/video/vertical.ts`
 - Dependency configuration: `backend/src/routes/config/registerDependenciesRoutes.ts`, `backend/src/features/dependencies/`
 - Job feature operations: `backend/src/features/jobs/`
+- Service boundaries: `backend/src/services/`
 
 ## Backend Documentation Map
 
@@ -170,8 +180,13 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - Keep this section as a high-level pointer. Use the folder docs listed in **Backend Documentation Map** for responsibilities, interactions, and invariants.
 - Route and response contracts live under `backend/src/routes/`; route behavior should remain compatible with frontend API wrappers.
 - Route handlers now delegate much of the route-adjacent work to `backend/src/features/`; jobs feature modules are flattened for small operations and grouped only for multi-file areas like batch and render.
-- Pipeline and artifact behavior live under `backend/src/pipeline/` and `backend/src/storage/`; preserve artifact names and source path semantics during refactors.
-- Runtime settings, tool configs, and local task logs live under `backend/src/core/`; preserve persisted JSON shapes unless intentionally migrating them.
+- `backend/src/services/` contains the current backend service boundaries:
+  - `jobLifecycleService.ts` wraps job metadata load/save/update/status behavior.
+  - `artifactService.ts` wraps canonical artifact paths, artifact reads/writes, source-video lookup, render listings, and storage-facing path helpers.
+  - `operationRuntimeService.ts` owns process-local runtime state for task logs, active transcription/render processes, cancellation state, batch progress, and dependency install session access.
+- Pipeline behavior lives under `backend/src/pipeline/`; low-level artifact implementation remains under `backend/src/storage/` behind `artifactService`.
+- Runtime defaults, persisted settings, and persisted tool configs live under `backend/src/core/`; preserve persisted JSON shapes unless intentionally migrating them.
+- `backend/src/config/` currently contains user-facing config route helpers. A future `backend/src/features/config/` boundary has been recommended but has not yet been implemented.
 
 ### Frontend Layout
 
@@ -221,6 +236,9 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - Transcribe: `App.tsx` -> `transcribeJob()` -> `POST /jobs/:job_id/transcribe`.
 - Build blocks: `App.tsx` -> `buildBlocks()` -> `POST /jobs/:job_id/blocks`.
 - Analyze: `App.tsx` -> `analyzeJob()` -> `POST /jobs/:job_id/analyze` -> `features/jobs/directAnalysis.ts`.
+- Direct analysis uses `analysis_prerequisites.ts`:
+  - short videos prepare semantic blocks only.
+  - medium/long videos prepare semantic blocks and topic segments before `analyzeBlocks()`.
 - Render: `App.tsx` -> `updateCuts()` -> `renderJob()` -> poll render outputs/job status.
 
 ### Full Backend Pipeline
@@ -230,10 +248,11 @@ Do not break these during refactors unless the task explicitly asks for a behavi
   - ingest
   - transcription
   - semantic blocks
-  - topic segmentation
+  - strategy-aware topic segmentation for medium/long videos
   - analysis
   - optional rendering
 - `orchestrator.ts` uses job status ordering to skip already-completed steps.
+- `analysis_prerequisites.ts` is the shared source for analysis preparation behavior across orchestrator, direct analysis, and batch analysis.
 
 ### Batch Pipeline
 
@@ -242,9 +261,12 @@ Do not break these during refactors unless the task explicitly asks for a behavi
   - `/jobs/batch/:batch_id/status`
   - `/jobs/batch/:batch_id/cancel`
   - `/jobs/batch/:batch_id/continue`
-- `registerBatchPipelineRoutes.ts` stores progress in an in-memory `activeBatchProcesses` map.
+- `registerBatchPipelineRoutes.ts` creates/reads in-memory batch progress through `operationRuntimeService`.
 - `registerBatchPipelineRoutes.ts` delegates processing to `features/jobs/batch/runner.ts`.
 - Batch can run transcription, semantic blocks, analysis, optional approval wait, and rendering.
+- Batch analysis uses the same strategy-aware prerequisites as direct/orchestrator analysis:
+  - short videos prepare semantic blocks only.
+  - medium/long videos prepare semantic blocks and topic segments before `analyzeBlocks()`.
 
 ### Media Output
 
@@ -257,7 +279,8 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 ### Job Metadata
 
 - `backend/src/models/job.ts` defines `Job` and `JobStatus`.
-- `metadata.ts` persists jobs as `data/jobs/<job_id>/job.json`.
+- `storage/metadata.ts` persists jobs as `data/jobs/<job_id>/job.json`.
+- `services/jobLifecycleService.ts` is the backend-facing boundary for job load/save/update/status operations.
 
 ### Source Video
 
@@ -266,22 +289,23 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 
 ### Transcription
 
-- `transcription.ts` finds source video with `files.findSourceVideo(jobId)`.
+- `transcription.ts` finds source video through `artifactService.findSourceVideo(jobId)`.
 - It builds a Whisper CLI command from `loadActiveToolConfigs().whisper`.
 - It writes:
   - `transcription.segments.json`
   - `transcription.txt` when configured
   - `transcription.vtt` when configured
+- Active transcription process tracking and cancellation are owned by `operationRuntimeService`.
 
 ### Semantic Blocks
 
-- `semantic_blocks.ts` reads `transcription.segments.json`.
+- `semantic_blocks.ts` reads `transcription.segments.json` through `artifactService`.
 - It groups segments by duration, punctuation, and pause thresholds.
 - It writes `semantic.blocks.json`.
 
 ### Topic Segments
 
-- `topic_segmentation.ts` reads `semantic.blocks.json`.
+- `topic_segmentation.ts` reads `semantic.blocks.json` through `artifactService`.
 - It uses heuristic boundaries and optional embedding boundaries.
 - It writes `topic.segments.json`.
 
@@ -289,9 +313,10 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 
 - `analysis.ts` reads semantic blocks.
 - For medium/long strategies, `analysis.ts` reads topic segments.
+- `analysis_prerequisites.ts` prepares semantic blocks for short videos and semantic blocks plus topic segments for medium/long videos across direct, batch, and orchestrator analysis entrypoints.
 - It calls Ollama through `OllamaClient`.
-- It parses LLM JSON, filters incoherent cuts, deduplicates overlaps, and writes cuts through `files.cutsPath(jobId)`.
-- `files.cutsPath(jobId)` resolves to `data/jobs/<job_id>/cuts.suggested.json`.
+- It parses LLM JSON, filters incoherent cuts, deduplicates overlaps, and writes cuts through `artifactService.cutsPath(jobId)`.
+- `artifactService.cutsPath(jobId)` resolves to `data/jobs/<job_id>/cuts.suggested.json`.
 - `curation.ts` reads/writes the same cuts file for approve/reject status changes.
 - `App.tsx` can edit, delete, manually add, normalize IDs, and sync the whole cuts array with `PUT /jobs/:job_id/cuts`.
 
@@ -300,7 +325,8 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - `rendering.ts` reads source video and cuts.
 - `video/vertical.ts` builds FFmpeg commands.
 - Rendered MP4 files are written into the video's `shorts` folder.
-- `files.buildCutFilename(start, end)` names rendered files from timestamp ranges.
+- `artifactService.buildCutFilename(start, end)` names rendered files from timestamp ranges.
+- Active rendering process tracking and cancellation are owned by `operationRuntimeService`.
 
 ### Settings And Tool Config
 
@@ -311,7 +337,8 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 
 ### Logs And Progress
 
-- `taskLogs.ts` stores ingest/transcription/render logs in memory.
+- `core/taskLogs.ts` stores ingest/transcription/render logs in memory.
+- `operationRuntimeService.ts` is the backend-facing boundary for task logs, active transcription/render processes, cancellation state, batch progress, and dependency install session access.
 - Logs are capped at 400 lines per task.
 - `registerLogsRoutes.ts` exposes `/jobs/:job_id/logs/:task`.
 - `App.tsx` polls task logs every 1500ms.
@@ -378,14 +405,17 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 
 ### Backend Complexity Hotspots
 
-- `backend/src/core/toolConfigs.ts`: 20000 bytes, 606 lines.
-- `backend/src/features/dependencies/execution/install.ts`: 9942 bytes, 299 lines.
-- `backend/src/core/settings.ts`: 8883 bytes, 290 lines.
-- `backend/src/llm/client.ts`: 7046 bytes, 219 lines.
-- `backend/src/config/installer.ts`: 6944 bytes, 180 lines.
-- `backend/src/features/dependencies/runtime/dependencySessions.ts`: 6596 bytes, 228 lines.
-- `backend/src/features/dependencies/detection/pythonRuntime.ts`: 5898 bytes, 203 lines.
-- `backend/src/routes/config/registerDependenciesRoutes.ts` is now reduced to 5426 bytes after dependency logic moved into `features/dependencies/`.
+- `backend/src/core/toolConfigs.ts`: 20000 bytes, 538 lines.
+- `backend/src/features/dependencies/execution/install.ts`: 9942 bytes, 259 lines.
+- `backend/src/core/settings.ts`: 8883 bytes, 263 lines.
+- `backend/src/llm/client.ts`: 7046 bytes, 180 lines.
+- `backend/src/config/installer.ts`: 6944 bytes, 178 lines.
+- `backend/src/features/dependencies/runtime/dependencySessions.ts`: 6596 bytes, 207 lines.
+- `backend/src/features/dependencies/detection/pythonRuntime.ts`: 5898 bytes, 178 lines.
+- `backend/src/pipeline/analysis/cuts.ts`: 5880 bytes, 143 lines.
+- `backend/src/services/operationRuntimeService.ts`: 5765 bytes, 162 lines.
+- `backend/src/config/ollama/catalog.ts`: 5682 bytes, 162 lines.
+- `backend/src/routes/config/registerDependenciesRoutes.ts`: 5537 bytes, 135 lines after dependency logic moved into `features/dependencies/`.
 
 ### Large Runtime / Generated Files
 
@@ -402,24 +432,16 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 
 ## Observed Risks
 
-### Analysis Prerequisite Divergence
-
-- `orchestrator.ts` runs `buildTopicSegments()` before `analyzeBlocks()`.
-- `features/jobs/directAnalysis.ts` ensures semantic blocks only.
-- `features/jobs/batch/runner.ts` rebuilds semantic blocks before analysis, but does not run topic segmentation.
-- Tests currently assert that direct analysis and batch analysis do not prepare topic segments, even for topic-aware durations.
-- Risk: if product expectations change so direct/batch analysis should fully support medium/long topic-aware strategies, callers may need a shared analysis preparation helper.
-
 ### Absolute Source Paths
 
 - `Job.source_video_path` is shared by many modules.
 - Rename/archive/delete operations move or remove folders.
-- Caches exist in `metadata.ts` and `storage/sourceVideo.ts`.
+- Caches exist in `metadata.ts`, `storage/sourceVideo.ts`, and `features/media/streaming.ts`.
 - Risk: moved or deleted files can conflict with cached paths if invalidation is incomplete.
 
-### In-Memory Runtime State
+### Process-Local Runtime State
 
-- Task logs, batch progress, active transcriptions, and active renderings are module-level maps.
+- `operationRuntimeService.ts` owns task logs access, batch progress, active transcriptions, active renderings, render cancellation state, and dependency install session access.
 - Risk: state is lost on process restart and is not durable.
 
 ### Shared Cuts Mutation
@@ -445,12 +467,17 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - Root `README.md` still documents backend port `3000`, while current backend code and frontend API config use `8000`.
 - Risk: setup/debugging instructions can mislead new contributors.
 
+### Config Boundary Ambiguity
+
+- `backend/src/config/` currently contains user-facing config route helpers, while `backend/src/core/` contains persisted settings/tool config stores.
+- `backend/src/features/config/` has been recommended as the future route-adjacent config feature boundary but does not exist yet.
+- Risk: future config refactors may continue ad hoc moves unless this boundary is implemented deliberately.
+
 ## Hypotheses
 
 These are plausible interpretations, not verified requirements:
 
-- `POST /jobs/:job_id/run` may be the intended safe path for medium/long analysis because it includes topic segmentation before analysis.
-- `POST /jobs/:job_id/analyze` and batch analysis may be intentionally lighter-weight/manual workflows; tests currently preserve that behavior.
+- `backend/src/features/config/` may be the right long-term home for user-facing config workflows currently under `backend/src/config/`, while `backend/src/core/` remains the persisted config store.
 - `UploadSection` may be the intended current upload owner, while leftover upload state remains in `App.tsx`/`useUIState.ts`.
 
 ## Immediate Wins
@@ -458,8 +485,8 @@ These are plausible interpretations, not verified requirements:
 Small, low-risk improvements to consider first:
 
 - Correct the root `README.md` backend port references from `3000` to `8000`.
-- Decide whether direct and batch analysis should remain semantic-block-only preparation flows or should share the orchestrator's topic-segmentation preparation for topic-aware durations.
-- If direct/batch analysis should become topic-aware, add/extend regression tests before changing the prerequisite behavior currently asserted by tests.
+- Introduce `backend/src/features/config/` and move route-only config helpers from `backend/src/config/` in small slices.
+- Move `backend/src/config/installer.ts` into the dependency feature area if dependency install guides remain dependency-domain data.
 - Add a small shared route path/contract reference only if route literal duplication starts causing real churn.
 - Confirm whether the existing `docs/ARCHITECTURE.md` deletion is intentional before staging or committing.
 - Consider narrowing frontend upload state ownership after confirming which path is active in the UI.
@@ -469,17 +496,28 @@ Small, low-risk improvements to consider first:
 ### Recently Completed
 
 - Added frontend `BUILDING_TOPICS` status compatibility.
-- Switched batch pre-approval pending cuts to the canonical `files.cutsPath(jobId)` / `cuts.suggested.json` artifact and added regression coverage.
+- Switched batch pre-approval pending cuts to the canonical `artifactService.cutsPath(jobId)` / `cuts.suggested.json` artifact and added regression coverage.
 - Added/kept focused tests around direct analysis prerequisites, batch analysis prerequisites, topic status transitions, cuts mutation, and artifact path lifecycle.
 - Extracted dependency detection/execution/session/terminal logic from the large config route into `backend/src/features/dependencies/`.
 - Flattened single-file job feature folders into direct files under `backend/src/features/jobs/`.
 - Added parent-folder backend documentation and updated this `AGENTS.md` documentation map.
+- Aligned direct, batch, and orchestrator analysis entrypoints on strategy-aware prerequisites:
+  - short videos prepare semantic blocks only.
+  - medium/long videos prepare semantic blocks and topic segments before analysis.
+- Added shared analysis preparation helpers in `backend/src/pipeline/analysis_prerequisites.ts`.
+- Introduced backend service boundaries:
+  - `backend/src/services/jobLifecycleService.ts`
+  - `backend/src/services/artifactService.ts`
+  - `backend/src/services/operationRuntimeService.ts`
 
 ### Priority 1 = Low Risk / High Impact
 
 - Correct stale root README references to backend port `3000`.
-- Decide and document the intended behavior for direct/batch analysis on topic-aware durations before changing implementation.
-- If direct/batch should be topic-aware, add a shared analysis preparation helper that preserves existing route response shapes and updates tests first.
+- Introduce `backend/src/features/config/` for route-adjacent config workflows while keeping persisted settings/tool config stores in `backend/src/core/`.
+- Move route-only config helpers first:
+  - `backend/src/config/settings/settingsUpdate.ts`
+  - `backend/src/config/prompts/savedPrompts.ts`
+  - `backend/src/config/folders/`
 - Add route/path contract coverage only where route literals have caused or are likely to cause breakage.
 - Tighten frontend API wrapper types without changing routes.
 
@@ -490,6 +528,8 @@ Small, low-risk improvements to consider first:
   - `backend/src/core/settings.ts`
   - `backend/src/features/dependencies/execution/install.ts`
   - `backend/src/features/dependencies/runtime/dependencySessions.ts`
+- Move `backend/src/config/ollama/` into the future `backend/src/features/config/ollama/` boundary if the config-feature structure is introduced.
+- Move dependency installation guide data out of `backend/src/config/installer.ts` and into the dependency feature area.
 - Reduce `App.tsx` by workflow:
   - Render polling and task-log polling.
   - Batch polling.
@@ -504,10 +544,10 @@ Small, low-risk improvements to consider first:
 
 ### Priority 3 = Structural Changes
 
-- Introduce service boundaries around current file-backed behavior:
-  - `jobService` for lifecycle and metadata updates.
-  - `artifactService` or storage facade for paths/read/write operations.
-  - `operationService` for active transcription/render/batch state and logs.
+- Refine existing service boundaries only where tests show a clear benefit:
+  - `jobLifecycleService`
+  - `artifactService`
+  - `operationRuntimeService`
 - Establish shared frontend/backend contracts after route behavior stabilizes:
   - `JobStatus`
   - `Job`
@@ -526,11 +566,14 @@ Small, low-risk improvements to consider first:
 - Move code before changing behavior.
 - Prefer wrappers before rewrites.
 - Replace call sites incrementally.
+- Prefer routing new lifecycle, artifact/path, and process-local runtime access through the existing service boundaries.
 - Keep generated/runtime data separate from refactors.
 - Add tests before touching high-risk files:
   - `backend/src/pipeline/transcription.ts`
   - `backend/src/pipeline/rendering.ts`
+  - `backend/src/pipeline/analysis_prerequisites.ts`
   - `backend/src/features/dependencies/`
+  - `backend/src/services/`
   - `backend/src/routes/config/registerDependenciesRoutes.ts` when changing route contracts
   - major `frontend/src/App.tsx` extraction
 - Avoid changing these during structural extraction:
@@ -554,6 +597,6 @@ Validation commands for future code changes:
 - `README.md` references `frontend/README.md`; that file was not observed during file listing.
 - `README.md` mentions an `upload/` folder; `core/paths.ts` references `upload/`, but no root `upload/` directory was observed.
 - It is unclear which upload state path is intended as primary.
-- It is unclear whether direct `POST /jobs/:job_id/analyze` and batch analysis are expected to support medium/long topic segmentation without first using `POST /jobs/:job_id/run`; tests currently preserve the no-topic-preparation behavior for those routes.
+- `backend/src/features/config/` does not exist yet; the intended config/core/features-config boundary has been recommended but not implemented.
 - `docs/ARCHITECTURE.md` is currently deleted in the working tree; confirm whether that deletion is intentional before staging or committing.
-- It is unclear whether caches in `metadata.ts` and `storage/sourceVideo.ts` are invalidated in every rename/archive/delete scenario.
+- It is unclear whether caches in `metadata.ts`, `storage/sourceVideo.ts`, and `features/media/streaming.ts` are invalidated in every rename/archive/delete scenario.
