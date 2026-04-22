@@ -1,7 +1,7 @@
 import { Job, JobStatus } from "../../models/job";
 import { appendTaskLogs, clearTaskLogs } from "../../core/taskLogs";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 import { IngestPaths } from "./types";
 
 export function beginIngest(job: Job): IngestPaths {
@@ -17,7 +17,7 @@ export function beginIngest(job: Job): IngestPaths {
     `[ingest] URL: ${job.youtube_url}`,
   ]);
 
-  metadata.updateJobStatus(job.job_id, JobStatus.DOWNLOADING);
+  jobLifecycleService.updateJobStatus(job.job_id, JobStatus.DOWNLOADING);
 
   const infoPath = files.sourceVideoInfoPath(job.job_id);
   const outputPattern = files.sourceVideoOutputTemplate(job.job_id);

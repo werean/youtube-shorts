@@ -6,8 +6,8 @@ import * as fs from "fs";
 import { Segment } from "../models/segment";
 import { SemanticBlock } from "../models/semantic_block";
 import { JobStatus } from "../models/job";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as files from "../storage/files";
-import * as metadata from "../storage/metadata";
 
 const TARGET_MIN_SECONDS = 5.0;
 const TARGET_MAX_SECONDS = 20.0;
@@ -32,7 +32,7 @@ function endsSentence(text: string): boolean {
 
 export function buildSemanticBlocks(jobId: string): SemanticBlock[] {
   console.log(`[semantic_blocks] Building semantic blocks for job ${jobId}`);
-  metadata.updateJobStatus(jobId, JobStatus.BUILDING_BLOCKS);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.BUILDING_BLOCKS);
 
   const segments = loadSegments(jobId);
   if (segments.length === 0) {
@@ -108,10 +108,10 @@ export function buildSemanticBlocks(jobId: string): SemanticBlock[] {
   fs.writeFileSync(outputPath, JSON.stringify(blocks, null, 2), "utf-8");
   console.log(`[semantic_blocks] Semantic blocks saved for job ${jobId}`);
 
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
   job.status = JobStatus.ANALYZING;
   job.updated_at = new Date().toISOString();
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
 
   return blocks;
 }

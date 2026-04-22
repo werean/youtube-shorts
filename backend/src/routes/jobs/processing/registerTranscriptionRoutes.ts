@@ -9,7 +9,7 @@ import {
   deleteAllTranscriptionArtifacts,
   deleteTranscriptionFormat,
   readTranscriptionResponse,
-} from "../../../features/jobs/transcription/artifacts";
+} from "../../../features/jobs/transcriptionArtifacts";
 
 export function registerTranscriptionRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/transcribe", async (request, reply) => {

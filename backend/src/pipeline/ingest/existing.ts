@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
-import * as metadata from "../../storage/metadata";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import { IngestResult } from "./types";
 
 export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult | null {
@@ -11,7 +11,7 @@ export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult
 
   console.log(`[ingest] ✓ Video já existe, pulando download...`);
   appendTaskLog(job.job_id, "ingest", "[ingest] Video already exists. Skipping download.");
-  const updatedJob = metadata.loadJob(job.job_id);
+  const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
   updatedJob.status = JobStatus.DOWNLOADED;
 
@@ -26,7 +26,7 @@ export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult
     } catch (e) {
       updatedJob.video_name = updatedJob.job_id;
     }
-    metadata.saveJob(updatedJob);
+    jobLifecycleService.saveJob(updatedJob);
   }
 
   return {

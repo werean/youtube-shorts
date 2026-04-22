@@ -3,7 +3,7 @@ import * as path from "path";
 import { getVideoDir } from "../../core/settings";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
-import * as metadata from "../../storage/metadata";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import { IngestResult } from "./types";
 
 export function handleDownloadedArtifacts(
@@ -23,7 +23,7 @@ export function handleDownloadedArtifacts(
   console.log(`[ingest] ✓ Arquivo baixado: ${downloadedFile}`);
   appendTaskLog(job.job_id, "ingest", `[ingest] File: ${downloadedFile}`);
 
-  const updatedJob = metadata.loadJob(job.job_id);
+  const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
   updatedJob.status = JobStatus.DOWNLOADED;
   updatedJob.source_video_path = downloadedPath;
@@ -54,7 +54,7 @@ export function handleDownloadedArtifacts(
   }
 
   updatedJob.source_video_path = downloadedPath;
-  metadata.saveJob(updatedJob);
+  jobLifecycleService.saveJob(updatedJob);
 
   console.log(`[ingest] ✓ Video pronto para reprodução: ${downloadedFile}`);
   console.log(`[ingest] ============================================\n`);

@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 
-import type { Job } from "../../../models/job";
-import { JobStatus } from "../../../models/job";
-import * as metadata from "../../../storage/metadata";
+import type { Job } from "../../models/job";
+import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 
 export function createJobForYoutubeUrl(youtubeUrl: string): Job {
   const jobId = uuidv4().replace(/-/g, "");
@@ -16,6 +16,6 @@ export function createJobForYoutubeUrl(youtubeUrl: string): Job {
   };
 
   console.log(`[POST /jobs] Salvando job...`);
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
   return job;
 }

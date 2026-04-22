@@ -5,7 +5,7 @@
 import type { FastifyInstance } from "fastify";
 import * as curation from "../../../pipeline/curation";
 import type { Cut } from "../../../models/cut";
-import { replaceCuts } from "../../../features/jobs/cuts/sync";
+import { replaceCuts } from "../../../features/jobs/cuts";
 
 export function registerCutsRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { job_id: string } }>("/:job_id/cuts", async (request, reply) => {

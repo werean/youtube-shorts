@@ -4,13 +4,14 @@ import type { FastifyInstance } from "fastify";
 import { createServer } from "../../../src/app/createServer";
 
 let app: FastifyInstance;
+const durationsByJobId = new Map<string, number>();
 
 const loadJobMock = mock((jobId: string) => ({
   job_id: jobId,
   youtube_url: "https://example.com/video",
   status: "DOWNLOADED",
   created_at: "2026-04-21T00:00:00.000Z",
-  video_duration_seconds: 1800,
+  video_duration_seconds: durationsByJobId.get(jobId) ?? 1800,
 }));
 
 const transcribeJobMock = mock(async () => undefined);
@@ -46,6 +47,14 @@ mock.module("../../../src/pipeline/analysis", () => ({
 
 mock.module("../../../src/pipeline/rendering", () => ({
   renderSuggestedCuts: renderSuggestedCutsMock,
+}));
+
+mock.module("../../../src/core/toolConfigs", () => ({
+  loadActiveToolConfigs: () => ({
+    llm: {
+      embedding_model: "test-embed-model",
+    },
+  }),
 }));
 
 const { registerBatchPipelineRoutes } = await import(
@@ -101,6 +110,7 @@ describe("batch analysis prerequisites", () => {
     buildTopicSegmentsMock.mockClear();
     analyzeBlocksMock.mockClear();
     renderSuggestedCutsMock.mockClear();
+    durationsByJobId.clear();
 
     app = createServer();
     registerBatchPipelineRoutes(app);
@@ -112,6 +122,8 @@ describe("batch analysis prerequisites", () => {
   });
 
   test("always builds semantic blocks before batch analysis when analysis is enabled", async () => {
+    durationsByJobId.set("job-batch", 60);
+
     const startResponse = await request("POST", "/batch/run", {
       job_ids: ["job-batch"],
       options: {
@@ -134,10 +146,31 @@ describe("batch analysis prerequisites", () => {
     });
     expect(transcribeJobMock).not.toHaveBeenCalled();
     expect(buildSemanticBlocksMock).toHaveBeenCalledWith("job-batch");
-    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-batch", 1800);
+    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-batch", 60);
   });
 
-  test("does not prepare topic segments before batch analysis, even for topic-aware durations", async () => {
+  test("does not prepare topic segments before batch analysis for short videos", async () => {
+    durationsByJobId.set("job-batch-short", 60);
+
+    const startResponse = await request("POST", "/batch/run", {
+      job_ids: ["job-batch-short"],
+      options: {
+        transcription: false,
+        analysis: true,
+        render: false,
+        preApprove: false,
+      },
+    });
+
+    expect(startResponse.statusCode).toBe(200);
+    await waitForBatchDone(String(startResponse.body.batch_id));
+
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-batch-short", 60);
+    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+  });
+
+  test("prepares topic segments before batch analysis for medium videos", async () => {
     const startResponse = await request("POST", "/batch/run", {
       job_ids: ["job-batch-medium"],
       options: {
@@ -152,6 +185,34 @@ describe("batch analysis prerequisites", () => {
     await waitForBatchDone(String(startResponse.body.batch_id));
 
     expect(analyzeBlocksMock).toHaveBeenCalledWith("job-batch-medium", 1800);
-    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+    expect(buildTopicSegmentsMock).toHaveBeenCalledWith(
+      "job-batch-medium",
+      true,
+      "test-embed-model",
+    );
+  });
+
+  test("prepares topic segments before batch analysis for long videos", async () => {
+    durationsByJobId.set("job-batch-long", 4000);
+
+    const startResponse = await request("POST", "/batch/run", {
+      job_ids: ["job-batch-long"],
+      options: {
+        transcription: false,
+        analysis: true,
+        render: false,
+        preApprove: false,
+      },
+    });
+
+    expect(startResponse.statusCode).toBe(200);
+    await waitForBatchDone(String(startResponse.body.batch_id));
+
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-batch-long", 4000);
+    expect(buildTopicSegmentsMock).toHaveBeenCalledWith(
+      "job-batch-long",
+      true,
+      "test-embed-model",
+    );
   });
 });

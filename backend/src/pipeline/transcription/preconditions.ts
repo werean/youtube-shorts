@@ -1,8 +1,8 @@
 import { config } from "../../core/config";
 import { appendTaskLog, appendTaskLogs, clearTaskLogs } from "../../core/taskLogs";
 import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 import { activeTranscriptionJobIds } from "./process";
 
 export type PreparedTranscriptionSource = {
@@ -27,7 +27,7 @@ export function prepareTranscriptionSource(jobId: string): PreparedTranscription
   console.log(`[transcription] Starting transcription for job ${jobId}`);
   console.log(`[transcription] ============================================`);
   appendTaskLog(jobId, "transcription", "[transcription] Starting transcription");
-  metadata.updateJobStatus(jobId, JobStatus.TRANSCRIBING);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.TRANSCRIBING);
 
   console.log(`[transcription] Procurando arquivo de vídeo...`);
   const videoPath = files.findSourceVideo(jobId);

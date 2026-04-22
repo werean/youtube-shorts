@@ -97,6 +97,8 @@ mock.module("../../../src/pipeline/transcription", () => ({
 
 mock.module("../../../src/pipeline/analysis_prerequisites", () => ({
   buildSemanticBlocksForAnalysis: buildSemanticBlocksForAnalysisMock,
+  prepareAnalysisPrerequisites: async (job: { job_id: string }) =>
+    buildSemanticBlocksForAnalysisMock(job.job_id),
 }));
 
 mock.module("../../../src/pipeline/analysis", () => ({

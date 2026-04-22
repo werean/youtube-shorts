@@ -8,6 +8,7 @@ import { createServer } from "../../../src/app/createServer";
 
 let app: FastifyInstance;
 let tempRoot = "";
+const durationsByJobId = new Map<string, number>();
 
 function semanticBlocksPath(jobId: string): string {
   return path.join(tempRoot, jobId, "semantic.blocks.json");
@@ -22,7 +23,7 @@ const loadJobMock = mock((jobId: string) => ({
   youtube_url: "https://example.com/video",
   status: "DOWNLOADED",
   created_at: "2026-04-21T00:00:00.000Z",
-  video_duration_seconds: 1800,
+  video_duration_seconds: durationsByJobId.get(jobId) ?? 1800,
 }));
 
 const buildSemanticBlocksMock = mock((jobId: string) => {
@@ -59,6 +60,14 @@ mock.module("../../../src/pipeline/analysis", () => ({
   analyzeBlocks: analyzeBlocksMock,
 }));
 
+mock.module("../../../src/core/toolConfigs", () => ({
+  loadActiveToolConfigs: () => ({
+    llm: {
+      embedding_model: "test-embed-model",
+    },
+  }),
+}));
+
 const { registerAnalysisRoutes } = await import("../../../src/routes/jobs/registerAnalysisRoutes");
 
 function baseUrl(): string {
@@ -88,6 +97,7 @@ describe("direct analysis route prerequisites", () => {
     buildSemanticBlocksMock.mockClear();
     buildTopicSegmentsMock.mockClear();
     analyzeBlocksMock.mockClear();
+    durationsByJobId.clear();
 
     app = createServer();
     registerAnalysisRoutes(app);
@@ -102,12 +112,15 @@ describe("direct analysis route prerequisites", () => {
   });
 
   test("builds semantic blocks before analysis when the blocks artifact is missing", async () => {
+    durationsByJobId.set("job-direct", 60);
+
     const response = await postAnalyze("job-direct");
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ cuts: [], raw_response: "[]" });
     expect(buildSemanticBlocksMock).toHaveBeenCalledWith("job-direct");
-    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-direct", 1800);
+    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-direct", 60);
   });
 
   test("does not rebuild semantic blocks when the blocks artifact already exists", async () => {
@@ -121,12 +134,38 @@ describe("direct analysis route prerequisites", () => {
     expect(analyzeBlocksMock).toHaveBeenCalledWith("job-existing", 1800);
   });
 
-  test("does not prepare topic segments before direct analysis, even for topic-aware durations", async () => {
+  test("does not prepare topic segments before direct analysis for short videos", async () => {
+    durationsByJobId.set("job-short", 60);
+
+    const response = await postAnalyze("job-short");
+
+    expect(response.statusCode).toBe(200);
+    expect(loadJobMock).toHaveBeenCalledWith("job-short");
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-short", 60);
+    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+  });
+
+  test("prepares topic segments before direct analysis for medium videos", async () => {
     const response = await postAnalyze("job-medium");
 
     expect(response.statusCode).toBe(200);
     expect(loadJobMock).toHaveBeenCalledWith("job-medium");
     expect(analyzeBlocksMock).toHaveBeenCalledWith("job-medium", 1800);
-    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+    expect(buildTopicSegmentsMock).toHaveBeenCalledWith(
+      "job-medium",
+      true,
+      "test-embed-model",
+    );
+  });
+
+  test("prepares topic segments before direct analysis for long videos", async () => {
+    durationsByJobId.set("job-long", 4000);
+
+    const response = await postAnalyze("job-long");
+
+    expect(response.statusCode).toBe(200);
+    expect(loadJobMock).toHaveBeenCalledWith("job-long");
+    expect(analyzeBlocksMock).toHaveBeenCalledWith("job-long", 4000);
+    expect(buildTopicSegmentsMock).toHaveBeenCalledWith("job-long", true, "test-embed-model");
   });
 });

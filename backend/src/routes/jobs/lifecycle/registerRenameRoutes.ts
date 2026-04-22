@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { renameJobVideo } from "../../../features/jobs/rename/renameJob";
+import { renameJobVideo } from "../../../features/jobs/rename";
 
 export function registerRenameRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string }; Body: { new_name: string } }>(

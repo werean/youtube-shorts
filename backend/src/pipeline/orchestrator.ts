@@ -3,7 +3,7 @@
  */
 
 import { Job, JobStatus } from "../models/job";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import { ingestVideo } from "./ingest";
 import { transcribeJob } from "./transcription";
 import {
@@ -47,7 +47,7 @@ export async function runPipeline(
     steps.push([JobStatus.RENDERING, (job: Job) => renderSuggestedCuts(job.job_id)]);
   }
 
-  let job = metadata.loadJob(jobId);
+  let job = jobLifecycleService.loadJob(jobId);
 
   try {
     for (const [status, action] of steps) {
@@ -58,15 +58,15 @@ export async function runPipeline(
       // Skip steps that already completed based on current status
       if (isStatusBefore(job.status, status)) {
         await action(job);
-        job = metadata.loadJob(jobId);
+        job = jobLifecycleService.loadJob(jobId);
       }
     }
   } catch (error) {
-    metadata.updateJobStatus(jobId, JobStatus.ERROR);
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR);
     throw error;
   }
 
-  return metadata.loadJob(jobId);
+  return jobLifecycleService.loadJob(jobId);
 }
 
 /**

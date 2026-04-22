@@ -1,5 +1,5 @@
-import * as files from "../../../storage/files";
-import * as metadata from "../../../storage/metadata";
+import * as files from "../../storage/files";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 
 export function renameJobVideo(jobId: string, newName: string) {
   console.log(`[jobs] Renaming job ${jobId} to "${newName}"`);
@@ -9,5 +9,5 @@ export function renameJobVideo(jobId: string, newName: string) {
     return null;
   }
 
-  return metadata.loadJob(jobId);
+  return jobLifecycleService.loadJob(jobId);
 }

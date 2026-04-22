@@ -6,7 +6,7 @@
 
 import { TopicSegment } from "../models/topic_segment";
 import { JobStatus } from "../models/job";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import { addEmbeddingBoundaries } from "./topic_segmentation/embeddings";
 import { detectHeuristicBoundaries } from "./topic_segmentation/heuristics";
 import { persistTopicSegments } from "./topic_segmentation/persistence";
@@ -32,7 +32,7 @@ export async function buildTopicSegments(
   console.log(
     `[topic_segmentation] Building topic segments for job ${jobId} (useEmbeddings=${useEmbeddings}, model=${embeddingModel}, threshold=${similarityThreshold})`,
   );
-  metadata.updateJobStatus(jobId, JobStatus.BUILDING_TOPICS);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.BUILDING_TOPICS);
 
   const blocks = loadSemanticBlocksForTopics(jobId);
   const heuristicBoundaries = detectHeuristicBoundaries(blocks);

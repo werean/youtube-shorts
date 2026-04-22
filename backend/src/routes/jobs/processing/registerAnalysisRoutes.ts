@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { analyzeJobDirectly } from "../../../features/jobs/analysis/directAnalysis";
+import { analyzeJobDirectly } from "../../../features/jobs/directAnalysis";
 
 export function registerAnalysisRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/analyze", async (request, reply) => {

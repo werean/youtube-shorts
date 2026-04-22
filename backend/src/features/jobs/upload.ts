@@ -3,10 +3,10 @@ import * as path from "path";
 import { pipeline } from "stream/promises";
 import { v4 as uuidv4 } from "uuid";
 
-import { getVideoFilePath } from "../../../core/settings";
-import type { Job } from "../../../models/job";
-import { JobStatus } from "../../../models/job";
-import * as metadata from "../../../storage/metadata";
+import { getVideoFilePath } from "../../core/settings";
+import type { Job } from "../../models/job";
+import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 
 export async function saveUploadedVideoJob(data: any): Promise<{ job: Job; video_path: string }> {
   console.log(`[POST /jobs/upload] Arquivo recebido: ${data.filename}`);
@@ -38,7 +38,7 @@ export async function saveUploadedVideoJob(data: any): Promise<{ job: Job; video
   };
 
   console.log(`[POST /jobs/upload] Salvando job...`);
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
   console.log(`[POST /jobs/upload] ✓ Job criado com sucesso: ${jobId}`);
 
   return {

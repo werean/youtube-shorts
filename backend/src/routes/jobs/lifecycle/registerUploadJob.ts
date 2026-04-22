@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { saveUploadedVideoJob } from "../../../features/jobs/upload/localUpload";
+import { saveUploadedVideoJob } from "../../../features/jobs/upload";
 
 export function registerUploadJobRoutes(fastify: FastifyInstance) {
   fastify.post("/upload", async (request, reply) => {

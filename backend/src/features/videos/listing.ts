@@ -5,8 +5,8 @@ import { v4 as uuidv4 } from "uuid";
 import { archivedVideosDir, loadSettings } from "../../core/settings";
 import type { Job } from "../../models/job";
 import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 import type { VideoRecord } from "./types";
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"]);
@@ -51,7 +51,7 @@ function collectVideoFiles(
 }
 
 function mapJobsBySourcePath(): Map<string, Job> {
-  const jobs = metadata.listJobs();
+  const jobs = jobLifecycleService.listJobs();
   const map = new Map<string, Job>();
   for (const job of jobs) {
     if (job.source_video_path) {
@@ -83,7 +83,7 @@ function ensureJobForVideo(
     source_file_name: fileName,
     video_name: videoName,
   };
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
   return job;
 }
 

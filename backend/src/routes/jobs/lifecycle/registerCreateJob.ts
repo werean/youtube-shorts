@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { createJobForYoutubeUrl } from "../../../features/jobs/create/createJob";
+import { createJobForYoutubeUrl } from "../../../features/jobs/create";
 
 interface CreateJobRequest {
   youtube_url: string;

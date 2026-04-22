@@ -6,7 +6,7 @@ import { appendTaskLog, appendTaskLogs } from "../core/taskLogs";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
 import { JobStatus } from "../models/job";
 import { Segment } from "../models/segment";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import {
   readWhisperSegments,
   type TranscriptionFormats,
@@ -32,7 +32,7 @@ export function cancelTranscription(jobId: string): boolean {
     return false;
   }
 
-  metadata.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
   appendTaskLog(jobId, "transcription", "[transcription] Cancelled");
   return true;
 }
@@ -69,10 +69,10 @@ export async function transcribeJob(
     appendTaskLog(jobId, "transcription", "[transcription] Transcription saved");
     writeTranscriptionArtifacts(jobId, segments, formats);
 
-    const job = metadata.loadJob(jobId);
+    const job = jobLifecycleService.loadJob(jobId);
     job.status = JobStatus.BUILDING_BLOCKS;
     job.updated_at = new Date().toISOString();
-    metadata.saveJob(job);
+    jobLifecycleService.saveJob(job);
 
     console.log(`[transcription] ============================================\n`);
     return segments;
@@ -102,7 +102,7 @@ export async function transcribeJob(
       );
     }
 
-    metadata.updateJobStatus(jobId, JobStatus.ERROR);
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR);
     console.log(`[transcription] ============================================\n`);
     throw error;
   }

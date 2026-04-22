@@ -3,8 +3,8 @@ import { appendTaskLog, clearTaskLogs } from "../../core/taskLogs";
 import { loadActiveToolConfigs, type FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
 import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 
 export type PreparedRenderInputs = {
   videoPath: string;
@@ -35,7 +35,7 @@ export function beginRenderJob(jobId: string): void {
   clearTaskLogs(jobId, "render");
   console.log(`[rendering] Rendering suggested cuts for job ${jobId}`);
   appendTaskLog(jobId, "render", "[rendering] Starting render");
-  metadata.updateJobStatus(jobId, JobStatus.RENDERING);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.RENDERING);
 }
 
 export function prepareRenderInputs(jobId: string): PreparedRenderInputs {

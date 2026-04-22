@@ -1,18 +1,27 @@
 /**
  * Analysis prerequisite helpers.
  *
- * These helpers preserve the current caller-specific behavior:
- * direct analysis ensures blocks exist, batch/orchestrator rebuild blocks,
- * and orchestrator runs topic segmentation as its own step.
+ * These helpers align analysis entrypoints on strategy-dependent prerequisites:
+ * short videos need semantic blocks only, while medium/long videos also need
+ * topic segments before analysis.
  */
 
 import * as fs from "fs";
 import type { Job } from "../models/job";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as files from "../storage/files";
 import { buildSemanticBlocks } from "./semantic_blocks";
 import { buildTopicSegments } from "./topic_segmentation";
 import { selectStrategy } from "./strategy";
+import { analyzeBlocks } from "./analysis";
+
+type SemanticBlockPreparation = "ensure" | "rebuild";
+
+type AnalysisPreparationOptions = {
+  semanticBlocks: SemanticBlockPreparation;
+  onMissingSemanticBlocks?: () => void;
+};
 
 export function ensureSemanticBlocksForAnalysis(
   jobId: string,
@@ -39,4 +48,36 @@ export function buildTopicSegmentsForAnalysis(job: Job) {
     String(configs.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
 
   return buildTopicSegments(job.job_id, strategy.useEmbeddings, embeddingModel);
+}
+
+export async function prepareAnalysisPrerequisites(
+  job: Job,
+  options: AnalysisPreparationOptions,
+): Promise<void> {
+  if (options.semanticBlocks === "rebuild") {
+    await buildSemanticBlocksForAnalysis(job.job_id);
+  } else {
+    await ensureSemanticBlocksForAnalysis(job.job_id, options.onMissingSemanticBlocks);
+  }
+
+  const strategy = selectStrategy(job.video_duration_seconds ?? 0);
+  if (strategy.useTopicSegmentation) {
+    await buildTopicSegmentsForAnalysis(job);
+  }
+}
+
+export async function analyzeWithPreparedPrerequisites(
+  job: Job,
+  options: AnalysisPreparationOptions,
+) {
+  await prepareAnalysisPrerequisites(job, options);
+  return analyzeBlocks(job.job_id, job.video_duration_seconds ?? 0);
+}
+
+export async function analyzeJobWithPreparedPrerequisites(
+  jobId: string,
+  options: AnalysisPreparationOptions,
+) {
+  const job = jobLifecycleService.loadJob(jobId);
+  return analyzeWithPreparedPrerequisites(job, options);
 }

@@ -1,7 +1,7 @@
 import * as fs from "fs";
-import { JobStatus } from "../../../models/job";
-import * as files from "../../../storage/files";
-import * as metadata from "../../../storage/metadata";
+import { JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
+import * as files from "../../storage/files";
 
 type AvailableTranscriptionFormats = {
   segments: boolean;
@@ -34,10 +34,10 @@ function availableFormats(jobId: string): AvailableTranscriptionFormats {
 
 function resetJobToDownloaded(jobId: string): void {
   try {
-    const job = metadata.loadJob(jobId);
-    job.status = JobStatus.DOWNLOADED;
-    job.updated_at = new Date().toISOString();
-    metadata.saveJob(job);
+    jobLifecycleService.updateJob(jobId, (job) => {
+      job.status = JobStatus.DOWNLOADED;
+      job.updated_at = new Date().toISOString();
+    });
   } catch (error) {
     console.warn(`[jobs] Failed to update job status after transcription delete:`, error);
   }

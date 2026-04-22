@@ -7,7 +7,7 @@
 import { loadActiveToolConfigs } from "../core/toolConfigs";
 import { Cut } from "../models/cut";
 import { JobStatus } from "../models/job";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import { normalizeCuts } from "./analysis/cuts";
 import { buildClient } from "./analysis/llm";
 import { persistAnalysisOutput } from "./analysis/persistence";
@@ -34,7 +34,7 @@ export async function analyzeBlocks(
   videoDurationSeconds: number,
 ): Promise<{ cuts: Cut[]; raw_response: string }> {
   console.log(`[analysis] Analyzing blocks for job ${jobId} (duration: ${videoDurationSeconds}s)`);
-  metadata.updateJobStatus(jobId, JobStatus.ANALYZING);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.ANALYZING);
 
   const allBlocks = loadBlocks(jobId);
   if (allBlocks.length === 0) {

@@ -4,7 +4,7 @@
 
 import { appendTaskLog, appendTaskLogs } from "../core/taskLogs";
 import { Job, JobStatus } from "../models/job";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import { buildDownloadCommand } from "./ingest/command";
 import { handleDownloadedArtifacts } from "./ingest/downloaded";
 import { createDummyFallback } from "./ingest/dummy";
@@ -52,7 +52,7 @@ export async function ingestVideo(job: Job): Promise<IngestResult> {
     console.error(`[ingest] ✗ Erro crítico:`, error.message);
     console.error(`[ingest] Stack:`, error.stack);
     appendTaskLogs(job.job_id, "ingest", ["[ingest] CRITICAL ERROR", `[ingest] ${error.message}`]);
-    metadata.updateJobStatus(job.job_id, JobStatus.ERROR);
+    jobLifecycleService.updateJobStatus(job.job_id, JobStatus.ERROR);
     throw new Error(`Ingestion failed: ${error.message}`);
   }
 }

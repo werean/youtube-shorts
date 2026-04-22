@@ -5,8 +5,8 @@
 import * as fs from "fs";
 import { Cut } from "../models/cut";
 import { JobStatus } from "../models/job";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as files from "../storage/files";
-import * as metadata from "../storage/metadata";
 
 function loadCuts(jobId: string): Cut[] {
   const path = files.cutsPath(jobId);
@@ -49,10 +49,10 @@ export function approveCut(jobId: string, cutId: string): Cut {
 
   saveCuts(jobId, cuts);
 
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
   job.status = JobStatus.WAITING_APPROVAL;
   job.updated_at = new Date().toISOString();
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
 
   return approvedCut!;
 }
@@ -79,10 +79,10 @@ export function rejectCut(jobId: string, cutId: string): Cut {
 
   saveCuts(jobId, cuts);
 
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
   job.status = JobStatus.WAITING_APPROVAL;
   job.updated_at = new Date().toISOString();
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
 
   return rejectedCut!;
 }

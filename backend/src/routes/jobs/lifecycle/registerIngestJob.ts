@@ -4,14 +4,14 @@
 
 import type { FastifyInstance } from "fastify";
 import * as ingest from "../../../pipeline/ingest";
-import * as metadata from "../../../storage/metadata";
+import * as jobLifecycleService from "../../../services/jobLifecycleService";
 
 export function registerIngestJobRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/ingest", async (request, reply) => {
     try {
       const { job_id } = request.params;
       console.log(`[jobs] Ingesting job: ${job_id}`);
-      const job = metadata.loadJob(job_id);
+      const job = jobLifecycleService.loadJob(job_id);
       const result = await ingest.ingestVideo(job);
 
       return {

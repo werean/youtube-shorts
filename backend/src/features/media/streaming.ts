@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { getShortsDir } from "../../core/settings";
-import * as metadata from "../../storage/metadata";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 
 function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -82,7 +82,7 @@ function getCachedJob(jobId: string) {
   if (cached && now - cached.timestamp < CACHE_TTL) {
     return cached.job;
   }
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
   jobCache.set(jobId, { job, timestamp: now });
   return job;
 }

@@ -8,12 +8,12 @@ import {
   getVideoDir,
   loadSettings,
 } from "../../core/settings";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 import { openFolderInExplorerForFile } from "../../utils/openFolder";
 
 export function archiveVideo(jobId: string): { ok: true; job_id: string } | { ok: false } {
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
 
   const videoName = job.video_name || jobId;
   const videoDir = getVideoDir(jobId, videoName);
@@ -31,14 +31,14 @@ export function archiveVideo(jobId: string): { ok: true; job_id: string } | { ok
     job.source_video_path = path.join(targetDir, videoFile);
   }
   job.updated_at = new Date().toISOString();
-  metadata.saveJob(job);
+  jobLifecycleService.saveJob(job);
 
   return { ok: true, job_id: jobId };
 }
 
 export function deleteVideo(jobId: string): { ok: true; job_id: string } | { ok: false } {
   try {
-    const job = metadata.loadJob(jobId);
+    const job = jobLifecycleService.loadJob(jobId);
     const videoName = job.video_name || jobId;
     const activeDir = getVideoDir(jobId, videoName);
     const archivedDir = getArchivedVideoDir(videoName);
@@ -68,7 +68,7 @@ export function deleteVideo(jobId: string): { ok: true; job_id: string } | { ok:
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 
-  metadata.invalidateJobCache(jobId);
+  jobLifecycleService.invalidateJobCache(jobId);
   files.invalidateSourceVideoCache(jobId);
 
   return { ok: true, job_id: jobId };
@@ -77,7 +77,7 @@ export function deleteVideo(jobId: string): { ok: true; job_id: string } | { ok:
 export function openVideoFolder(
   jobId: string,
 ): { ok: true } | { ok: false; detail: string; statusCode: number } {
-  const job = metadata.loadJob(jobId);
+  const job = jobLifecycleService.loadJob(jobId);
   const filePath = job.source_video_path;
 
   if (!filePath || typeof filePath !== "string") {

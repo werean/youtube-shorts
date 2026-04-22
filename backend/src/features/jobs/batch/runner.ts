@@ -1,6 +1,6 @@
-import * as metadata from "../../../storage/metadata";
+import * as jobLifecycleService from "../../../services/jobLifecycleService";
 import { transcribeJob } from "../../../pipeline/transcription";
-import { buildSemanticBlocksForAnalysis } from "../../../pipeline/analysis_prerequisites";
+import { prepareAnalysisPrerequisites } from "../../../pipeline/analysis_prerequisites";
 import { analyzeBlocks } from "../../../pipeline/analysis";
 import { renderSuggestedCuts } from "../../../pipeline/rendering";
 import { loadPendingCutsForApproval, waitForApproval } from "./approval";
@@ -29,7 +29,7 @@ export async function processBatchPipeline(
     console.log(`[batch] Processing job ${i + 1}/${jobIds.length}: ${jobId}`);
 
     try {
-      const job = metadata.loadJob(jobId);
+      const job = jobLifecycleService.loadJob(jobId);
 
       // Step 1: Transcription (always required)
       if (options.transcription) {
@@ -47,10 +47,12 @@ export async function processBatchPipeline(
         if (!progress.is_running) break;
 
         progress.current_step = "semantic_blocks";
-        console.log(`[batch] [${jobId}] Building semantic blocks...`);
+        console.log(`[batch] [${jobId}] Preparing analysis prerequisites...`);
 
-        await buildSemanticBlocksForAnalysis(jobId);
-        console.log(`[batch] [${jobId}] Semantic blocks completed`);
+        await prepareAnalysisPrerequisites(job, {
+          semanticBlocks: "rebuild",
+        });
+        console.log(`[batch] [${jobId}] Analysis prerequisites completed`);
       }
 
       // Step 3: Analysis

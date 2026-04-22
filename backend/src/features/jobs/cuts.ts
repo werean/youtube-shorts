@@ -1,7 +1,7 @@
 import * as fs from "fs";
 
-import type { Cut } from "../../../models/cut";
-import * as files from "../../../storage/files";
+import type { Cut } from "../../models/cut";
+import * as files from "../../storage/files";
 
 export function replaceCuts(jobId: string, cuts: Cut[]) {
   const cutsPath = files.cutsPath(jobId);

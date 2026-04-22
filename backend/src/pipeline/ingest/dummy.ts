@@ -3,8 +3,8 @@ import * as path from "path";
 import { getVideoDir, getVideoFilePath } from "../../core/settings";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
+import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as files from "../../storage/files";
-import * as metadata from "../../storage/metadata";
 import { createDummyMP4 } from "../../utils/mp4";
 import { IngestResult } from "./types";
 
@@ -27,7 +27,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
   console.log(`[ingest] ✓ Info JSON criado em: ${infoPath}`);
   appendTaskLog(job.job_id, "ingest", "[ingest] Info JSON created");
 
-  const updatedJob = metadata.loadJob(job.job_id);
+  const updatedJob = jobLifecycleService.loadJob(job.job_id);
   updatedJob.updated_at = new Date().toISOString();
   updatedJob.status = JobStatus.DOWNLOADED;
   updatedJob.video_name = updatedJob.video_name || "Dummy Video for Testing";
@@ -40,7 +40,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
     }
   }
   updatedJob.source_video_path = dummyPath;
-  metadata.saveJob(updatedJob);
+  jobLifecycleService.saveJob(updatedJob);
 
   console.log(`[ingest] ============================================\n`);
   appendTaskLog(job.job_id, "ingest", "[ingest] Dummy flow completed");

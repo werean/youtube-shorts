@@ -4,7 +4,7 @@
 
 import { appendTaskLog } from "../core/taskLogs";
 import { JobStatus } from "../models/job";
-import * as metadata from "../storage/metadata";
+import * as jobLifecycleService from "../services/jobLifecycleService";
 import { collectOrderedOutputs, listRenderOutputs as listStoredRenderOutputs } from "./rendering/outputs";
 import { beginRenderJob, prepareRenderInputs } from "./rendering/preconditions";
 import { renderCut, runWithConcurrency } from "./rendering/runner";
@@ -23,7 +23,7 @@ export function cancelRendering(jobId: string): boolean {
     return false;
   }
 
-  metadata.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+  jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
   appendTaskLog(jobId, "render", "[rendering] Cancelled");
   return true;
 }
@@ -63,19 +63,19 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
     outputs.push(...collectOrderedOutputs(orderedOutputs));
 
     if (isRenderingCancelled(jobId)) {
-      metadata.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+      jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
       appendTaskLog(jobId, "render", "[rendering] Cancel acknowledged");
       return outputs;
     }
 
     console.log(`[rendering] ✓ All cuts rendered successfully`);
-    metadata.updateJobStatus(jobId, JobStatus.DONE);
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.DONE);
     appendTaskLog(jobId, "render", "[rendering] ✓ Render complete");
 
     return outputs;
   } catch (error) {
     if (isRenderingCancelled(jobId)) {
-      metadata.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+      jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
       appendTaskLog(jobId, "render", "[rendering] Cancel acknowledged");
       return outputs;
     }
@@ -84,7 +84,7 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
     const errorMsg = error instanceof Error ? error.message : String(error);
     appendTaskLog(jobId, "render", `[rendering] ✗ Error: ${errorMsg}`);
 
-    metadata.updateJobStatus(jobId, JobStatus.ERROR);
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR);
 
     throw error;
   } finally {
