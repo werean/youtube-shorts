@@ -1,4 +1,4 @@
-import { INSTALLATION_GUIDES } from "../../../config/installer";
+import { INSTALLATION_GUIDES } from "../installationGuides";
 import { snapshotDependencies } from "../detection/dependencyDetection";
 import { INSTALL_TIMEOUT_MS } from "../shared/dependencyTypes";
 import type {

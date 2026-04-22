@@ -3,7 +3,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { INSTALLATION_GUIDES } from "../../config/installer";
+import { INSTALLATION_GUIDES } from "../../features/dependencies/installationGuides";
 import { snapshotDependencies } from "../../features/dependencies/detection/dependencyDetection";
 import {
   performDependencyInstall,

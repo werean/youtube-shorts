@@ -1,4 +1,4 @@
-import type { LlmRegisteredModel } from "../../core/toolConfigs";
+import type { LlmRegisteredModel } from "../../../core/toolConfigs";
 
 export function normalizeModelName(value: unknown): string {
   return String(value || "").trim();

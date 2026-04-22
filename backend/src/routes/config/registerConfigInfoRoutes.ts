@@ -8,7 +8,7 @@ import {
   getConfigInfoSummary,
   getOllamaModelsPayload,
   registerOllamaModel,
-} from "../../config/ollama/models";
+} from "../../features/config/ollama/models";
 
 export function registerConfigInfoRoutes(fastify: FastifyInstance) {
   fastify.get("/", async () => {

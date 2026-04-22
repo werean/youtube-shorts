@@ -81,9 +81,9 @@ Use these folder-level docs for backend navigation. They are intentionally kept 
 
 - `backend/README.md` - backend overview, entrypoints, folder guide, and core invariants.
 - `backend/src/app/README.md` - server composition, plugin registration, route mounting, and startup behavior.
-- `backend/src/config/README.md` - user-facing config helpers, folders, prompts, Ollama catalog, and installer support.
 - `backend/src/core/README.md` - shared runtime defaults, paths, settings, tool configs, and task logs.
-- `backend/src/features/README.md` - route-adjacent business logic for jobs, videos, media, and dependencies.
+- `backend/src/features/README.md` - route-adjacent business logic for jobs, videos, media, config, and dependencies.
+- `backend/src/features/config/README.md` - user-facing config workflows, folders, prompts, tool config payloads, and Ollama model operations.
 - `backend/src/llm/README.md` - Ollama chat client behavior and prompt templates.
 - `backend/src/models/README.md` - backend domain types and persisted status/model contracts.
 - `backend/src/pipeline/README.md` - ingest, transcription, semantic blocks, topics, analysis, rendering, and orchestration.
@@ -186,7 +186,7 @@ Do not break these during refactors unless the task explicitly asks for a behavi
   - `operationRuntimeService.ts` owns process-local runtime state for task logs, active transcription/render processes, cancellation state, batch progress, and dependency install session access.
 - Pipeline behavior lives under `backend/src/pipeline/`; low-level artifact implementation remains under `backend/src/storage/` behind `artifactService`.
 - Runtime defaults, persisted settings, and persisted tool configs live under `backend/src/core/`; preserve persisted JSON shapes unless intentionally migrating them.
-- `backend/src/config/` currently contains user-facing config route helpers. A future `backend/src/features/config/` boundary has been recommended but has not yet been implemented.
+- User-facing config workflows live under `backend/src/features/config/`; persisted settings and tool config stores remain under `backend/src/core/`.
 
 ### Frontend Layout
 
@@ -409,12 +409,12 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - `backend/src/features/dependencies/execution/install.ts`: 9942 bytes, 259 lines.
 - `backend/src/core/settings.ts`: 8883 bytes, 263 lines.
 - `backend/src/llm/client.ts`: 7046 bytes, 180 lines.
-- `backend/src/config/installer.ts`: 6944 bytes, 178 lines.
+- `backend/src/features/dependencies/installationGuides.ts`: 6944 bytes, 178 lines.
 - `backend/src/features/dependencies/runtime/dependencySessions.ts`: 6596 bytes, 207 lines.
 - `backend/src/features/dependencies/detection/pythonRuntime.ts`: 5898 bytes, 178 lines.
 - `backend/src/pipeline/analysis/cuts.ts`: 5880 bytes, 143 lines.
 - `backend/src/services/operationRuntimeService.ts`: 5765 bytes, 162 lines.
-- `backend/src/config/ollama/catalog.ts`: 5682 bytes, 162 lines.
+- `backend/src/features/config/ollama/catalog.ts`: 5682 bytes, 162 lines.
 - `backend/src/routes/config/registerDependenciesRoutes.ts`: 5537 bytes, 135 lines after dependency logic moved into `features/dependencies/`.
 
 ### Large Runtime / Generated Files
@@ -467,17 +467,17 @@ Do not break these during refactors unless the task explicitly asks for a behavi
 - Root `README.md` still documents backend port `3000`, while current backend code and frontend API config use `8000`.
 - Risk: setup/debugging instructions can mislead new contributors.
 
-### Config Boundary Ambiguity
+### Config Boundary
 
-- `backend/src/config/` currently contains user-facing config route helpers, while `backend/src/core/` contains persisted settings/tool config stores.
-- `backend/src/features/config/` has been recommended as the future route-adjacent config feature boundary but does not exist yet.
-- Risk: future config refactors may continue ad hoc moves unless this boundary is implemented deliberately.
+- `backend/src/features/config/` owns route-adjacent user-facing config workflows.
+- `backend/src/features/dependencies/` owns dependency installation guide data and dependency install/uninstall workflows.
+- `backend/src/core/` owns persisted settings/tool config stores and shared runtime primitives.
 
 ## Hypotheses
 
 These are plausible interpretations, not verified requirements:
 
-- `backend/src/features/config/` may be the right long-term home for user-facing config workflows currently under `backend/src/config/`, while `backend/src/core/` remains the persisted config store.
+- `backend/src/core/` remains the persisted config store while `backend/src/features/config/` owns user-facing config workflows.
 - `UploadSection` may be the intended current upload owner, while leftover upload state remains in `App.tsx`/`useUIState.ts`.
 
 ## Immediate Wins
@@ -485,8 +485,6 @@ These are plausible interpretations, not verified requirements:
 Small, low-risk improvements to consider first:
 
 - Correct the root `README.md` backend port references from `3000` to `8000`.
-- Introduce `backend/src/features/config/` and move route-only config helpers from `backend/src/config/` in small slices.
-- Move `backend/src/config/installer.ts` into the dependency feature area if dependency install guides remain dependency-domain data.
 - Add a small shared route path/contract reference only if route literal duplication starts causing real churn.
 - Confirm whether the existing `docs/ARCHITECTURE.md` deletion is intentional before staging or committing.
 - Consider narrowing frontend upload state ownership after confirming which path is active in the UI.
@@ -509,15 +507,14 @@ Small, low-risk improvements to consider first:
   - `backend/src/services/jobLifecycleService.ts`
   - `backend/src/services/artifactService.ts`
   - `backend/src/services/operationRuntimeService.ts`
+- Completed the config-boundary cleanup:
+  - user-facing config workflows live under `backend/src/features/config/`.
+  - dependency installation guide data lives under `backend/src/features/dependencies/`.
+  - persisted settings and tool config stores remain under `backend/src/core/`.
 
 ### Priority 1 = Low Risk / High Impact
 
 - Correct stale root README references to backend port `3000`.
-- Introduce `backend/src/features/config/` for route-adjacent config workflows while keeping persisted settings/tool config stores in `backend/src/core/`.
-- Move route-only config helpers first:
-  - `backend/src/config/settings/settingsUpdate.ts`
-  - `backend/src/config/prompts/savedPrompts.ts`
-  - `backend/src/config/folders/`
 - Add route/path contract coverage only where route literals have caused or are likely to cause breakage.
 - Tighten frontend API wrapper types without changing routes.
 
@@ -528,8 +525,6 @@ Small, low-risk improvements to consider first:
   - `backend/src/core/settings.ts`
   - `backend/src/features/dependencies/execution/install.ts`
   - `backend/src/features/dependencies/runtime/dependencySessions.ts`
-- Move `backend/src/config/ollama/` into the future `backend/src/features/config/ollama/` boundary if the config-feature structure is introduced.
-- Move dependency installation guide data out of `backend/src/config/installer.ts` and into the dependency feature area.
 - Reduce `App.tsx` by workflow:
   - Render polling and task-log polling.
   - Batch polling.
@@ -597,6 +592,5 @@ Validation commands for future code changes:
 - `README.md` references `frontend/README.md`; that file was not observed during file listing.
 - `README.md` mentions an `upload/` folder; `core/paths.ts` references `upload/`, but no root `upload/` directory was observed.
 - It is unclear which upload state path is intended as primary.
-- `backend/src/features/config/` does not exist yet; the intended config/core/features-config boundary has been recommended but not implemented.
 - `docs/ARCHITECTURE.md` is currently deleted in the working tree; confirm whether that deletion is intentional before staging or committing.
 - It is unclear whether caches in `metadata.ts`, `storage/sourceVideo.ts`, and `features/media/streaming.ts` are invalidated in every rename/archive/delete scenario.

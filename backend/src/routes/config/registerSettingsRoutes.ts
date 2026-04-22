@@ -3,15 +3,16 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { loadSettings } from "../../core/settings";
-import type { AppSettings } from "../../core/settings";
-import { updateAppSettings } from "../../features/config/settings/settingsUpdate";
+import {
+  getAppSettings,
+  updateAppSettings,
+  type AppSettings,
+} from "../../features/config/settings/settingsOperations";
 
 export function registerSettingsRoutes(fastify: FastifyInstance) {
   fastify.get("/settings", async (request, reply) => {
     try {
-      const settings = loadSettings();
-      return settings;
+      return getAppSettings();
     } catch (error: any) {
       reply.code(500).send({ detail: error.message });
     }

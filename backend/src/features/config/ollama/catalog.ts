@@ -1,4 +1,4 @@
-import { loadActiveToolConfigs, type LlmRegisteredModel } from "../../core/toolConfigs";
+import { loadActiveToolConfigs, type LlmRegisteredModel } from "../../../core/toolConfigs";
 import { normalizeModelName, normalizeRegisteredModels } from "./normalization";
 import type { OllamaCatalogEntry } from "./types";
 

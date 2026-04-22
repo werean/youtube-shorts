@@ -22,11 +22,10 @@ Shared runtime configuration and process-local state used across backend feature
 
 - Pipeline modules read tool configs and append logs while running external processes.
 - Storage modules depend on path helpers for job metadata and artifact locations.
-- Config routes expose and update settings/tool configs for the frontend.
+- Config feature operations expose and update settings/tool configs for the frontend routes.
 
 ## Invariants
 
 - Preserve persisted file names and JSON shapes unless intentionally migrating them.
 - Settings/tool config caches must be invalidated when writes occur.
 - Task logs are intentionally in-memory and capped; do not treat them as durable persistence.
-

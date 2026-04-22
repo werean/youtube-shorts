@@ -1,4 +1,4 @@
-import { loadActiveToolConfigs, updateToolConfigs } from "../../core/toolConfigs";
+import { loadActiveToolConfigs, updateToolConfigs } from "../../../core/toolConfigs";
 import { runOllamaCommand } from "./commands";
 import { normalizeModelName, normalizeRegisteredModels } from "./normalization";
 import type { OllamaRouteResult } from "./types";

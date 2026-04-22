@@ -11,9 +11,8 @@ TypeScript Fastify backend for the YouTube Shorts workflow. It owns job metadata
 ## Folder Guide
 
 - `src/app/` - server composition and startup.
-- `src/config/` - user-facing configuration helpers and dependency install/catalog logic.
 - `src/core/` - shared runtime config, filesystem roots, persisted settings, tool configs, and task logs.
-- `src/features/` - route-adjacent business operations for jobs, videos, media, and dependency workflows.
+- `src/features/` - route-adjacent business operations for jobs, videos, media, config workflows, and dependency workflows.
 - `src/llm/` - Ollama chat client and prompt templates.
 - `src/models/` - shared backend domain types.
 - `src/pipeline/` - ingest, transcription, semantic blocks, topics, analysis, rendering, and orchestration.
@@ -28,4 +27,3 @@ TypeScript Fastify backend for the YouTube Shorts workflow. It owns job metadata
 - Job artifacts are file-backed and stored under the configured data/media roots.
 - `Job.source_video_path` is an absolute path and is used across streaming, transcription, rendering, and folder lifecycle flows.
 - Long-running external tools are invoked by pipeline/video modules; preserve command arguments, environment behavior, and artifact names unless intentionally changing behavior.
-

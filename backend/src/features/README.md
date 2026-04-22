@@ -16,8 +16,8 @@ Route-adjacent business logic that sits between HTTP handlers and lower-level pi
 - `jobs/` contains job feature operations. Small operations live as direct files; multi-file areas such as `batch/` and `render/` remain grouped.
 - `videos/` contains library listing and video folder lifecycle behavior.
 - `media/` contains source/render streaming helpers.
-- `config/` contains low-risk route-facing config operations such as settings updates, saved prompts, and folder selection helpers.
-- `dependencies/` contains detection, execution, policy, runtime session, shared type, and terminal helpers.
+- `config/` contains route-facing config operations such as settings updates, tool config payloads, saved prompts, folder selection helpers, and Ollama model workflows.
+- `dependencies/` contains detection, installation guide data, execution, policy, runtime session, shared type, and terminal helpers.
 
 ## Interactions
 
