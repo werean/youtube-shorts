@@ -8,8 +8,8 @@ import {
   getVideoDir,
   loadSettings,
 } from "../../core/settings";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 import { openFolderInExplorerForFile } from "../../utils/openFolder";
 
 export function archiveVideo(jobId: string): { ok: true; job_id: string } | { ok: false } {
@@ -61,7 +61,7 @@ export function deleteVideo(jobId: string): { ok: true; job_id: string } | { ok:
     return { ok: false };
   }
 
-  files.deleteRenderOutputs(jobId);
+  artifactService.deleteRenderOutputs(jobId);
 
   const dataPath = jobDir(jobId);
   if (fs.existsSync(dataPath)) {
@@ -69,7 +69,7 @@ export function deleteVideo(jobId: string): { ok: true; job_id: string } | { ok:
   }
 
   jobLifecycleService.invalidateJobCache(jobId);
-  files.invalidateSourceVideoCache(jobId);
+  artifactService.invalidateSourceVideoCache(jobId);
 
   return { ok: true, job_id: jobId };
 }

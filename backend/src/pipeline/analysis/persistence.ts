@@ -1,12 +1,11 @@
-import * as fs from "fs";
 import { Cut } from "../../models/cut";
 import { JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 
 export function persistAnalysisOutput(jobId: string, cuts: Cut[]): void {
-  const outputPath = files.cutsPath(jobId);
-  fs.writeFileSync(outputPath, JSON.stringify(cuts, null, 2), "utf-8");
+  const outputPath = artifactService.cutsPath(jobId);
+  artifactService.writeJsonArtifact(outputPath, cuts);
   console.log(`[analysis] ${cuts.length} cut(s) saved for job ${jobId}`);
 
   const job = jobLifecycleService.loadJob(jobId);

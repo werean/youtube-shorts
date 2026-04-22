@@ -1,8 +1,8 @@
 import { config } from "../../core/config";
 import { appendTaskLog, appendTaskLogs, clearTaskLogs } from "../../core/taskLogs";
 import { JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 import { activeTranscriptionJobIds } from "./process";
 
 export type PreparedTranscriptionSource = {
@@ -30,7 +30,7 @@ export function prepareTranscriptionSource(jobId: string): PreparedTranscription
   jobLifecycleService.updateJobStatus(jobId, JobStatus.TRANSCRIBING);
 
   console.log(`[transcription] Procurando arquivo de vídeo...`);
-  const videoPath = files.findSourceVideo(jobId);
+  const videoPath = artifactService.findSourceVideo(jobId);
   console.log(
     `[transcription] Resultado da busca: ${videoPath ? "✓ Encontrado" : "✗ Não encontrado"}`,
   );
@@ -43,11 +43,11 @@ export function prepareTranscriptionSource(jobId: string): PreparedTranscription
   console.log(`[transcription] ✓ Usando arquivo: ${videoPath}`);
   appendTaskLog(jobId, "transcription", `[transcription] Using file: ${videoPath}`);
 
-  const clearedDir = files.removeTranscriptionsJobDir(jobId);
+  const clearedDir = artifactService.removeTranscriptionsJobDir(jobId);
   console.log(`[transcription] 🧹 Limpando pasta de transcrição: ${clearedDir}`);
   appendTaskLog(jobId, "transcription", `[transcription] Cleared dir: ${clearedDir}`);
 
-  const tempDir = files.ensureTranscriptionsJobDir(jobId);
+  const tempDir = artifactService.ensureTranscriptionsJobDir(jobId);
 
   console.log(`[transcription] 📁 Diretório de saída: ${tempDir}`);
   console.log(`[transcription] 🎤 Modelo Whisper: ${config.WHISPER_MODEL_NAME}`);

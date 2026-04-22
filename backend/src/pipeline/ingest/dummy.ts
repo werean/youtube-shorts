@@ -3,15 +3,15 @@ import * as path from "path";
 import { getVideoDir, getVideoFilePath } from "../../core/settings";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 import { createDummyMP4 } from "../../utils/mp4";
 import { IngestResult } from "./types";
 
 export function createDummyFallback(job: Job, infoPath: string): IngestResult {
   // Fallback: criar um vídeo dummy MP4 para testar
   const mp4Buffer = createDummyMP4();
-  let dummyPath = files.sourceVideoPathForJob(job.job_id, "mp4");
+  let dummyPath = artifactService.sourceVideoPathForJob(job.job_id, "mp4");
   fs.writeFileSync(dummyPath, mp4Buffer);
   console.log(`[ingest] ✓ Vídeo dummy criado em: ${dummyPath} (${mp4Buffer.length} bytes)`);
   appendTaskLog(job.job_id, "ingest", "[ingest] Dummy video created");
@@ -23,7 +23,7 @@ export function createDummyFallback(job: Job, infoPath: string): IngestResult {
     ext: "mp4",
     url: job.youtube_url,
   };
-  fs.writeFileSync(infoPath, JSON.stringify(infoData, null, 2));
+  artifactService.writeJsonArtifact(infoPath, infoData);
   console.log(`[ingest] ✓ Info JSON criado em: ${infoPath}`);
   appendTaskLog(job.job_id, "ingest", "[ingest] Info JSON created");
 

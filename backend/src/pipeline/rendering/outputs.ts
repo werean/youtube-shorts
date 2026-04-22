@@ -1,4 +1,4 @@
-import * as files from "../../storage/files";
+import * as artifactService from "../../services/artifactService";
 
 export function collectOrderedOutputs(orderedOutputs: string[]): string[] {
   const outputs: string[] = [];
@@ -11,5 +11,5 @@ export function collectOrderedOutputs(orderedOutputs: string[]): string[] {
 }
 
 export function listRenderOutputs(jobId: string): string[] {
-  return files.listRenderOutputUrls(jobId);
+  return artifactService.listRenderOutputUrls(jobId);
 }

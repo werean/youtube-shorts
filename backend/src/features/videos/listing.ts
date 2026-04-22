@@ -5,8 +5,8 @@ import { v4 as uuidv4 } from "uuid";
 import { archivedVideosDir, loadSettings } from "../../core/settings";
 import type { Job } from "../../models/job";
 import { JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 import type { VideoRecord } from "./types";
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"]);
@@ -104,8 +104,8 @@ function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
       job_id: job.job_id,
       video_path: `/media/videos/${job.job_id}`,
       archived,
-      hasTranscription: files.hasTranscription(job.job_id),
-      hasAnalysis: files.hasAnalysis(job.job_id),
+      hasTranscription: artifactService.hasTranscription(job.job_id),
+      hasAnalysis: artifactService.hasAnalysis(job.job_id),
     });
   }
 

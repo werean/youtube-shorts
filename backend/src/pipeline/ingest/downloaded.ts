@@ -3,6 +3,7 @@ import * as path from "path";
 import { getVideoDir } from "../../core/settings";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
 import { IngestResult } from "./types";
 
@@ -30,7 +31,7 @@ export function handleDownloadedArtifacts(
 
   // Try to get video title from info JSON
   try {
-    const infoContent = fs.readFileSync(infoPath, "utf-8");
+    const infoContent = artifactService.readTextArtifact(infoPath);
     const infoData = JSON.parse(infoContent);
     if (infoData.title && !updatedJob.video_name) {
       updatedJob.video_name = infoData.title;

@@ -2,24 +2,22 @@
  * Pipeline step: human curation of suggested cuts.
  */
 
-import * as fs from "fs";
 import { Cut } from "../models/cut";
 import { JobStatus } from "../models/job";
+import * as artifactService from "../services/artifactService";
 import * as jobLifecycleService from "../services/jobLifecycleService";
-import * as files from "../storage/files";
 
 function loadCuts(jobId: string): Cut[] {
-  const path = files.cutsPath(jobId);
-  if (!fs.existsSync(path)) {
+  const path = artifactService.cutsPath(jobId);
+  if (!artifactService.artifactExists(path)) {
     return [];
   }
-  const content = fs.readFileSync(path, "utf-8");
-  return JSON.parse(content);
+  return artifactService.readJsonArtifact<Cut[]>(path);
 }
 
 function saveCuts(jobId: string, cuts: Cut[]): void {
-  const path = files.cutsPath(jobId);
-  fs.writeFileSync(path, JSON.stringify(cuts, null, 2), "utf-8");
+  const path = artifactService.cutsPath(jobId);
+  artifactService.writeJsonArtifact(path, cuts);
 }
 
 export function listSuggestions(jobId: string): Cut[] {

@@ -1,7 +1,6 @@
-import * as fs from "fs";
 import * as path from "path";
 import { archivedVideosDir, loadSettings } from "../../../core/settings";
-import * as files from "../../../storage/files";
+import * as artifactService from "../../../services/artifactService";
 import { openFolderInExplorerForFile } from "../../../utils/openFolder";
 
 export function deleteRenderOutputFile(
@@ -11,14 +10,14 @@ export function deleteRenderOutputFile(
   const safeFile = path.basename(file);
   console.log(`[jobs] Deleting render: ${jobId}/${safeFile}`);
 
-  const shortsDir = files.ensureShortsJobDir(jobId);
+  const shortsDir = artifactService.ensureShortsJobDir(jobId);
   const filePath = path.join(shortsDir, safeFile);
 
-  if (!fs.existsSync(filePath)) {
+  if (!artifactService.artifactExists(filePath)) {
     return { status: "not-found", safeFile };
   }
 
-  fs.unlinkSync(filePath);
+  artifactService.unlinkArtifact(filePath);
   console.log(`[jobs] ✓ Render deleted: ${filePath}`);
 
   return { status: "deleted", safeFile };
@@ -30,7 +29,7 @@ export function openRenderOutputFolder(
 ): { ok: true } | { ok: false; detail: string; statusCode: number } {
   const safeFile = path.basename(file);
 
-  const shortsDir = files.ensureShortsJobDir(jobId);
+  const shortsDir = artifactService.ensureShortsJobDir(jobId);
   const filePath = path.join(shortsDir, safeFile);
 
   const settings = loadSettings();

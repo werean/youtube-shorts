@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Segment } from "../../models/segment";
-import * as files from "../../storage/files";
+import * as artifactService from "../../services/artifactService";
 
 export type TranscriptionFormats = {
   text?: boolean;
@@ -48,8 +48,8 @@ export function readWhisperSegments(outputPath: string): Segment[] {
 }
 
 export function writeTranscriptionSegments(jobId: string, segments: Segment[]): void {
-  const outputPath = files.transcriptionPath(jobId);
-  fs.writeFileSync(outputPath, JSON.stringify(segments, null, 2), "utf-8");
+  const outputPath = artifactService.transcriptionPath(jobId);
+  artifactService.writeJsonArtifact(outputPath, segments);
 }
 
 function formatVttTimestamp(seconds: number): string {
@@ -92,13 +92,13 @@ export function writeTranscriptionArtifacts(
   };
 
   if (normalized.text) {
-    const textPath = files.transcriptionTextPath(jobId);
-    fs.writeFileSync(textPath, buildPlainText(segments), "utf-8");
+    const textPath = artifactService.transcriptionTextPath(jobId);
+    artifactService.writeTextArtifact(textPath, buildPlainText(segments));
   }
 
   if (normalized.vtt) {
-    const vttPath = files.transcriptionVttPath(jobId);
-    fs.writeFileSync(vttPath, buildVtt(segments), "utf-8");
+    const vttPath = artifactService.transcriptionVttPath(jobId);
+    artifactService.writeTextArtifact(vttPath, buildVtt(segments));
   }
 
   if (normalized.text || normalized.vtt) {

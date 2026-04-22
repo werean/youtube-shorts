@@ -1,7 +1,6 @@
-import * as fs from "fs";
 import { JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 
 type AvailableTranscriptionFormats = {
   segments: boolean;
@@ -17,18 +16,18 @@ export type TranscriptionRouteResponse = {
 
 function transcriptionArtifactPaths(jobId: string) {
   return {
-    transcriptionPath: files.transcriptionPath(jobId),
-    textPath: files.transcriptionTextPath(jobId),
-    vttPath: files.transcriptionVttPath(jobId),
+    transcriptionPath: artifactService.transcriptionPath(jobId),
+    textPath: artifactService.transcriptionTextPath(jobId),
+    vttPath: artifactService.transcriptionVttPath(jobId),
   };
 }
 
 function availableFormats(jobId: string): AvailableTranscriptionFormats {
   const { transcriptionPath, textPath, vttPath } = transcriptionArtifactPaths(jobId);
   return {
-    segments: fs.existsSync(transcriptionPath),
-    text: fs.existsSync(textPath),
-    vtt: fs.existsSync(vttPath),
+    segments: artifactService.artifactExists(transcriptionPath),
+    text: artifactService.artifactExists(textPath),
+    vtt: artifactService.artifactExists(vttPath),
   };
 }
 
@@ -63,9 +62,9 @@ export function buildTranscriptionResponseFromSegments(
 
 export function readTranscriptionResponse(jobId: string): TranscriptionRouteResponse | null {
   const { transcriptionPath, textPath, vttPath } = transcriptionArtifactPaths(jobId);
-  const hasSegments = fs.existsSync(transcriptionPath);
-  const hasText = fs.existsSync(textPath);
-  const hasVtt = fs.existsSync(vttPath);
+  const hasSegments = artifactService.artifactExists(transcriptionPath);
+  const hasText = artifactService.artifactExists(textPath);
+  const hasVtt = artifactService.artifactExists(vttPath);
 
   if (!hasSegments && !hasText && !hasVtt) {
     return null;
@@ -75,14 +74,13 @@ export function readTranscriptionResponse(jobId: string): TranscriptionRouteResp
   let transcriptionText = "";
 
   if (hasSegments) {
-    const raw = fs.readFileSync(transcriptionPath, "utf-8");
-    segments = JSON.parse(raw) as { text: string }[];
+    segments = artifactService.readJsonArtifact<{ text: string }[]>(transcriptionPath);
     transcriptionText = segments
       .map((s) => s.text)
       .join(" ")
       .trim();
   } else if (hasText) {
-    transcriptionText = fs.readFileSync(textPath, "utf-8").trim();
+    transcriptionText = artifactService.readTextArtifact(textPath).trim();
   }
 
   return {
@@ -102,16 +100,16 @@ export function deleteAllTranscriptionArtifacts(jobId: string):
   const { transcriptionPath, textPath, vttPath } = transcriptionArtifactPaths(jobId);
 
   let removed = false;
-  if (fs.existsSync(transcriptionPath)) {
-    fs.rmSync(transcriptionPath, { force: true });
+  if (artifactService.artifactExists(transcriptionPath)) {
+    artifactService.removeArtifact(transcriptionPath);
     removed = true;
   }
-  if (fs.existsSync(textPath)) {
-    fs.rmSync(textPath, { force: true });
+  if (artifactService.artifactExists(textPath)) {
+    artifactService.removeArtifact(textPath);
     removed = true;
   }
-  if (fs.existsSync(vttPath)) {
-    fs.rmSync(vttPath, { force: true });
+  if (artifactService.artifactExists(vttPath)) {
+    artifactService.removeArtifact(vttPath);
     removed = true;
   }
 
@@ -139,18 +137,18 @@ export function deleteTranscriptionFormat(jobId: string, format: string):
 
   let removed = false;
   if (format === "segments") {
-    if (fs.existsSync(transcriptionPath)) {
-      fs.rmSync(transcriptionPath, { force: true });
+    if (artifactService.artifactExists(transcriptionPath)) {
+      artifactService.removeArtifact(transcriptionPath);
       removed = true;
     }
   } else if (format === "text") {
-    if (fs.existsSync(textPath)) {
-      fs.rmSync(textPath, { force: true });
+    if (artifactService.artifactExists(textPath)) {
+      artifactService.removeArtifact(textPath);
       removed = true;
     }
   } else if (format === "vtt") {
-    if (fs.existsSync(vttPath)) {
-      fs.rmSync(vttPath, { force: true });
+    if (artifactService.artifactExists(vttPath)) {
+      artifactService.removeArtifact(vttPath);
       removed = true;
     }
   } else {

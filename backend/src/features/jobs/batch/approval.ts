@@ -1,15 +1,14 @@
-import * as fs from "fs";
-import * as files from "../../../storage/files";
+import * as artifactService from "../../../services/artifactService";
 import type { BatchPipelineProgress } from "./types";
 
 export function loadPendingCutsForApproval(jobId: string): any[] | undefined {
-  const cutsPath = files.cutsPath(jobId);
+  const cutsPath = artifactService.cutsPath(jobId);
 
-  if (!fs.existsSync(cutsPath)) {
+  if (!artifactService.artifactExists(cutsPath)) {
     return undefined;
   }
 
-  return JSON.parse(fs.readFileSync(cutsPath, "utf-8"));
+  return artifactService.readJsonArtifact<any[]>(cutsPath);
 }
 
 export async function waitForApproval(progress: BatchPipelineProgress): Promise<boolean> {

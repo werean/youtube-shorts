@@ -1,7 +1,7 @@
 import { Job, JobStatus } from "../../models/job";
 import { appendTaskLogs, clearTaskLogs } from "../../core/taskLogs";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 import { IngestPaths } from "./types";
 
 export function beginIngest(job: Job): IngestPaths {
@@ -19,8 +19,8 @@ export function beginIngest(job: Job): IngestPaths {
 
   jobLifecycleService.updateJobStatus(job.job_id, JobStatus.DOWNLOADING);
 
-  const infoPath = files.sourceVideoInfoPath(job.job_id);
-  const outputPattern = files.sourceVideoOutputTemplate(job.job_id);
+  const infoPath = artifactService.sourceVideoInfoPath(job.job_id);
+  const outputPattern = artifactService.sourceVideoOutputTemplate(job.job_id);
 
   console.log(`[ingest] Video output pattern: ${outputPattern}`);
   console.log(`[ingest] Info path: ${infoPath}`);

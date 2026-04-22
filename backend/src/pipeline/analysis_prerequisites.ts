@@ -6,11 +6,10 @@
  * topic segments before analysis.
  */
 
-import * as fs from "fs";
 import type { Job } from "../models/job";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
+import * as artifactService from "../services/artifactService";
 import * as jobLifecycleService from "../services/jobLifecycleService";
-import * as files from "../storage/files";
 import { buildSemanticBlocks } from "./semantic_blocks";
 import { buildTopicSegments } from "./topic_segmentation";
 import { selectStrategy } from "./strategy";
@@ -27,8 +26,8 @@ export function ensureSemanticBlocksForAnalysis(
   jobId: string,
   onMissing?: () => void,
 ): boolean {
-  const blocksPath = files.semanticBlocksPath(jobId);
-  if (fs.existsSync(blocksPath)) {
+  const blocksPath = artifactService.semanticBlocksPath(jobId);
+  if (artifactService.artifactExists(blocksPath)) {
     return false;
   }
 

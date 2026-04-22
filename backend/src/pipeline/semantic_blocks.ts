@@ -2,12 +2,11 @@
  * Pipeline step: build semantic blocks from transcription.
  */
 
-import * as fs from "fs";
 import { Segment } from "../models/segment";
 import { SemanticBlock } from "../models/semantic_block";
 import { JobStatus } from "../models/job";
+import * as artifactService from "../services/artifactService";
 import * as jobLifecycleService from "../services/jobLifecycleService";
-import * as files from "../storage/files";
 
 const TARGET_MIN_SECONDS = 5.0;
 const TARGET_MAX_SECONDS = 20.0;
@@ -16,12 +15,11 @@ const PAUSE_THRESHOLD_SECONDS = 0.6;
 const SENTENCE_BOUNDARIES = [".", "!", "?", "…"];
 
 function loadSegments(jobId: string): Segment[] {
-  const path = files.transcriptionPath(jobId);
-  if (!fs.existsSync(path)) {
+  const path = artifactService.transcriptionPath(jobId);
+  if (!artifactService.artifactExists(path)) {
     throw new Error("Transcription segments JSON not found");
   }
-  const content = fs.readFileSync(path, "utf-8");
-  return JSON.parse(content);
+  return artifactService.readJsonArtifact<Segment[]>(path);
 }
 
 function endsSentence(text: string): boolean {
@@ -104,8 +102,8 @@ export function buildSemanticBlocks(jobId: string): SemanticBlock[] {
 
   finalizeBlock();
 
-  const outputPath = files.semanticBlocksPath(jobId);
-  fs.writeFileSync(outputPath, JSON.stringify(blocks, null, 2), "utf-8");
+  const outputPath = artifactService.semanticBlocksPath(jobId);
+  artifactService.writeJsonArtifact(outputPath, blocks);
   console.log(`[semantic_blocks] Semantic blocks saved for job ${jobId}`);
 
   const job = jobLifecycleService.loadJob(jobId);

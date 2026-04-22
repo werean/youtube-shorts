@@ -1,10 +1,9 @@
-import * as fs from "fs";
 import { appendTaskLog, clearTaskLogs } from "../../core/taskLogs";
 import { loadActiveToolConfigs, type FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
 import { JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
-import * as files from "../../storage/files";
 
 export type PreparedRenderInputs = {
   videoPath: string;
@@ -22,12 +21,11 @@ function resolveRenderConcurrency(totalCuts: number): number {
 }
 
 function loadCuts(jobId: string): Cut[] {
-  const cutsFilePath = files.cutsPath(jobId);
-  if (!fs.existsSync(cutsFilePath)) {
+  const cutsFilePath = artifactService.cutsPath(jobId);
+  if (!artifactService.artifactExists(cutsFilePath)) {
     return [];
   }
-  const content = fs.readFileSync(cutsFilePath, "utf-8");
-  return JSON.parse(content);
+  return artifactService.readJsonArtifact<Cut[]>(cutsFilePath);
 }
 
 export function beginRenderJob(jobId: string): void {
@@ -39,7 +37,7 @@ export function beginRenderJob(jobId: string): void {
 }
 
 export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
-  const videoPath = files.findSourceVideo(jobId);
+  const videoPath = artifactService.findSourceVideo(jobId);
   if (!videoPath) {
     throw new Error("Source video not found for job");
   }
@@ -51,7 +49,7 @@ export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
     throw new Error("No cuts found to render");
   }
 
-  const shortsDir = files.ensureShortsJobDir(jobId);
+  const shortsDir = artifactService.ensureShortsJobDir(jobId);
   const ffmpegConfig = loadActiveToolConfigs().ffmpeg;
   const concurrency = resolveRenderConcurrency(cuts.length);
 

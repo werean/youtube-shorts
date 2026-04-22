@@ -1,11 +1,17 @@
-import * as fs from "fs";
 import { appendTaskLog } from "../../core/taskLogs";
 import { Job, JobStatus } from "../../models/job";
+import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
 import { IngestResult } from "./types";
 
 export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult | null {
-  if (!(job.source_video_path && fs.existsSync(job.source_video_path) && fs.existsSync(infoPath))) {
+  if (
+    !(
+      job.source_video_path &&
+      artifactService.artifactExists(job.source_video_path) &&
+      artifactService.artifactExists(infoPath)
+    )
+  ) {
     return null;
   }
 
@@ -18,7 +24,7 @@ export function maybeUseExistingSource(job: Job, infoPath: string): IngestResult
   // Ensure video_name is set
   if (!updatedJob.video_name) {
     try {
-      const infoContent = fs.readFileSync(infoPath, "utf-8");
+      const infoContent = artifactService.readTextArtifact(infoPath);
       const infoData = JSON.parse(infoContent);
       if (infoData.title) {
         updatedJob.video_name = infoData.title;
