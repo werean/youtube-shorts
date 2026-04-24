@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ActionState } from "../hooks/useAppAction";
+import type { ActionState } from "../../hooks/useAppAction";
 
 interface CutEditDialogProps {
   editCutStartMinutes: string;

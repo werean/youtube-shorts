@@ -1,4 +1,4 @@
-import { AppDialog } from "./shared";
+import { AppDialog } from "../shared";
 
 interface AiResponseDialogProps {
   aiResponseRaw: string;

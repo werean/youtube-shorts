@@ -9,19 +9,19 @@ import type { VideoItem } from "../hooks/useVideoManagement";
 import type { WhisperConfig } from "../types/whisper";
 
 // Dialog components
-import { TranscriptionFormatListDialog } from "../components/TranscriptionFormatListDialog";
-import { TranscriptionContentDialog } from "../components/TranscriptionContentDialog";
-import { TranscriptionDeleteDialog } from "../components/TranscriptionDeleteDialog";
-import { BlocksDialog } from "../components/BlocksDialog";
-import { AiResponseDialog } from "../components/AiResponseDialog";
-import { RegenerateAnalyzeDialog } from "../components/RegenerateAnalyzeDialog";
-import { CutEditDialog } from "../components/CutEditDialog";
-import { RenameVideoDialog } from "../components/RenameVideoDialog";
-import { ConfigureAppDialog } from "../components/ConfigureAppDialog";
-import { LLMConfigDialog } from "../components/LLMConfigDialog";
-import { WhisperConfigDialog } from "../components/WhisperConfigDialog";
-import { InstallationInstructionsDialog } from "../components/InstallationInstructionsDialog";
-import { MoveUploadDialog } from "../components/MoveUploadDialog";
+import { TranscriptionFormatListDialog } from "../components/dialogs/TranscriptionFormatListDialog";
+import { TranscriptionContentDialog } from "../components/dialogs/TranscriptionContentDialog";
+import { TranscriptionDeleteDialog } from "../components/dialogs/TranscriptionDeleteDialog";
+import { BlocksDialog } from "../components/dialogs/BlocksDialog";
+import { AiResponseDialog } from "../components/dialogs/AiResponseDialog";
+import { RegenerateAnalyzeDialog } from "../components/dialogs/RegenerateAnalyzeDialog";
+import { CutEditDialog } from "../components/dialogs/CutEditDialog";
+import { RenameVideoDialog } from "../components/dialogs/RenameVideoDialog";
+import { ConfigureAppDialog } from "../components/dialogs/ConfigureAppDialog";
+import { LLMConfigDialog } from "../components/dialogs/LLMConfigDialog";
+import { WhisperConfigDialog } from "../components/dialogs/WhisperConfigDialog";
+import { InstallationInstructionsDialog } from "../components/dialogs/InstallationInstructionsDialog";
+import { MoveUploadDialog } from "../components/dialogs/MoveUploadDialog";
 
 export interface DialogsProps {
   // Transcription dialog state

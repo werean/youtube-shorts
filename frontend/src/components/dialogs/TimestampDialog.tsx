@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppButton, AppDialog, AppInput } from "./shared";
+import { AppButton, AppDialog, AppInput } from "../shared";
 
 interface TimestampDialogProps {
   mode: "add" | "edit";

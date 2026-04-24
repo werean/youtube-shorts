@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
-import type { ActionState } from "../hooks/useAppAction";
-import { WHISPER_MODELS, WHISPER_LANGUAGES, WHISPER_OUTPUT_FORMATS } from "../types/whisper";
-import type { WhisperConfig } from "../types/whisper";
+import type { ActionState } from "../../hooks/useAppAction";
+import { WHISPER_MODELS, WHISPER_LANGUAGES, WHISPER_OUTPUT_FORMATS } from "../../types/whisper";
+import type { WhisperConfig } from "../../types/whisper";
 import {
   ConfigField,
   TextInput,
@@ -10,9 +10,9 @@ import {
   Toggle,
   MultiSelect,
   ConfigSection,
-} from "./WhisperConfigComponents";
-import { generateWhisperCommand } from "../utils/whisperCommandBuilder";
-import { AppButton } from "./shared";
+} from "../WhisperConfigComponents";
+import { generateWhisperCommand } from "../../utils/whisperCommandBuilder";
+import { AppButton } from "../shared";
 
 interface WhisperConfigDialogProps {
   whisperDevice: "cpu" | "cuda";

@@ -1,21 +1,21 @@
 import { useState, useMemo } from "react";
-import type { ActionState } from "../hooks/useAppAction";
+import type { ActionState } from "../../hooks/useAppAction";
 import {
   VIDEO_CODECS,
   AUDIO_CODECS,
   CONTAINER_FORMATS,
   NVENC_PRESETS,
   SOFTWARE_PRESETS,
-} from "../types/ffmpeg";
-import type { FFmpegConfig } from "../types/ffmpeg";
+} from "../../types/ffmpeg";
+import type { FFmpegConfig } from "../../types/ffmpeg";
 import {
   ConfigField,
   TextInput,
   SelectInput,
   Toggle,
   ConfigSection,
-} from "./WhisperConfigComponents";
-import { AppButton } from "./shared";
+} from "../WhisperConfigComponents";
+import { AppButton } from "../shared";
 
 interface FFmpegConfigDialogProps {
   action: ActionState;

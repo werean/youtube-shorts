@@ -1,5 +1,5 @@
-import type { ActionState } from "../hooks/useAppAction";
-import { AppButton, AppDialog } from "./shared";
+import type { ActionState } from "../../hooks/useAppAction";
+import { AppButton, AppDialog } from "../shared";
 
 interface TranscriptionDeleteDialogProps {
   pendingDeleteFormat: "text" | "vtt" | "segments";

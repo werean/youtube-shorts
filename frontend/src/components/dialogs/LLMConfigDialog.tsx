@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ActionState } from "../hooks/useAppAction";
+import type { ActionState } from "../../hooks/useAppAction";
 import {
   getDefaultLLMPrompt,
   getSavedLLMPrompts,
   saveLLMPrompt,
   type SavedLLMPrompt,
-} from "../api";
-import { AppButton, AppInput, AppSelect } from "./shared";
+} from "../../api";
+import { AppButton, AppInput, AppSelect } from "../shared";
 
 interface OllamaModelCatalogItem {
   name: string;

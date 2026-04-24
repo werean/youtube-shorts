@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AppButton } from "./shared";
+import { AppButton } from "../shared";
 
 interface Dependency {
   installed: boolean;

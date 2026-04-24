@@ -1,4 +1,4 @@
-import { AppButton, AppDialog } from "./shared";
+import { AppButton, AppDialog } from "../shared";
 
 interface TranscriptionContentDialogProps {
   title: string;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AppButton, AppDialog } from "./shared";
+import { AppButton, AppDialog } from "../shared";
 
 interface TranscriptionFormatListDialogProps {
   activeVideoHasText: boolean;

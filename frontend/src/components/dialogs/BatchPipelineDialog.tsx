@@ -1,6 +1,6 @@
 import type React from "react";
 import type { BatchPipelineOptions } from "@youtube-shorts/contracts";
-import { AppButton, AppDialog } from "./shared";
+import { AppButton, AppDialog } from "../shared";
 
 interface VideoItem {
   job: {

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { selectFolder } from "../api";
-import type { ActionState } from "../hooks/useAppAction";
-import { AppButton, AppCheckboxField, AppDialog, AppInput, AppSelect } from "./shared";
+import { selectFolder } from "../../api";
+import type { ActionState } from "../../hooks/useAppAction";
+import { AppButton, AppCheckboxField, AppDialog, AppInput, AppSelect } from "../shared";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;

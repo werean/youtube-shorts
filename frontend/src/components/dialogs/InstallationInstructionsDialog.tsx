@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getInstallationGuide, type InstallationGuide } from "../api";
+import { getInstallationGuide, type InstallationGuide } from "../../api";
 
 interface InstallationInstructionsDialogProps {
   dependencyName: string;

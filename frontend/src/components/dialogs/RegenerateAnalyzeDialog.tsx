@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { Cut } from "../types";
-import type { ActionState } from "../hooks/useAppAction";
-import { AppButton, AppDialog } from "./shared";
+import type { Cut } from "../../types";
+import type { ActionState } from "../../hooks/useAppAction";
+import { AppButton, AppDialog } from "../shared";
 
 function formatTimestamp(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
