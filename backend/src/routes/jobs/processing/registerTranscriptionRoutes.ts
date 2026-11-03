@@ -10,6 +10,7 @@ import {
   deleteTranscriptionFormat,
   readTranscriptionResponse,
 } from "../../../features/jobs/transcriptionArtifacts";
+import { JobAlreadyRunningError } from "../../../services/operationRuntimeService";
 
 export function registerTranscriptionRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/transcribe", async (request, reply) => {
@@ -20,7 +21,8 @@ export function registerTranscriptionRoutes(fastify: FastifyInstance) {
 
       return buildTranscriptionResponseFromSegments(job_id, segments);
     } catch (error: any) {
-      reply.code(500).send({ detail: error.message });
+      const statusCode = error instanceof JobAlreadyRunningError ? 409 : 500;
+      return reply.code(statusCode).send({ detail: error.message });
     }
   });
 

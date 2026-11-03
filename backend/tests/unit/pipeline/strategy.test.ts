@@ -49,7 +49,7 @@ describe("validateLLMPayload", () => {
     expect(result.blockCount).toBe(2);
   });
 
-  it("rejects payloads above max block count", () => {
+  it("warns and still accepts payloads above max block count when characters fit", () => {
     const strategy = selectStrategy(1200);
     const blocks = Array.from({ length: strategy.maxBlocksPerLLMRequest + 1 }, (_, index) =>
       makeBlock(index + 1, "ok"),
@@ -57,8 +57,8 @@ describe("validateLLMPayload", () => {
 
     const result = validateLLMPayload(blocks, strategy);
 
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain("maxBlocksPerLLMRequest");
+    expect(result.valid).toBe(true);
+    expect(result.blockCount).toBe(strategy.maxBlocksPerLLMRequest + 1);
   });
 
   it("rejects payloads above max char count", () => {

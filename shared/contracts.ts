@@ -21,6 +21,7 @@ export interface Job {
   source_file_name?: string;
   video_name?: string;
   video_duration_seconds?: number;
+  last_error?: string | null;
 }
 
 export interface Cut {

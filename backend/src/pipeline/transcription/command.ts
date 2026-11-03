@@ -1,4 +1,5 @@
 import { config } from "../../core/config";
+import { resolveModelDevice } from "../../core/gpu";
 import { loadActiveToolConfigs, type ToolConfigs } from "../../core/toolConfigs";
 import type { TranscriptionFormats } from "./artifacts";
 
@@ -18,30 +19,25 @@ export function buildWhisperCommand(
   videoPath: string,
   outputDir: string,
   toolConfigs: ToolConfigs = loadActiveToolConfigs(),
-): string {
+): string[] {
   const whisper = toolConfigs.whisper;
-  const outputFormats = Array.isArray(whisper.output_format) ? [...whisper.output_format] : [];
-  if (!outputFormats.includes("json") && !outputFormats.includes("all")) {
-    outputFormats.push("json");
+  const requestedDevice = whisper.device === "cpu" ? "cpu" : "cuda";
+  const device = resolveModelDevice(requestedDevice);
+  if (requestedDevice === "cuda" && device === "cpu") {
+    console.warn("[transcription] No local GPU detected. Whisper will use CPU.");
   }
-  const normalizedFormats = outputFormats.filter(Boolean);
-  const outputFormatArg = normalizedFormats.includes("all")
-    ? "all"
-    : normalizedFormats.length > 1
-      ? "all"
-      : normalizedFormats[0] || "json";
 
   const args: string[] = [
     "whisper",
-    `"${videoPath}"`,
+    videoPath,
     "--model",
     String(whisper.model || config.WHISPER_MODEL_NAME),
     "--output_format",
-    outputFormatArg,
+    "json",
     "--output_dir",
-    `"${outputDir}"`,
+    outputDir,
     "--device",
-    whisper.device === "cpu" ? "cpu" : "cuda",
+    device,
   ];
 
   if (whisper.verbose !== undefined) {
@@ -69,10 +65,10 @@ export function buildWhisperCommand(
     args.push("--length_penalty", String(whisper.length_penalty));
   }
   if (whisper.suppress_tokens !== undefined) {
-    args.push("--suppress_tokens", `"${whisper.suppress_tokens}"`);
+    args.push("--suppress_tokens", String(whisper.suppress_tokens));
   }
   if (whisper.initial_prompt) {
-    args.push("--initial_prompt", `"${whisper.initial_prompt}"`);
+    args.push("--initial_prompt", whisper.initial_prompt);
   }
   if (whisper.carry_initial_prompt !== undefined) {
     args.push("--carry_initial_prompt", whisper.carry_initial_prompt ? "True" : "False");
@@ -83,7 +79,9 @@ export function buildWhisperCommand(
       whisper.condition_on_previous_text ? "True" : "False",
     );
   }
-  if (whisper.fp16 !== undefined) {
+  if (device === "cpu") {
+    args.push("--fp16", "False");
+  } else if (whisper.fp16 !== undefined) {
     args.push("--fp16", whisper.fp16 ? "True" : "False");
   }
   if (whisper.temperature_increment_on_fallback !== undefined) {
@@ -105,10 +103,10 @@ export function buildWhisperCommand(
     args.push("--word_timestamps", whisper.word_timestamps ? "True" : "False");
   }
   if (whisper.prepend_punctuations) {
-    args.push("--prepend_punctuations", `"${whisper.prepend_punctuations}"`);
+    args.push("--prepend_punctuations", whisper.prepend_punctuations);
   }
   if (whisper.append_punctuations) {
-    args.push("--append_punctuations", `"${whisper.append_punctuations}"`);
+    args.push("--append_punctuations", whisper.append_punctuations);
   }
   if (whisper.highlight_words !== undefined) {
     args.push("--highlight_words", whisper.highlight_words ? "True" : "False");
@@ -126,7 +124,7 @@ export function buildWhisperCommand(
     args.push("--threads", String(whisper.threads));
   }
   if (whisper.clip_timestamps) {
-    args.push("--clip_timestamps", `"${whisper.clip_timestamps}"`);
+    args.push("--clip_timestamps", whisper.clip_timestamps);
   }
   if (
     whisper.hallucination_silence_threshold !== undefined &&
@@ -135,5 +133,9 @@ export function buildWhisperCommand(
     args.push("--hallucination_silence_threshold", String(whisper.hallucination_silence_threshold));
   }
 
-  return args.join(" ");
+  return args;
+}
+
+export function formatWhisperCommand(args: string[]): string {
+  return args.map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)).join(" ");
 }

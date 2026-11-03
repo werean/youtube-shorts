@@ -20,8 +20,8 @@ export function saveJob(job: Job): string {
   return metadata.saveJob(job);
 }
 
-export function updateJobStatus(jobId: string, status: JobStatus): Job {
-  return metadata.updateJobStatus(jobId, status);
+export function updateJobStatus(jobId: string, status: JobStatus, lastError?: string): Job {
+  return metadata.updateJobStatus(jobId, status, lastError);
 }
 
 export function invalidateJobCache(jobId?: string): void {

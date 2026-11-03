@@ -139,6 +139,10 @@ describe("orchestrator analysis prerequisites", () => {
       "ingest failed",
     );
 
-    expect(updateJobStatusMock).toHaveBeenCalledWith("job-orchestrated", JobStatus.ERROR);
+    expect(updateJobStatusMock).toHaveBeenCalledWith(
+      "job-orchestrated",
+      JobStatus.ERROR,
+      "ingest failed",
+    );
   });
 });

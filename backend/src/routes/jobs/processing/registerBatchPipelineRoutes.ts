@@ -4,7 +4,10 @@
 
 import type { FastifyInstance } from "fastify";
 import { processBatchPipeline } from "../../../features/jobs/batch/runner";
+import * as artifactService from "../../../services/artifactService";
 import * as operationRuntimeService from "../../../services/operationRuntimeService";
+import { cancelTranscription } from "../../../pipeline/transcription";
+import { cancelRendering } from "../../../pipeline/rendering";
 import {
   getBatchOptions,
   hasBatchJobIds,
@@ -59,6 +62,16 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
         return reply.code(404).send({ detail: "Batch process not found" });
       }
 
+      if (!progress.is_running && progress.current_step === "completed") {
+        const snapshot = {
+          ...progress,
+          completed_jobs: [...progress.completed_jobs],
+          failed_jobs: progress.failed_jobs.map((entry) => ({ ...entry })),
+        };
+        operationRuntimeService.deleteBatchProgress(batch_id);
+        return snapshot;
+      }
+
       return progress;
     },
   );
@@ -75,6 +88,12 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
       }
 
       progress.is_running = false;
+      const currentJobId = progress.current_job_id;
+      if (currentJobId) {
+        operationRuntimeService.cancelActiveDownload(currentJobId);
+        cancelTranscription(currentJobId);
+        cancelRendering(currentJobId);
+      }
       console.log(`[batch] Cancellation requested for batch ${batch_id}`);
 
       return { status: "cancelled" };
@@ -96,7 +115,14 @@ export function registerBatchPipelineRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ detail: "Batch is not waiting for approval" });
       }
 
-      // Resume processing
+      const cutsPath = artifactService.cutsPath(progress.current_job_id);
+      const cuts = artifactService.artifactExists(cutsPath)
+        ? artifactService.readJsonArtifact<Array<{ status?: string }>>(cutsPath)
+        : [];
+      if (!cuts.some((cut) => cut.status === "approved")) {
+        return reply.code(400).send({ detail: "At least one approved cut is required" });
+      }
+
       progress.waiting_for_approval = false;
       console.log(`[batch] Continuing batch ${batch_id} after approval`);
 

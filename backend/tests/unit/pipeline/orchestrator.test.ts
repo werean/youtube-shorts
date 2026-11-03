@@ -166,6 +166,28 @@ describe("runPipeline", () => {
 
     await expect(runPipeline("job-1", { includeRender: false })).rejects.toThrow("ingest failed");
 
-    expect(updateJobStatusMock).toHaveBeenCalledWith("job-1", JobStatus.ERROR);
+    expect(updateJobStatusMock).toHaveBeenCalledWith("job-1", JobStatus.ERROR, "ingest failed");
+  });
+
+  it("does not ingest a job that is already DOWNLOADED", async () => {
+    let currentStatus = JobStatus.DOWNLOADED;
+    loadJobMock.mockImplementation(() => makeJob(currentStatus));
+    transcribeJobMock.mockImplementation(async () => {
+      currentStatus = JobStatus.TRANSCRIBING;
+    });
+    buildSemanticBlocksMock.mockImplementation(async () => {
+      currentStatus = JobStatus.BUILDING_BLOCKS;
+    });
+    buildTopicSegmentsMock.mockImplementation(async () => {
+      currentStatus = JobStatus.BUILDING_TOPICS;
+    });
+    analyzeBlocksMock.mockImplementation(async () => {
+      currentStatus = JobStatus.ANALYZING;
+    });
+
+    await runPipeline("job-1", { includeRender: false });
+
+    expect(ingestVideoMock).not.toHaveBeenCalled();
+    expect(transcribeJobMock).toHaveBeenCalledTimes(1);
   });
 });

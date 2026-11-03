@@ -282,7 +282,7 @@ describe("topic segmentation pipeline behavior", () => {
     expect(savedStatusValues("job-embeddings")).toEqual([JobStatus.ANALYZING]);
   });
 
-  test("embedding failures are wrapped and do not persist topics or mark the job ERROR", async () => {
+  test("embedding failures fall back to heuristic topics and still finish the step", async () => {
     writeSemanticBlocks("job-embedding-failure", [
       {
         block_id: "b1",
@@ -294,14 +294,11 @@ describe("topic segmentation pipeline behavior", () => {
     ]);
     embeddingError = new Error("embed offline");
 
-    await expect(
-      buildTopicSegments("job-embedding-failure", true, "bad-model"),
-    ).rejects.toThrow(
-      "[topic_segmentation] Embedding boundary detection failed for job job-embedding-failure (model='bad-model', blocks=1): embed offline",
-    );
+    const topics = await buildTopicSegments("job-embedding-failure", true, "bad-model");
 
+    expect(topics.map((topic) => topic.block_ids)).toEqual([["b1"]]);
     expect(statusUpdateValues("job-embedding-failure")).toEqual([JobStatus.BUILDING_TOPICS]);
-    expect(savedStatusValues("job-embedding-failure")).toEqual([]);
-    expect(fs.existsSync(topicSegmentsPath("job-embedding-failure"))).toBe(false);
+    expect(savedStatusValues("job-embedding-failure")).toEqual([JobStatus.ANALYZING]);
+    expect(fs.existsSync(topicSegmentsPath("job-embedding-failure"))).toBe(true);
   });
 });

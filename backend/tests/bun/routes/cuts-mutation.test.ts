@@ -69,7 +69,7 @@ function writeSemanticBlocks(jobId: string): void {
       {
         block_id: "b1",
         start: 0,
-        end: 10,
+        end: 320,
         text: "This is a complete thought.",
         segment_ids: ["s1"],
       },
@@ -193,7 +193,7 @@ describe("cuts ownership and mutation behavior", () => {
         cut_id: "c1",
         block_ids: ["b1"],
         start: 0,
-        end: 10,
+        end: 320,
         title: "Generated cut",
         status: "pending",
       },

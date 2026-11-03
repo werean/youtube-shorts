@@ -18,11 +18,25 @@ function buildYtDlpFormat(resolution: string): string {
   return `bv*[height<=${maxHeight}]+ba/b[height<=${maxHeight}]`;
 }
 
-export function buildDownloadCommand(job: Job, outputPattern: string): string {
+export function buildDownloadArgs(job: Job, outputPattern: string): string[] {
   const settings = loadSettings();
   const format = buildYtDlpFormat(settings.media.download_resolution || "1080p");
-  return (
-    `python -m yt_dlp --no-playlist --write-info-json --format "${format}" ` +
-    `--output "${outputPattern}" "${job.youtube_url}"`
-  );
+  return [
+    "python",
+    "-m",
+    "yt_dlp",
+    "--no-playlist",
+    "--write-info-json",
+    "--format",
+    format,
+    "--output",
+    outputPattern,
+    job.youtube_url,
+  ];
+}
+
+export function formatDownloadCommand(args: string[]): string {
+  return args
+    .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
+    .join(" ");
 }

@@ -4,6 +4,9 @@
 
 import { config } from "../core/config";
 import { SemanticBlock } from "../models/semantic_block";
+import { continuesSentence } from "./sentence";
+
+const EMBEDDING_BATCH_SIZE = 48;
 
 /**
  * Fetches embeddings for an array of texts from Ollama.
@@ -13,26 +16,34 @@ import { SemanticBlock } from "../models/semantic_block";
  * @param model - Ollama embedding model name (default: "nomic-embed-text").
  * @returns Array of embedding vectors, same order as input.
  */
-export async function fetchEmbeddings(
-  texts: string[],
-  model: string = "nomic-embed-text",
-): Promise<number[][]> {
-  if (texts.length === 0) {
-    return [];
-  }
-
+async function fetchEmbeddingBatch(texts: string[], model: string): Promise<number[][]> {
   const baseUrl = config.OLLAMA_BASE_URL.replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/api/embed`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(config.OLLAMA_API_KEY ? { Authorization: `Bearer ${config.OLLAMA_API_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      input: texts,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.OLLAMA_TIMEOUT_SECONDS * 1000);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/embed`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(config.OLLAMA_API_KEY ? { Authorization: `Bearer ${config.OLLAMA_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({
+        model,
+        input: texts,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        `[embedding] Ollama embed request timed out (model='${model}', texts=${texts.length}).`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const detail = (await response.text().catch(() => "")).trim();
@@ -62,7 +73,7 @@ export async function fetchEmbeddings(
     );
   }
 
-  return payload.embeddings.map((vector, vectorIndex) => {
+  return (payload.embeddings as unknown[]).map((vector, vectorIndex) => {
     if (!Array.isArray(vector)) {
       throw new Error(
         `[embedding] Invalid embedding vector at index ${vectorIndex} for model '${model}' (expected number[]).`,
@@ -81,13 +92,32 @@ export async function fetchEmbeddings(
   });
 }
 
+export async function fetchEmbeddings(
+  texts: string[],
+  model: string = "nomic-embed-text",
+): Promise<number[][]> {
+  if (texts.length === 0) {
+    return [];
+  }
+
+  const vectors: number[][] = [];
+  for (let index = 0; index < texts.length; index += EMBEDDING_BATCH_SIZE) {
+    const batch = texts.slice(index, index + EMBEDDING_BATCH_SIZE);
+    vectors.push(...(await fetchEmbeddingBatch(batch, model)));
+  }
+  return vectors;
+}
+
+function vectorNorm(values: number[]): number {
+  let sum = 0;
+  for (const value of values) {
+    sum += value * value;
+  }
+  return Math.sqrt(sum);
+}
+
 /**
- * Computes cosine similarity between two L2-normalized vectors.
- * Since vectors are L2-normalized, this is equivalent to dot product.
- *
- * @param a - First vector.
- * @param b - Second vector.
- * @returns Similarity score between -1 and 1.
+ * Cosine similarity after L2 normalization, so the 0.75 threshold stays a cosine.
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
@@ -96,11 +126,17 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     );
   }
 
+  const normA = vectorNorm(a);
+  const normB = vectorNorm(b);
+  if (normA === 0 || normB === 0) {
+    return 0;
+  }
+
   let sum = 0;
   for (let i = 0; i < a.length; i += 1) {
     sum += a[i] * b[i];
   }
-  return sum;
+  return sum / (normA * normB);
 }
 
 /**
@@ -126,6 +162,9 @@ export function detectEmbeddingBoundaries(
   const boundaries = new Set<string>();
 
   for (let i = 1; i < blocks.length; i += 1) {
+    if (continuesSentence(blocks[i - 1].text, blocks[i].text)) {
+      continue;
+    }
     const similarity = cosineSimilarity(embeddings[i - 1], embeddings[i]);
     if (similarity < threshold) {
       boundaries.add(blocks[i].block_id);

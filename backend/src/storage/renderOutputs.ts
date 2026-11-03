@@ -14,16 +14,14 @@ export function renderOutputUrl(jobId: string, cutId: string): string {
   return `/media/shorts/${jobId}/${cutId}.mp4`;
 }
 
-function formatTimestampForFilename(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(mins).padStart(2, "0")}_${String(secs).padStart(2, "0")}`;
+function formatSecondsForFilename(seconds: number): string {
+  const wholeSeconds = Math.max(0, Math.round(seconds));
+  return String(wholeSeconds).padStart(5, "0");
 }
 
-export function buildCutFilename(start: number, end: number): string {
-  const startFormatted = formatTimestampForFilename(start);
-  const endFormatted = formatTimestampForFilename(end);
-  return `${startFormatted}-${endFormatted}.mp4`;
+export function buildCutFilename(start: number, end: number, cutId?: string): string {
+  const prefix = cutId ? `${cutId}_` : "";
+  return `${prefix}${formatSecondsForFilename(start)}-${formatSecondsForFilename(end)}.mp4`;
 }
 
 export function listRenderOutputUrls(jobId: string): string[] {

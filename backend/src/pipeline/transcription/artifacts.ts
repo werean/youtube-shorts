@@ -29,7 +29,12 @@ export function readWhisperSegments(outputPath: string): Segment[] {
   }
 
   const whisperRaw = readFileTextWithFallback(outputPath);
-  const whisperData = JSON.parse(whisperRaw);
+  let whisperData: { segments?: Array<{ start?: string | number; end?: string | number; text?: string }> };
+  try {
+    whisperData = JSON.parse(whisperRaw) as typeof whisperData;
+  } catch {
+    throw new Error(`Whisper output JSON is invalid: ${outputPath}`);
+  }
 
   const segments: Segment[] = [];
   const whisperSegments = whisperData.segments || [];
@@ -38,8 +43,8 @@ export function readWhisperSegments(outputPath: string): Segment[] {
     const item = whisperSegments[index];
     segments.push({
       segment_id: `s${index + 1}`,
-      start: parseFloat(item.start || 0),
-      end: parseFloat(item.end || 0),
+      start: parseFloat(String(item.start || 0)),
+      end: parseFloat(String(item.end || 0)),
       text: String(item.text || "").trim(),
     });
   }

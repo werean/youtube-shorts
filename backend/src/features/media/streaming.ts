@@ -4,6 +4,7 @@ import * as path from "path";
 
 import { getShortsDir } from "../../core/settings";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
+import { readMediaJobCache, writeMediaJobCache } from "./jobCache";
 
 function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -73,17 +74,13 @@ export async function sendVideoStream(
   await reply.send(fs.createReadStream(filePath));
 }
 
-const jobCache = new Map<string, { job: any; timestamp: number }>();
-const CACHE_TTL = 60000;
-
 function getCachedJob(jobId: string) {
-  const cached = jobCache.get(jobId);
-  const now = Date.now();
-  if (cached && now - cached.timestamp < CACHE_TTL) {
-    return cached.job;
+  const cached = readMediaJobCache(jobId);
+  if (cached) {
+    return cached;
   }
   const job = jobLifecycleService.loadJob(jobId);
-  jobCache.set(jobId, { job, timestamp: now });
+  writeMediaJobCache(jobId, job);
   return job;
 }
 

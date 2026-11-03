@@ -120,6 +120,8 @@ mock.module("../../../src/storage/metadata", () => ({
 mock.module("../../../src/storage/files", () => ({
   buildCutFilename: (start: number, end: number) => `${start.toFixed(2)}-${end.toFixed(2)}.mp4`,
   cutsPath,
+  semanticBlocksPath: (jobId: string) => path.join(jobDir(jobId), "semantic.blocks.json"),
+  topicSegmentsPath: (jobId: string) => path.join(jobDir(jobId), "topic.segments.json"),
   ensureShortsJobDir: (jobId: string) => {
     const dir = shortsDir(jobId);
     fs.mkdirSync(dir, { recursive: true });
@@ -283,23 +285,9 @@ describe("rendering flow behavior", () => {
 
     const outputs = await renderSuggestedCuts("job-success");
 
-    expect(outputs).toEqual([
-      "/media/shorts/job-success/20.00-32.50.mp4",
-      "/media/shorts/job-success/4.00-9.25.mp4",
-    ]);
+    expect(outputs).toEqual(["/media/shorts/job-success/4.00-9.25.mp4"]);
     expect(statusUpdateValues("job-success")).toEqual([JobStatus.RENDERING, JobStatus.DONE]);
     expect(commandParams).toEqual([
-      {
-        inputPath: sourceVideoPath,
-        outputPath: path.join(shortsDir("job-success"), "20.00-32.50.mp4"),
-        start: 20,
-        end: 32.5,
-        ffmpegConfig: {
-          audio_codec: "aac-test",
-          video_codec: "h264-test",
-          video_preset: "p1-test",
-        },
-      },
       {
         inputPath: sourceVideoPath,
         outputPath: path.join(shortsDir("job-success"), "4.00-9.25.mp4"),
@@ -310,22 +298,21 @@ describe("rendering flow behavior", () => {
           video_codec: "h264-test",
           video_preset: "p1-test",
         },
+        disableHardware: false,
       },
     ]);
     expect(ffmpegCalls.map((call) => call.command.join(" "))).toEqual([
-      `ffmpeg -i ${sourceVideoPath} -ss 20 -to 32.5 ${path.join(shortsDir("job-success"), "20.00-32.50.mp4")}`,
       `ffmpeg -i ${sourceVideoPath} -ss 4 -to 9.25 ${path.join(shortsDir("job-success"), "4.00-9.25.mp4")}`,
     ]);
-    expect(fs.existsSync(path.join(shortsDir("job-success"), "20.00-32.50.mp4"))).toBe(true);
     expect(fs.existsSync(path.join(shortsDir("job-success"), "4.00-9.25.mp4"))).toBe(true);
     expect(logLines("job-success")).toEqual(
       expect.arrayContaining([
         "[rendering] Starting render",
         `[rendering] Source: ${sourceVideoPath}`,
         "[rendering] Concurrency: 1",
-        "[rendering] Cut c2 20.00-32.50",
+        "[rendering] Cut c1 4.00-9.25",
         expect.stringContaining("[rendering] Command: ffmpeg -i"),
-        "ffmpeg started " + path.join(shortsDir("job-success"), "20.00-32.50.mp4"),
+        "ffmpeg started " + path.join(shortsDir("job-success"), "4.00-9.25.mp4"),
         "[rendering] ✓ Render complete",
       ]),
     );
@@ -342,8 +329,8 @@ describe("rendering flow behavior", () => {
     expect(statusUpdateValues("job-failure")).toEqual([JobStatus.RENDERING, JobStatus.ERROR]);
     expect(logLines("job-failure")).toEqual(
       expect.arrayContaining([
-        "[rendering] Cut c2 20.00-32.50",
-        "ffmpeg started " + path.join(shortsDir("job-failure"), "20.00-32.50.mp4"),
+        "[rendering] Cut c1 4.00-9.25",
+        "ffmpeg started " + path.join(shortsDir("job-failure"), "4.00-9.25.mp4"),
         "[rendering] ✗ Error: FFmpeg failed with code 9",
       ]),
     );
@@ -361,7 +348,7 @@ describe("rendering flow behavior", () => {
     expect(cancelRendering("job-cancel")).toBe(true);
     expect(statusUpdateValues("job-cancel")).toEqual([
       JobStatus.RENDERING,
-      JobStatus.DOWNLOADED,
+      JobStatus.WAITING_APPROVAL,
     ]);
     expect(logLines("job-cancel")).toEqual(
       expect.arrayContaining([
@@ -373,11 +360,11 @@ describe("rendering flow behavior", () => {
     pendingFfmpeg?.resolve();
     const outputs = await renderPromise;
 
-    expect(outputs).toEqual(["/media/shorts/job-cancel/20.00-32.50.mp4"]);
+    expect(outputs).toEqual(["/media/shorts/job-cancel/4.00-9.25.mp4"]);
     expect(statusUpdateValues("job-cancel")).toEqual([
       JobStatus.RENDERING,
-      JobStatus.DOWNLOADED,
-      JobStatus.DOWNLOADED,
+      JobStatus.WAITING_APPROVAL,
+      JobStatus.WAITING_APPROVAL,
     ]);
     expect(logLines("job-cancel")).toContain("[rendering] Cancel acknowledged");
     expect(cancelRendering("job-cancel")).toBe(false);

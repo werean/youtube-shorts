@@ -4,6 +4,7 @@ import { buildCutSelectionPrompt, buildTopicCandidacyPrompt } from "../../llm/pr
 import { SemanticBlock } from "../../models/semantic_block";
 import { TopicSegment } from "../../models/topic_segment";
 import { parseRawCuts } from "./cuts";
+import { parseJsonContent } from "./jsonText";
 import { RawLLMCut } from "./types";
 
 export function buildClient(toolConfigs: ReturnType<typeof loadActiveToolConfigs>): OllamaClient {
@@ -25,30 +26,28 @@ export async function runPass1Candidacy(
   client: OllamaClient,
 ): Promise<boolean> {
   const prompt = buildTopicCandidacyPrompt(topic, allBlocks);
+  let lastError: unknown;
 
-  let content: string;
-  try {
-    content = await client.chat([
-      { role: "system", content: "You output JSON only." },
-      { role: "user", content: prompt },
-    ]);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[analysis] Pass 1 failed for topic ${topic.topic_id}: ${message} — skipping topic`,
-    );
-    return false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const content = await client.chat([
+        { role: "system", content: "You output JSON only." },
+        { role: "user", content: prompt },
+      ]);
+      const parsed = parseJsonContent(content) as { is_candidate?: boolean };
+      return parsed.is_candidate === true;
+    } catch (err: unknown) {
+      lastError = err;
+      console.warn(
+        `[analysis] Pass 1 attempt ${attempt + 1} failed for topic ${topic.topic_id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
-  try {
-    const parsed = JSON.parse(content) as { is_candidate?: boolean };
-    return parsed.is_candidate === true;
-  } catch {
-    console.warn(
-      `[analysis] Pass 1 response for topic ${topic.topic_id} is not valid JSON — skipping topic. Raw: ${content.slice(0, 120)}`,
-    );
-    return false;
-  }
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`Pass 1 failed for topic ${topic.topic_id}: ${message}`);
 }
 
 /**
@@ -66,8 +65,9 @@ export async function runFullPass(
   blocks: SemanticBlock[],
   client: OllamaClient,
   systemPrompt: string,
+  topics?: TopicSegment[],
 ): Promise<RawLLMCut[]> {
-  const prompt = buildCutSelectionPrompt(blocks);
+  const prompt = buildCutSelectionPrompt(blocks, topics);
 
   let content: string;
   try {
@@ -78,13 +78,12 @@ export async function runFullPass(
     ]);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[analysis] Full pass failed for job ${jobId}: ${message}`);
-    return [];
+    throw new Error(`LLM request failed for job ${jobId}: ${message}`);
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    parsed = parseJsonContent(content);
   } catch {
     throw new Error(`LLM response is not valid JSON. Raw: ${content.slice(0, 200)}`);
   }

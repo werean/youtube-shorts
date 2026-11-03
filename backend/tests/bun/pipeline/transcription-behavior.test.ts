@@ -24,7 +24,7 @@ const statusUpdates: Array<{ jobId: string; status: JobStatus }> = [];
 const savedJobs: Job[] = [];
 const clearedLogs: Array<{ jobId: string; task: string }> = [];
 const taskLogLines: Array<{ jobId: string; task: string; line: string }> = [];
-const spawnCalls: Array<{ command: string; options: any }> = [];
+const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
 
 function jobDir(jobId: string): string {
   return path.join(tempRoot, jobId);
@@ -96,16 +96,18 @@ function writeWhisperJson(outputDir: string): void {
   );
 }
 
-function parseOutputDir(command: string): string {
-  const match = command.match(/--output_dir\s+"([^"]+)"/);
-  if (!match) {
-    throw new Error(`Could not parse output dir from command: ${command}`);
+function parseOutputDir(args: string[]): string {
+  const index = args.indexOf("--output_dir");
+  if (index < 0 || !args[index + 1]) {
+    throw new Error(`Could not parse output dir from command: ${args.join(" ")}`);
   }
-  return match[1];
+  return args[index + 1];
 }
 
-const spawnMock = mock((command: string, options: any = {}): SpawnedChild => {
-  spawnCalls.push({ command, options });
+const spawnMock = mock((command: string, args: string[] | any = [], options: any = {}): SpawnedChild => {
+  const argv = [command, ...(Array.isArray(args) ? args : [])];
+  const spawnOptions = Array.isArray(args) ? options : args;
+  spawnCalls.push({ command: argv.join(" "), args: argv, options: spawnOptions });
 
   const child = new EventEmitter() as SpawnedChild;
   child.stdout = new EventEmitter();
@@ -113,14 +115,14 @@ const spawnMock = mock((command: string, options: any = {}): SpawnedChild => {
   child.pid = 12345;
   child.kill = () => true;
 
-  if (command.startsWith("taskkill")) {
+  if (command === "taskkill" || command.startsWith("taskkill")) {
     queueMicrotask(() => child.emit("exit", 0));
     return child;
   }
 
   queueMicrotask(() => {
     if (spawnScenario === "success") {
-      latestOutputDir = parseOutputDir(command);
+      latestOutputDir = parseOutputDir(argv);
       writeWhisperJson(latestOutputDir);
       child.stdout.emit("data", Buffer.from("whisper line one\nwhisper line two\n"));
       child.stderr.emit("data", Buffer.from("warning without newline"));
@@ -266,18 +268,30 @@ describe("transcription flow behavior", () => {
     ]);
 
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].command).toContain(`whisper "${sourceVideoPath}"`);
-    expect(spawnCalls[0].command).toContain("--model tiny-test");
-    expect(spawnCalls[0].command).toContain("--output_format all");
-    expect(spawnCalls[0].command).toContain(`--output_dir "${latestOutputDir}"`);
-    expect(spawnCalls[0].command).toContain("--device cpu");
-    expect(spawnCalls[0].command).toContain("--verbose False");
-    expect(spawnCalls[0].command).toContain("--task translate");
-    expect(spawnCalls[0].command).toContain("--language pt");
-    expect(spawnCalls[0].command).toContain('--initial_prompt "seed prompt"');
-    expect(spawnCalls[0].command).toContain("--condition_on_previous_text False");
+    expect(spawnCalls[0].args[0]).toBe("whisper");
+    expect(spawnCalls[0].args).toContain(sourceVideoPath);
+    expect(spawnCalls[0].args).toContain("--model");
+    expect(spawnCalls[0].args).toContain("tiny-test");
+    expect(spawnCalls[0].args).toContain("--output_format");
+    expect(spawnCalls[0].args).toContain("json");
+    expect(spawnCalls[0].args).not.toContain("all");
+    expect(spawnCalls[0].args).toContain(latestOutputDir);
+    expect(spawnCalls[0].args).toContain("--device");
+    expect(spawnCalls[0].args).toContain("cpu");
+    expect(spawnCalls[0].args).toContain("--fp16");
+    expect(spawnCalls[0].args).toContain("False");
+    expect(spawnCalls[0].args).toContain("--verbose");
+    expect(spawnCalls[0].args).toContain("False");
+    expect(spawnCalls[0].args).toContain("--task");
+    expect(spawnCalls[0].args).toContain("translate");
+    expect(spawnCalls[0].args).toContain("--language");
+    expect(spawnCalls[0].args).toContain("pt");
+    expect(spawnCalls[0].args).toContain("--initial_prompt");
+    expect(spawnCalls[0].args).toContain("seed prompt");
+    expect(spawnCalls[0].args).toContain("--condition_on_previous_text");
+    expect(spawnCalls[0].args).toContain("False");
+    expect(spawnCalls[0].options.shell).not.toBe(true);
     expect(spawnCalls[0].options).toMatchObject({
-      shell: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     expect(spawnCalls[0].options.env).toMatchObject({

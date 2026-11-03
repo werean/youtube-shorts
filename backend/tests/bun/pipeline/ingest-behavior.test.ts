@@ -12,7 +12,7 @@ let mediaRoot = "";
 let spawnScenario: SpawnScenario = "success";
 let spawnStdoutChunks: string[] = [];
 let spawnStderrChunks: string[] = [];
-let spawnCalls: Array<{ command: string; options: unknown }> = [];
+let spawnCalls: Array<{ command: string; args: string[]; options: unknown }> = [];
 let downloadResolution: "1080p" | "1440p" | "4k" = "1440p";
 let failSave = false;
 
@@ -126,8 +126,13 @@ function createMockProcess(): EventEmitter & { stdout: EventEmitter; stderr: Eve
   return child;
 }
 
-function spawnMock(command: string, options: unknown) {
-  spawnCalls.push({ command, options });
+function spawnMock(command: string, args?: string[] | unknown, options?: unknown) {
+  const argv = [command, ...(Array.isArray(args) ? args : [])];
+  spawnCalls.push({
+    command: argv.join(" "),
+    args: argv,
+    options: Array.isArray(args) ? options : args,
+  });
   const child = createMockProcess();
 
   queueMicrotask(() => {
@@ -253,14 +258,18 @@ describe("ingest pipeline behavior", () => {
         video_name: "Existing Title",
       }),
     ]);
-    expect(clearedTasks.map((entry) => entry.task)).toEqual(["transcription", "render", "ingest"]);
+    expect(clearedTasks.map((entry) => entry.task)).toEqual(["ingest"]);
   });
 
   test("successful download invokes yt-dlp with configured format, logs flushed output, renames by title, and persists downloaded job", async () => {
     const job = putJob(makeJob("job-download"));
     const outputDir = path.dirname(sourceVideoOutputTemplate(job.job_id));
     const infoPath = sourceVideoInfoPath(job.job_id);
-    fs.writeFileSync(infoPath, JSON.stringify({ title: "Downloaded: Title?" }), "utf-8");
+    fs.writeFileSync(
+      infoPath,
+      JSON.stringify({ title: "Downloaded: Title?", duration: 95 }),
+      "utf-8",
+    );
     fs.writeFileSync(path.join(outputDir, "video.webm"), "downloaded", "utf-8");
     spawnStdoutChunks = ["line one\npartial"];
     spawnStderrChunks = ["err one\r\n"];
@@ -269,11 +278,17 @@ describe("ingest pipeline behavior", () => {
 
     const expectedVideoPath = path.join(mediaRoot, "Downloaded_ Title_", "video.webm");
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].options).toEqual({ shell: true, stdio: ["ignore", "pipe", "pipe"] });
-    expect(spawnCalls[0].command).toContain("python -m yt_dlp --no-playlist --write-info-json");
-    expect(spawnCalls[0].command).toContain('--format "bv*[height<=1440]+ba/b[height<=1440]"');
-    expect(spawnCalls[0].command).toContain(`--output "${path.join(outputDir, "video.%(ext)s")}"`);
-    expect(spawnCalls[0].command).toContain(`"${job.youtube_url}"`);
+    expect(spawnCalls[0].options).toMatchObject({ shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    expect(spawnCalls[0].args.slice(0, 5)).toEqual([
+      "python",
+      "-m",
+      "yt_dlp",
+      "--no-playlist",
+      "--write-info-json",
+    ]);
+    expect(spawnCalls[0].args).toContain("bv*[height<=1440]+ba/b[height<=1440]");
+    expect(spawnCalls[0].args).toContain(path.join(outputDir, "video.%(ext)s"));
+    expect(spawnCalls[0].args).toContain(job.youtube_url);
     expect(result).toEqual({
       video_path: expectedVideoPath,
       metadata_path: infoPath,
@@ -286,6 +301,7 @@ describe("ingest pipeline behavior", () => {
         status: JobStatus.DOWNLOADED,
         source_video_path: expectedVideoPath,
         video_name: "Downloaded: Title?",
+        video_duration_seconds: 95,
       }),
     ]);
     expect(taskLogLines.filter((entry) => entry.task === "ingest").map((entry) => entry.line)).toContain(
@@ -299,40 +315,30 @@ describe("ingest pipeline behavior", () => {
     );
   });
 
-  test("yt-dlp failure creates dummy video and info, renames by dummy title, and still saves DOWNLOADED", async () => {
+  test("yt-dlp failure marks ERROR and does not replace the source with a dummy mp4", async () => {
     const job = putJob(makeJob("job-dummy"));
     spawnScenario = "failure";
     spawnStderrChunks = ["download failed\n"];
+    const outputDir = path.dirname(sourceVideoOutputTemplate(job.job_id));
+    const realVideo = path.join(outputDir, "video.mp4");
+    fs.writeFileSync(realVideo, "real-video", "utf-8");
 
-    const result = await ingestVideo(job);
+    await expect(ingestVideo(job)).rejects.toThrow("Ingestion failed: yt-dlp failed with code 5");
 
-    const expectedVideoPath = path.join(mediaRoot, "Dummy Video for Testing", "video.mp4");
-    const infoPath = sourceVideoInfoPath("job-dummy");
     expect(spawnCalls).toHaveLength(1);
-    expect(result).toEqual({
-      video_path: expectedVideoPath,
-      metadata_path: infoPath,
-    });
-    expect(fs.readFileSync(expectedVideoPath, "utf-8")).toBe("dummy-mp4");
-    expect(JSON.parse(fs.readFileSync(infoPath, "utf-8"))).toEqual({
-      id: "dummy",
-      title: "Dummy Video for Testing",
-      ext: "mp4",
-      url: job.youtube_url,
-    });
+    expect(fs.readFileSync(realVideo, "utf-8")).toBe("real-video");
     expect(statusUpdateValues("job-dummy")).toEqual([JobStatus.DOWNLOADING]);
     expect(savedJobsFor("job-dummy")).toEqual([
       expect.objectContaining({
         job_id: "job-dummy",
-        status: JobStatus.DOWNLOADED,
-        source_video_path: expectedVideoPath,
-        video_name: "Dummy Video for Testing",
+        status: JobStatus.ERROR,
+        last_error: expect.stringContaining("yt-dlp failed with code 5"),
       }),
     ]);
     expect(taskLogLines.filter((entry) => entry.task === "ingest").map((entry) => entry.line)).toContain(
       "[ingest] ERROR executing yt-dlp",
     );
-    expect(taskLogLines.filter((entry) => entry.task === "ingest").map((entry) => entry.line)).toContain(
+    expect(taskLogLines.filter((entry) => entry.task === "ingest").map((entry) => entry.line)).not.toContain(
       "[ingest] Dummy flow completed",
     );
   });

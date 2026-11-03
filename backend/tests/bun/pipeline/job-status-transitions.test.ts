@@ -186,7 +186,7 @@ function writeCuts(jobId: string): void {
         start: 0,
         end: 10,
         title: "Valid cut",
-        status: "pending",
+        status: "approved",
       },
     ]),
     "utf-8",
@@ -219,13 +219,13 @@ describe("pipeline job status transitions", () => {
     expect(savedStatusValues("job-transcription-missing")).toEqual([]);
   });
 
-  test("semantic blocks move from BUILDING_BLOCKS to ANALYZING", () => {
+  test("semantic blocks move from BUILDING_BLOCKS to BUILDING_TOPICS", () => {
     writeSegments("job-blocks");
 
     buildSemanticBlocks("job-blocks");
 
     expect(statusUpdateValues("job-blocks")).toEqual([JobStatus.BUILDING_BLOCKS]);
-    expect(savedStatusValues("job-blocks")).toEqual([JobStatus.ANALYZING]);
+    expect(savedStatusValues("job-blocks")).toEqual([JobStatus.BUILDING_TOPICS]);
   });
 
   test("topic segmentation moves from BUILDING_TOPICS to ANALYZING", async () => {

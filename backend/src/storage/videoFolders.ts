@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { getVideoDir, getVideoFilePath } from "../core/settings";
+import { getVideoDir } from "../core/settings";
 import * as metadata from "./metadata";
 import { invalidateSourceVideoCache, setCachedSourceVideo } from "./sourceVideo";
 
@@ -16,14 +16,17 @@ export function renameVideo(jobId: string, newVideoName: string): boolean {
     const oldVideoDir = getVideoDir(jobId, oldVideoName);
     const newVideoDir = getVideoDir(jobId, newVideoName);
 
-    if (fs.existsSync(oldVideoDir)) {
+    if (fs.existsSync(oldVideoDir) && path.normalize(oldVideoDir) !== path.normalize(newVideoDir)) {
+      if (!fs.existsSync(newVideoDir)) {
+        fs.mkdirSync(path.dirname(newVideoDir), { recursive: true });
+      }
       fs.renameSync(oldVideoDir, newVideoDir);
     }
 
     const oldVideoPath = job.source_video_path;
-    if (oldVideoPath && fs.existsSync(oldVideoPath)) {
+    if (oldVideoPath && (fs.existsSync(newVideoDir) || fs.existsSync(oldVideoPath))) {
       const ext = path.extname(oldVideoPath) || ".mp4";
-      job.source_video_path = getVideoFilePath(jobId, newVideoName, ext);
+      job.source_video_path = path.join(newVideoDir, `video${ext.startsWith(".") ? ext : `.${ext}`}`);
     }
 
     job.video_name = newVideoName;

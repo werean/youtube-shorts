@@ -5,16 +5,48 @@
  * render cancellation, batch progress, and dependency install sessions.
  */
 
+import { AsyncLocalStorage } from "async_hooks";
 import { spawn, type ChildProcess } from "child_process";
 import type { TaskName } from "../core/taskLogs";
 import * as taskLogs from "../core/taskLogs";
 import type { DependencyInstallOptions } from "../features/dependencies/shared/dependencyTypes";
 import type { BatchPipelineProgress } from "../features/jobs/batch/types";
+import { killProcessTree } from "../pipeline/externalProcess";
 
 const activeTranscriptions = new Map<string, ChildProcess>();
+const cancelledTranscriptions = new Set<string>();
+const activeDownloads = new Map<string, ChildProcess>();
 const activeRenderings = new Map<string, Set<ChildProcess>>();
 const cancelledRenderings = new Set<string>();
+const failedRenderings = new Set<string>();
 const activeBatchProcesses = new Map<string, BatchPipelineProgress>();
+const activeJobRuns = new Set<string>();
+const jobRunStorage = new AsyncLocalStorage<string>();
+
+export class JobAlreadyRunningError extends Error {
+  statusCode = 409;
+
+  constructor(jobId: string) {
+    super(`Job ${jobId} is already running`);
+    this.name = "JobAlreadyRunningError";
+  }
+}
+
+export async function runWithJobLock<T>(jobId: string, action: () => Promise<T>): Promise<T> {
+  if (jobRunStorage.getStore() === jobId) {
+    return action();
+  }
+  if (activeJobRuns.has(jobId)) {
+    throw new JobAlreadyRunningError(jobId);
+  }
+
+  activeJobRuns.add(jobId);
+  try {
+    return await jobRunStorage.run(jobId, action);
+  } finally {
+    activeJobRuns.delete(jobId);
+  }
+}
 
 export function clearTaskLogs(jobId: string, task: TaskName): void {
   taskLogs.clearTaskLogs(jobId, task);
@@ -42,6 +74,36 @@ export function activeTranscriptionJobIds(): string[] {
 
 export function trackActiveTranscription(jobId: string, child: ChildProcess): void {
   activeTranscriptions.set(jobId, child);
+}
+
+export function markTranscriptionCancelled(jobId: string): void {
+  cancelledTranscriptions.add(jobId);
+}
+
+export function isTranscriptionCancelled(jobId: string): boolean {
+  return cancelledTranscriptions.has(jobId);
+}
+
+export function clearTranscriptionCancelled(jobId: string): void {
+  cancelledTranscriptions.delete(jobId);
+}
+
+export function trackActiveDownload(jobId: string, child: ChildProcess): void {
+  activeDownloads.set(jobId, child);
+}
+
+export function clearActiveDownload(jobId: string): void {
+  activeDownloads.delete(jobId);
+}
+
+export function cancelActiveDownload(jobId: string): boolean {
+  const child = activeDownloads.get(jobId);
+  if (!child) {
+    return false;
+  }
+  killProcessTree(child);
+  activeDownloads.delete(jobId);
+  return true;
 }
 
 export function clearActiveTranscription(jobId: string): void {
@@ -82,6 +144,25 @@ export function isRenderingCancelled(jobId: string): boolean {
   return cancelledRenderings.has(jobId);
 }
 
+export function markRenderingFailed(jobId: string): void {
+  failedRenderings.add(jobId);
+}
+
+export function isRenderingFailed(jobId: string): boolean {
+  return failedRenderings.has(jobId);
+}
+
+export function killActiveRenderingProcesses(jobId: string): void {
+  const children = activeRenderings.get(jobId);
+  if (!children) {
+    return;
+  }
+  for (const child of children) {
+    killProcessTree(child);
+  }
+  activeRenderings.delete(jobId);
+}
+
 export function trackChildProcess(jobId: string, child: ChildProcess): void {
   let children = activeRenderings.get(jobId);
   if (!children) {
@@ -104,16 +185,7 @@ export function trackChildProcess(jobId: string, child: ChildProcess): void {
 }
 
 function stopChildProcess(child: ChildProcess): void {
-  if (!child.pid) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
-    return;
-  }
-
-  child.kill("SIGTERM");
+  killProcessTree(child);
 }
 
 export function cancelActiveRendering(jobId: string, onCancelRequested: () => void): boolean {
@@ -140,6 +212,7 @@ export function cancelActiveRendering(jobId: string, onCancelRequested: () => vo
 export function cleanupRenderingState(jobId: string): void {
   activeRenderings.delete(jobId);
   cancelledRenderings.delete(jobId);
+  failedRenderings.delete(jobId);
 }
 
 export function createBatchProgress(batchId: string, jobIds: string[]): BatchPipelineProgress {
@@ -165,6 +238,10 @@ export function markBatchNotRunning(batchId: string): void {
   if (progress) {
     progress.is_running = false;
   }
+}
+
+export function deleteBatchProgress(batchId: string): void {
+  activeBatchProcesses.delete(batchId);
 }
 
 async function dependencySessionsRuntime() {

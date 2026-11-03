@@ -1,18 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
-import { v4 as uuidv4 } from "uuid";
-
 import { archivedVideosDir, loadSettings } from "../../core/settings";
+import { isVideoFileName } from "../../core/videoFiles";
 import type { Job } from "../../models/job";
-import { JobStatus } from "../../models/job";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
 import type { VideoRecord } from "./types";
 
-const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"]);
-
 function isVideoFile(fileName: string): boolean {
-  return VIDEO_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+  return isVideoFileName(fileName);
 }
 
 function collectVideoFiles(
@@ -61,32 +57,6 @@ function mapJobsBySourcePath(): Map<string, Job> {
   return map;
 }
 
-function ensureJobForVideo(
-  filePath: string,
-  fileName: string,
-  videoName: string,
-  jobsByPath: Map<string, Job>,
-): Job {
-  const normalizedPath = path.normalize(filePath);
-  const existing = jobsByPath.get(normalizedPath);
-  if (existing) {
-    return existing;
-  }
-
-  const jobId = uuidv4().replace(/-/g, "");
-  const job: Job = {
-    job_id: jobId,
-    youtube_url: `[Local Video] ${videoName}`,
-    status: JobStatus.DOWNLOADED,
-    created_at: new Date().toISOString(),
-    source_video_path: filePath,
-    source_file_name: fileName,
-    video_name: videoName,
-  };
-  jobLifecycleService.saveJob(job);
-  return job;
-}
-
 function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
   console.log(`\n[videos] Listando vídeos:`);
   console.log(`[videos]   Root dir: ${rootDir}`);
@@ -98,7 +68,10 @@ function listVideosFromDir(rootDir: string, archived: boolean): VideoRecord[] {
   const jobsByPath = mapJobsBySourcePath();
 
   for (const item of items) {
-    const job = ensureJobForVideo(item.filePath, item.fileName, item.videoName, jobsByPath);
+    const job = jobsByPath.get(path.normalize(item.filePath));
+    if (!job) {
+      continue;
+    }
     records.push({
       job,
       job_id: job.job_id,

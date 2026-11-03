@@ -1,9 +1,24 @@
 import { Cut } from "../../models/cut";
 import { SemanticBlock } from "../../models/semantic_block";
+import { TopicSegment } from "../../models/topic_segment";
+import { continuesSentence, endsSentence, startsWithLowercase } from "../sentence";
+import { TOPIC_MIN_DURATION_SECONDS } from "../topic_segmentation/topics";
 import { RawLLMCut } from "./types";
 
-const LOWERCASE_START_RE = /^[a-záéíóúãõâêôàèìòùäëïöüýçñ]/;
-const FINAL_PUNCTUATION_RE = /[.!?…]$/;
+export const MIN_CUT_SECONDS = 300;
+
+export type CutRepairReason =
+  | "missing-block"
+  | "gap"
+  | "mid-sentence-start"
+  | "mid-topic"
+  | "no-conclusion"
+  | "too-short"
+  | "invalid-duration";
+
+export type CutRepairResult =
+  | { ok: true; cut: RawLLMCut; note: string }
+  | { ok: false; reason: CutRepairReason };
 
 /**
  * Parse raw LLM JSON array into RawLLMCut objects.
@@ -45,59 +60,104 @@ export function parseRawCuts(payload: unknown): RawLLMCut[] {
   });
 }
 
+function rejectCut(reason: CutRepairReason): CutRepairResult {
+  return { ok: false, reason };
+}
+
 /**
- * Checks whether a raw LLM-suggested cut meets structural coherence requirements:
- * - First block must not start mid-sentence (no lowercase first character)
- * - Last block must end with final punctuation
- * - Blocks must be consecutive (no gaps in the `bN` sequence)
- *
- * @param cut - The raw cut from the LLM response.
- * @param blocks - Full semantic block list for the job.
- * @returns true if the cut is structurally coherent, false otherwise.
+ * Snap a model cut to sentence and topic edges, or reject it.
+ * The returned cut keeps the same JSON fields. Times come from the blocks.
  */
-export function isCutCoherent(cut: RawLLMCut, blocks: SemanticBlock[]): boolean {
-  const cutBlocks = blocks.filter((b) => cut.blocks.includes(b.block_id));
-  if (cutBlocks.length === 0) return false;
-
-  const first = cutBlocks[0];
-  const last = cutBlocks[cutBlocks.length - 1];
-
-  // First block must not start mid-sentence (no lowercase first char)
-  if (LOWERCASE_START_RE.test(first.text.trim())) return false;
-
-  // Last block must end with final punctuation
-  if (!FINAL_PUNCTUATION_RE.test(last.text.trim())) return false;
-
-  // Blocks must be consecutive (no gaps in block_id sequence)
-  const ids = cutBlocks.map((b) => parseInt(b.block_id.replace("b", ""), 10));
-  for (let i = 1; i < ids.length; i++) {
-    if (ids[i] !== ids[i - 1] + 1) return false;
+export function repairCutRange(
+  cut: RawLLMCut,
+  blocks: SemanticBlock[],
+  topics?: TopicSegment[],
+): CutRepairResult {
+  const indexById = new Map(blocks.map((block, index) => [block.block_id, index]));
+  const indices: number[] = [];
+  for (const blockId of cut.blocks) {
+    const index = indexById.get(blockId);
+    if (index === undefined) {
+      return rejectCut("missing-block");
+    }
+    indices.push(index);
   }
 
-  return true;
-}
+  if (indices.length === 0) {
+    return rejectCut("missing-block");
+  }
 
-export function cutCoherenceFailureReason(cut: RawLLMCut, blocks: SemanticBlock[]): string {
-  const cutBlocks = blocks.filter((b) => cut.blocks.includes(b.block_id));
-  if (cutBlocks.length === 0) return "no matching blocks found";
-  const first = cutBlocks[0];
-  const last = cutBlocks[cutBlocks.length - 1];
-  if (LOWERCASE_START_RE.test(first.text.trim())) return "starts mid-sentence";
-  if (!FINAL_PUNCTUATION_RE.test(last.text.trim())) return "ends without final punctuation";
-  return "non-consecutive block ids";
-}
-
-export function filterCoherentRawCuts(rawCuts: RawLLMCut[], allBlocks: SemanticBlock[]): RawLLMCut[] {
-  const coherentRaw: RawLLMCut[] = [];
-  for (const raw of rawCuts) {
-    if (isCutCoherent(raw, allBlocks)) {
-      coherentRaw.push(raw);
-    } else {
-      const reason = cutCoherenceFailureReason(raw, allBlocks);
-      console.warn(`[analysis] Discarding incoherent cut [${raw.blocks.join(",")}]: ${reason}`);
+  indices.sort((left, right) => left - right);
+  for (let index = 1; index < indices.length; index += 1) {
+    if (indices[index] !== indices[index - 1] + 1) {
+      return rejectCut("gap");
     }
   }
-  return coherentRaw;
+
+  let startIdx = indices[0];
+  while (
+    startIdx > 0 &&
+    continuesSentence(blocks[startIdx - 1].text, blocks[startIdx].text)
+  ) {
+    startIdx -= 1;
+  }
+  if (startIdx === 0 && startsWithLowercase(blocks[0].text)) {
+    return rejectCut("mid-sentence-start");
+  }
+
+  if (topics && topics.length > 0) {
+    const topic = topics.find((candidate) => candidate.block_ids.includes(blocks[startIdx].block_id));
+    const topicStartId = topic?.block_ids[0];
+    const topicStartIdx = topicStartId ? indexById.get(topicStartId) : undefined;
+    if (topic && topicStartIdx !== undefined && topicStartIdx < startIdx) {
+      const prefixDuration = blocks[startIdx].start - blocks[topicStartIdx].start;
+      if (prefixDuration > TOPIC_MIN_DURATION_SECONDS) {
+        return rejectCut("mid-topic");
+      }
+      startIdx = topicStartIdx;
+      while (
+        startIdx > 0 &&
+        continuesSentence(blocks[startIdx - 1].text, blocks[startIdx].text)
+      ) {
+        startIdx -= 1;
+      }
+      if (startIdx === 0 && startsWithLowercase(blocks[0].text)) {
+        return rejectCut("mid-sentence-start");
+      }
+    }
+  }
+
+  let endIdx = Math.max(indices[indices.length - 1], startIdx);
+  while (endIdx < blocks.length - 1 && !endsSentence(blocks[endIdx].text)) {
+    endIdx += 1;
+  }
+  if (!endsSentence(blocks[endIdx].text)) {
+    return rejectCut("no-conclusion");
+  }
+
+  const selected = blocks.slice(startIdx, endIdx + 1);
+  const start = selected[0]?.start;
+  const end = selected[selected.length - 1]?.end;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) {
+    return rejectCut("invalid-duration");
+  }
+  if (end - start < MIN_CUT_SECONDS) {
+    return rejectCut("too-short");
+  }
+
+  const blockIds = selected.map((block) => block.block_id);
+  const original = `${cut.blocks.join(",")} @ ${cut.start}-${cut.end}`;
+  const repaired = `${blockIds.join(",")} @ ${start}-${end}`;
+  return {
+    ok: true,
+    cut: {
+      ...cut,
+      blocks: blockIds,
+      start,
+      end,
+    },
+    note: `${original} → ${repaired}`,
+  };
 }
 
 /**
@@ -156,10 +216,29 @@ export function deduplicateCuts(cuts: Cut[], rawCuts: RawLLMCut[]): Cut[] {
   return result;
 }
 
-export function normalizeCuts(rawCuts: RawLLMCut[], allBlocks: SemanticBlock[]): Cut[] {
-  const coherentRaw = filterCoherentRawCuts(rawCuts, allBlocks);
-  const preDedupCuts = toCuts(coherentRaw, 0);
-  const finalCuts = deduplicateCuts(preDedupCuts, coherentRaw);
+export function normalizeCuts(
+  rawCuts: RawLLMCut[],
+  allBlocks: SemanticBlock[],
+  topics?: TopicSegment[],
+): Cut[] {
+  const repairedRaw: RawLLMCut[] = [];
+  let rejected = 0;
+  for (const raw of rawCuts) {
+    const repaired = repairCutRange(raw, allBlocks, topics);
+    if (!repaired.ok) {
+      rejected += 1;
+      console.warn(`[analysis] rejecting cut [${raw.blocks.join(",")}]: ${repaired.reason}`);
+      continue;
+    }
+    console.log(`[analysis] cut repaired: ${repaired.note}`);
+    repairedRaw.push(repaired.cut);
+  }
 
-  return finalCuts.map((cut, i) => ({ ...cut, cut_id: `c${i + 1}` }));
+  console.log(
+    `[analysis] kept ${repairedRaw.length} cut(s), rejected ${rejected} of ${rawCuts.length}`,
+  );
+
+  const preDedupCuts = toCuts(repairedRaw, 0);
+  const finalCuts = deduplicateCuts(preDedupCuts, repairedRaw);
+  return finalCuts.map((cut, index) => ({ ...cut, cut_id: `c${index + 1}` }));
 }

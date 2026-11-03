@@ -5,8 +5,6 @@ import * as operationRuntimeService from "../../services/operationRuntimeService
 import { IngestPaths } from "./types";
 
 export function beginIngest(job: Job): IngestPaths {
-  operationRuntimeService.clearTaskLogs(job.job_id, "transcription");
-  operationRuntimeService.clearTaskLogs(job.job_id, "render");
   operationRuntimeService.clearTaskLogs(job.job_id, "ingest");
   console.log(`\n[ingest] ============================================`);
   console.log(`[ingest] Starting ingestion for job ${job.job_id}`);

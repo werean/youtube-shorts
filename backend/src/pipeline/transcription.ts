@@ -7,6 +7,8 @@ import { JobStatus } from "../models/job";
 import { Segment } from "../models/segment";
 import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as operationRuntimeService from "../services/operationRuntimeService";
+import { PipelineCancelledError } from "./errors";
+import { statusAfterInterruptedStep } from "./recoveryStatus";
 import {
   readWhisperSegments,
   type TranscriptionFormats,
@@ -14,7 +16,11 @@ import {
   writeTranscriptionArtifacts,
   writeTranscriptionSegments,
 } from "./transcription/artifacts";
-import { buildWhisperCommand, resolveTranscriptionFormats } from "./transcription/command";
+import {
+  buildWhisperCommand,
+  formatWhisperCommand,
+  resolveTranscriptionFormats,
+} from "./transcription/command";
 import { runWhisperProcess } from "./transcription/process";
 import {
   ensureTranscriptionCanStart,
@@ -22,6 +28,12 @@ import {
 } from "./transcription/preconditions";
 
 export function cancelTranscription(jobId: string): boolean {
+  const active = operationRuntimeService.activeTranscriptionJobIds().includes(jobId);
+  if (!active) {
+    return false;
+  }
+
+  operationRuntimeService.markTranscriptionCancelled(jobId);
   const cancelled = operationRuntimeService.cancelActiveTranscriptionProcess(jobId, () =>
     operationRuntimeService.appendTaskLog(
       jobId,
@@ -30,29 +42,36 @@ export function cancelTranscription(jobId: string): boolean {
     ),
   );
   if (!cancelled) {
+    operationRuntimeService.clearTranscriptionCancelled(jobId);
     return false;
   }
 
-  jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+  jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
   operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Cancelled");
   return true;
 }
 
-export async function transcribeJob(
+async function transcribeJobUnlocked(
   jobId: string,
   formats: TranscriptionFormats = resolveTranscriptionFormats(),
 ): Promise<Segment[]> {
+  operationRuntimeService.clearTranscriptionCancelled(jobId);
   ensureTranscriptionCanStart(jobId);
 
   const { videoPath, tempDir } = prepareTranscriptionSource(jobId);
 
   try {
     const toolConfigs = loadActiveToolConfigs();
-    const device = toolConfigs.whisper.device === "cpu" ? "cpu" : "cuda";
-
     const command = buildWhisperCommand(videoPath, tempDir, toolConfigs);
-    console.log(`[transcription] 💻 Command: ${command}`);
-    operationRuntimeService.appendTaskLog(jobId, "transcription", `[transcription] Command: ${command}`);
+    const deviceArg = command.indexOf("--device");
+    const device = deviceArg >= 0 ? command[deviceArg + 1] : "cuda";
+    const commandText = formatWhisperCommand(command);
+    console.log(`[transcription] 💻 Command: ${commandText}`);
+    operationRuntimeService.appendTaskLog(
+      jobId,
+      "transcription",
+      `[transcription] Command: ${commandText}`,
+    );
 
     console.log(`[transcription] ⏳ Executando Whisper com ${device.toUpperCase()}...`);
     await runWhisperProcess(jobId, command);
@@ -77,6 +96,10 @@ export async function transcribeJob(
     const job = jobLifecycleService.loadJob(jobId);
     job.status = JobStatus.BUILDING_BLOCKS;
     job.updated_at = new Date().toISOString();
+    const lastEnd = segments.length > 0 ? segments[segments.length - 1].end : 0;
+    if ((!job.video_duration_seconds || job.video_duration_seconds <= 0) && lastEnd > 0) {
+      job.video_duration_seconds = lastEnd;
+    }
     jobLifecycleService.saveJob(job);
 
     console.log(`[transcription] ============================================\n`);
@@ -107,8 +130,21 @@ export async function transcribeJob(
       );
     }
 
-    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR);
+    if (operationRuntimeService.isTranscriptionCancelled(jobId)) {
+      jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
+      operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Cancel acknowledged");
+      throw new PipelineCancelledError("Transcription cancelled");
+    }
+
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR, error?.message || String(error));
     console.log(`[transcription] ============================================\n`);
     throw error;
   }
+}
+
+export async function transcribeJob(
+  jobId: string,
+  formats: TranscriptionFormats = resolveTranscriptionFormats(),
+): Promise<Segment[]> {
+  return operationRuntimeService.runWithJobLock(jobId, () => transcribeJobUnlocked(jobId, formats));
 }

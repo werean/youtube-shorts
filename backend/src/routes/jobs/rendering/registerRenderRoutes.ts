@@ -4,8 +4,11 @@
 
 import type { FastifyInstance } from "fastify";
 import * as rendering from "../../../pipeline/rendering";
+import { NoApprovedCutsError } from "../../../pipeline/errors";
 import { deleteRenderOutputFile, openRenderOutputFolder } from "../../../features/jobs/render/outputs";
 import { startRenderInBackground } from "../../../features/jobs/render/tasks";
+import * as artifactService from "../../../services/artifactService";
+import type { Cut } from "../../../models/cut";
 
 export function registerRenderRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { job_id: string } }>("/:job_id/render", async (request, reply) => {
@@ -13,11 +16,22 @@ export function registerRenderRoutes(fastify: FastifyInstance) {
       const { job_id } = request.params;
       console.log(`[jobs] Rendering suggested cuts for job: ${job_id}`);
 
+      const cutsPath = artifactService.cutsPath(job_id);
+      const cuts = artifactService.artifactExists(cutsPath)
+        ? artifactService.readJsonArtifact<Cut[]>(cutsPath)
+        : [];
+      if (!cuts.some((cut) => cut.status === "approved")) {
+        throw new NoApprovedCutsError();
+      }
+
       startRenderInBackground(job_id);
 
       return { started: true };
     } catch (error: any) {
-      reply.code(500).send({ detail: error.message });
+      if (error instanceof NoApprovedCutsError) {
+        return reply.code(400).send({ detail: error.message });
+      }
+      return reply.code(500).send({ detail: error.message });
     }
   });
 

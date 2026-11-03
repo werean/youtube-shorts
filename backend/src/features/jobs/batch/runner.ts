@@ -1,5 +1,6 @@
 import * as jobLifecycleService from "../../../services/jobLifecycleService";
 import * as operationRuntimeService from "../../../services/operationRuntimeService";
+import { PipelineCancelledError } from "../../../pipeline/errors";
 import { transcribeJob } from "../../../pipeline/transcription";
 import { prepareAnalysisPrerequisites } from "../../../pipeline/analysis_prerequisites";
 import { analyzeBlocks } from "../../../pipeline/analysis";
@@ -49,7 +50,8 @@ export async function processBatchPipeline(
         progress.current_step = "semantic_blocks";
         console.log(`[batch] [${jobId}] Preparing analysis prerequisites...`);
 
-        await prepareAnalysisPrerequisites(job, {
+        const preparedJob = jobLifecycleService.loadJob(jobId);
+        await prepareAnalysisPrerequisites(preparedJob, {
           semanticBlocks: "rebuild",
         });
         console.log(`[batch] [${jobId}] Analysis prerequisites completed`);
@@ -62,7 +64,8 @@ export async function processBatchPipeline(
         progress.current_step = "analysis";
         console.log(`[batch] [${jobId}] Starting analysis...`);
 
-        await analyzeBlocks(jobId, job.video_duration_seconds ?? 0);
+        const analyzedJob = jobLifecycleService.loadJob(jobId);
+        await analyzeBlocks(jobId, analyzedJob.video_duration_seconds ?? 0);
         console.log(`[batch] [${jobId}] Analysis completed`);
 
         // If preApprove is enabled, wait for user approval
@@ -88,6 +91,10 @@ export async function processBatchPipeline(
 
           console.log(`[batch] [${jobId}] Approval received, continuing...`);
           progress.pending_cuts = undefined;
+          const approvedCuts = loadPendingCutsForApproval(jobId) || [];
+          if (!approvedCuts.some((cut) => cut?.status === "approved")) {
+            throw new Error("At least one approved cut is required");
+          }
         }
       }
 
@@ -105,6 +112,10 @@ export async function processBatchPipeline(
       progress.completed_jobs.push(jobId);
       console.log(`[batch] [${jobId}] Job completed successfully`);
     } catch (error: any) {
+      if (error instanceof PipelineCancelledError || !progress.is_running) {
+        console.log(`[batch] [${jobId}] Stopped because the batch was cancelled`);
+        break;
+      }
       console.error(`[batch] [${jobId}] Error:`, error.message);
       progress.failed_jobs.push({ job_id: jobId, error: error.message });
     }

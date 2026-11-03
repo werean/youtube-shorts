@@ -191,21 +191,23 @@ export class OllamaClient {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutSeconds * 1000);
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: this.buildHeaders(),
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: this.buildHeaders(),
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeout);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new OllamaHttpError(response.status, errorText);
+        }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new OllamaHttpError(response.status, errorText);
+        return (await response.json()) as ChatResponse;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      return (await response.json()) as ChatResponse;
     } catch (error: any) {
       if (error instanceof OllamaHttpError) {
         throw error;

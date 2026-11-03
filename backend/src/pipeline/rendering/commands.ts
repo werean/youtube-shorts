@@ -15,8 +15,13 @@ export function buildRenderCommand(params: {
   videoPath: string;
   shortsDir: string;
   ffmpegConfig: FFmpegToolConfig;
+  disableHardware?: boolean;
 }): RenderCommandDetails {
-  const filename = artifactService.buildCutFilename(params.cut.start, params.cut.end);
+  const filename = artifactService.buildCutFilename(
+    params.cut.start,
+    params.cut.end,
+    params.cut.cut_id,
+  );
   const outputPath = path.join(params.shortsDir, filename);
   const command = buildVerticalNvencCommand({
     inputPath: params.videoPath,
@@ -24,6 +29,7 @@ export function buildRenderCommand(params: {
     start: params.cut.start,
     end: params.cut.end,
     ffmpegConfig: params.ffmpegConfig,
+    disableHardware: params.disableHardware,
   });
 
   return {

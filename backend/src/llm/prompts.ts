@@ -4,6 +4,7 @@
 
 import { SemanticBlock } from "../models/semantic_block";
 import { TopicSegment } from "../models/topic_segment";
+import { continuesSentence, endsSentence } from "../pipeline/sentence";
 
 export const PROMPT_VERSION = "v3";
 
@@ -63,15 +64,32 @@ Output format (JSON array):
 ]
 `;
 
-export function buildCutSelectionPrompt(blocks: SemanticBlock[]): string {
+export function buildCutSelectionPrompt(
+  blocks: SemanticBlock[],
+  topics: TopicSegment[] = [],
+): string {
+  const topicByBlock = new Map<string, string>();
+  for (const topic of topics) {
+    for (const blockId of topic.block_ids) {
+      topicByBlock.set(blockId, topic.topic_id);
+    }
+  }
+
   const blocksText = blocks
-    .map(
-      (block) =>
-        `- ${block.block_id} [${block.start.toFixed(2)}-${block.end.toFixed(2)}]: ${block.text}`,
-    )
+    .map((block, index) => {
+      const previous = index > 0 ? blocks[index - 1] : undefined;
+      const sentenceStart = !previous || !continuesSentence(previous.text, block.text);
+      const sentenceEnd = endsSentence(block.text);
+      const topicId = topicByBlock.get(block.block_id) ?? "none";
+      return `- ${block.block_id} topic=${topicId} sentence_start=${sentenceStart} sentence_end=${sentenceEnd} [${block.start.toFixed(2)}-${block.end.toFixed(2)}]: ${block.text}`;
+    })
     .join("\n");
 
   return `Runtime context for this analysis:
+
+The block list is authoritative. start and end in your JSON are rewritten to those block edges.
+Each block is marked with topic_id (or none), sentence_start, and sentence_end.
+Open on a sentence_start that is also the topic start, and close on a sentence_end.
 
 Semantic blocks:
 ${blocksText}`;

@@ -57,6 +57,7 @@ mock.module("../../../src/storage/files", () => ({
 
 mock.module("../../../src/pipeline/transcription", () => ({
   transcribeJob: transcribeJobMock,
+  cancelTranscription: () => false,
 }));
 
 mock.module("../../../src/pipeline/semantic_blocks", () => ({
@@ -69,6 +70,7 @@ mock.module("../../../src/pipeline/analysis", () => ({
 
 mock.module("../../../src/pipeline/rendering", () => ({
   renderSuggestedCuts: renderSuggestedCutsMock,
+  cancelRendering: () => false,
 }));
 
 const { registerBatchPipelineRoutes } = await import(
@@ -135,6 +137,14 @@ async function waitForApproval(batchId: string): Promise<Record<string, unknown>
 }
 
 async function continueBatch(batchId: string): Promise<void> {
+  const cutsPath = canonicalCutsPath(currentJobId);
+  if (fs.existsSync(cutsPath)) {
+    const cuts = JSON.parse(fs.readFileSync(cutsPath, "utf-8")) as Array<{ status?: string }>;
+    if (cuts[0]) {
+      cuts[0].status = "approved";
+      fs.writeFileSync(cutsPath, JSON.stringify(cuts));
+    }
+  }
   const continueResponse = await request("POST", `/batch/${batchId}/continue`);
   expect(continueResponse.statusCode).toBe(200);
 

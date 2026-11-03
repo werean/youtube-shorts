@@ -31,6 +31,7 @@ mock.module("../../../src/storage/files", () => ({
 
 mock.module("../../../src/pipeline/transcription", () => ({
   transcribeJob: transcribeJobMock,
+  cancelTranscription: () => false,
 }));
 
 mock.module("../../../src/pipeline/semantic_blocks", () => ({
@@ -47,6 +48,7 @@ mock.module("../../../src/pipeline/analysis", () => ({
 
 mock.module("../../../src/pipeline/rendering", () => ({
   renderSuggestedCuts: renderSuggestedCutsMock,
+  cancelRendering: () => false,
 }));
 
 mock.module("../../../src/core/toolConfigs", () => ({

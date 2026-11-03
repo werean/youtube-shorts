@@ -4,6 +4,7 @@ import { pipeline } from "stream/promises";
 import { v4 as uuidv4 } from "uuid";
 
 import { getVideoFilePath } from "../../core/settings";
+import { isVideoFileName } from "../../core/videoFiles";
 import type { Job } from "../../models/job";
 import { JobStatus } from "../../models/job";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
@@ -15,9 +16,14 @@ export async function saveUploadedVideoJob(data: any): Promise<{ job: Job; video
   const jobId = uuidv4().replace(/-/g, "");
   console.log(`[POST /jobs/upload] Job ID gerado: ${jobId}`);
 
-  const videoName = path.basename(data.filename, path.extname(data.filename));
+  const fileExtension = path.extname(data.filename || "");
+  if (!data.filename || !isVideoFileName(data.filename)) {
+    const error = new Error(`Unsupported video extension: ${fileExtension || "unknown"}`);
+    (error as { statusCode?: number }).statusCode = 400;
+    throw error;
+  }
 
-  const fileExtension = path.extname(data.filename) || ".mp4";
+  const videoName = path.basename(data.filename, fileExtension);
   const videoPath = getVideoFilePath(jobId, videoName, fileExtension);
   const videoDir = path.dirname(videoPath);
   fs.mkdirSync(videoDir, { recursive: true });

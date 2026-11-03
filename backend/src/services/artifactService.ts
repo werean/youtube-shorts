@@ -100,8 +100,8 @@ export function removeTranscriptionsJobDir(jobId: string): string {
   return files.removeTranscriptionsJobDir(jobId);
 }
 
-export function buildCutFilename(start: number, end: number): string {
-  return files.buildCutFilename(start, end);
+export function buildCutFilename(start: number, end: number, cutId?: string): string {
+  return files.buildCutFilename(start, end, cutId);
 }
 
 export function listRenderOutputUrls(jobId: string): string[] {

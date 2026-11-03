@@ -14,9 +14,6 @@ import * as metadata from "./metadata";
 const ensuredDirs = new Set<string>();
 
 export function ensureDir(dirPath: string): void {
-  if (ensuredDirs.has(dirPath)) {
-    return;
-  }
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }

@@ -27,8 +27,10 @@ export async function addEmbeddingBoundaries(
 
     return finalBoundaries;
   } catch (error: any) {
-    throw new Error(
-      `[topic_segmentation] Embedding boundary detection failed for job ${jobId} (model='${embeddingModel}', blocks=${blocks.length}): ${String(error?.message || error)}`,
+    const message = String(error?.message || error);
+    console.warn(
+      `[topic_segmentation] Embedding unavailable for job ${jobId} (model='${embeddingModel}', blocks=${blocks.length}): ${message}. Using heuristic boundaries only.`,
     );
+    return new Set(heuristicBoundaries);
   }
 }

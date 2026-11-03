@@ -6,6 +6,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { Job, JobStatus } from "../models/job";
 import { jobMetadataPath, jobsDir } from "../core/paths";
+import { invalidateMediaJobCache } from "../features/media/jobCache";
+import { invalidateSourceVideoCache } from "./sourceVideoCache";
 
 type CachedJobEntry = {
   value: Job;
@@ -37,7 +39,9 @@ function cacheJob(job: Job): void {
 
 function writeJsonFile(filePath: string, value: unknown): void {
   const content = PRETTY_JSON ? JSON.stringify(value, null, 2) : JSON.stringify(value);
-  fs.writeFileSync(filePath, content, "utf-8");
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, content, "utf-8");
+  fs.renameSync(tempPath, filePath);
 }
 
 function readJobFromDisk(jobId: string): Job {
@@ -68,6 +72,8 @@ export function saveJob(job: Job): string {
   ensureDir(path.dirname(metadataPath));
   writeJsonFile(metadataPath, job);
   cacheJob(job);
+  invalidateSourceVideoCache(job.job_id);
+  invalidateMediaJobCache(job.job_id);
   return metadataPath;
 }
 
@@ -105,10 +111,13 @@ export function listJobs(): Job[] {
   return jobs;
 }
 
-export function updateJobStatus(jobId: string, status: JobStatus): Job {
+export function updateJobStatus(jobId: string, status: JobStatus, lastError?: string): Job {
   const job = loadJob(jobId);
   job.status = status;
   job.updated_at = new Date().toISOString();
+  if (status === JobStatus.ERROR && lastError) {
+    job.last_error = lastError;
+  }
   saveJob(job);
   return job;
 }

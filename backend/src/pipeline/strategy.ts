@@ -111,3 +111,30 @@ export function validateLLMPayload(
 
   return { valid: true, blockCount, charCount };
 }
+
+/**
+ * Split a block list into chunks that fit the character limit.
+ * A single block larger than the limit stays in its own chunk so the caller can fail it.
+ */
+export function splitBlocksByCharLimit(blocks: SemanticBlock[], maxChars: number): SemanticBlock[][] {
+  const chunks: SemanticBlock[][] = [];
+  let current: SemanticBlock[] = [];
+  let chars = 0;
+
+  for (const block of blocks) {
+    const length = block.text.length;
+    if (current.length > 0 && chars + length > maxChars) {
+      chunks.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(block);
+    chars += length;
+  }
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}

@@ -11,6 +11,7 @@ import {
   type RunPipelineRequestDto,
 } from "../../contracts/jobContracts";
 import type { Job } from "../../../models/job";
+import { JobAlreadyRunningError } from "../../../services/operationRuntimeService";
 
 export function registerPipelineRoutes(fastify: FastifyInstance) {
   fastify.post<{
@@ -28,7 +29,8 @@ export function registerPipelineRoutes(fastify: FastifyInstance) {
         const job = await orchestrator.runPipeline(job_id, { includeRender });
         return job;
       } catch (error: any) {
-        reply.code(500).send({ detail: error.message });
+        const statusCode = error instanceof JobAlreadyRunningError ? 409 : 500;
+        return reply.code(statusCode).send({ detail: error.message });
       }
     },
   );

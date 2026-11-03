@@ -2,7 +2,7 @@ import { SemanticBlock } from "../../models/semantic_block";
 import { TopicSegment } from "../../models/topic_segment";
 
 /** Topics shorter than this are merged into the previous topic. */
-const TOPIC_MIN_DURATION_SECONDS = 90;
+export const TOPIC_MIN_DURATION_SECONDS = 90;
 
 /**
  * Finalizes the current open topic accumulator and pushes to `topics`.

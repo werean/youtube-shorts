@@ -3,6 +3,7 @@
  */
 
 import { execSync, spawn } from "child_process";
+import { config } from "../core/config";
 
 export function runFfmpeg(command: string[]): void {
   try {
@@ -29,6 +30,9 @@ export function runFfmpegAsync(
   return new Promise((resolve, reject) => {
     const [bin, ...args] = command;
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+    }, config.FFMPEG_TIMEOUT_SECONDS * 1000);
     if (onSpawn) {
       onSpawn(child);
     }
@@ -51,8 +55,18 @@ export function runFfmpegAsync(
       flushLines(stderrBuffer, onLog);
     });
 
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      fn();
+    };
+
     child.on("error", (error) => {
-      reject(error);
+      finish(() => reject(error));
     });
 
     child.on("close", (code) => {
@@ -65,10 +79,13 @@ export function runFfmpegAsync(
         }
       }
       if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`FFmpeg failed with code ${code ?? "unknown"}`));
+        finish(() => resolve());
+        return;
       }
+      const detail = stderrBuffer.value.trim().slice(-500);
+      finish(() =>
+        reject(new Error(`FFmpeg failed with code ${code ?? "unknown"}${detail ? `: ${detail}` : ""}`)),
+      );
     });
   });
 }

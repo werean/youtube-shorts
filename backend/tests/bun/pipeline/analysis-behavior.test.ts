@@ -71,57 +71,57 @@ function writeSemanticBlocks(jobId: string): void {
       {
         block_id: "b1",
         start: 0,
-        end: 40,
+        end: 200,
         text: "Strong complete thought.",
         segment_ids: ["s1"],
       },
       {
         block_id: "b2",
-        start: 40,
-        end: 80,
+        start: 200,
+        end: 400,
         text: "Another complete point.",
         segment_ids: ["s2"],
       },
       {
         block_id: "b3",
-        start: 80,
-        end: 120,
+        start: 400,
+        end: 600,
         text: "Third complete point.",
         segment_ids: ["s3"],
       },
       {
         block_id: "b4",
-        start: 120,
-        end: 160,
+        start: 600,
+        end: 800,
         text: "Fourth complete point.",
         segment_ids: ["s4"],
       },
       {
         block_id: "b5",
-        start: 160,
-        end: 200,
+        start: 800,
+        end: 1100,
         text: "Fifth complete point.",
         segment_ids: ["s5"],
       },
       {
         block_id: "b6",
-        start: 200,
-        end: 240,
-        text: "lowercase starts mid sentence.",
+        start: 1100,
+        end: 1200,
+        text: "lowercase starts mid sentence",
         segment_ids: ["s6"],
       },
       {
         block_id: "b7",
-        start: 240,
-        end: 280,
+        start: 1200,
+        end: 1300,
         text: "Ends without punctuation",
         segment_ids: ["s7"],
       },
       {
         block_id: "b8",
-        start: 280,
-        end: 320,
-        text: "Eighth complete point.",
+        start: 1300,
+        end: 1600,
+        text: "Eighth thought without ending",
         segment_ids: ["s8"],
       },
     ]),
@@ -137,26 +137,26 @@ function writeTopicSegments(jobId: string): void {
       {
         topic_id: "t1",
         start: 0,
-        end: 80,
+        end: 400,
         block_ids: ["b1", "b2"],
         blockCount: 2,
-        durationSeconds: 80,
+        durationSeconds: 400,
       },
       {
         topic_id: "t2",
-        start: 80,
-        end: 160,
+        start: 400,
+        end: 800,
         block_ids: ["b3", "b4"],
         blockCount: 2,
-        durationSeconds: 80,
+        durationSeconds: 400,
       },
       {
         topic_id: "t3",
-        start: 120,
-        end: 200,
-        block_ids: ["b4", "b5"],
-        blockCount: 2,
-        durationSeconds: 80,
+        start: 600,
+        end: 1100,
+        block_ids: ["b5"],
+        blockCount: 1,
+        durationSeconds: 300,
       },
     ]),
     "utf-8",
@@ -248,42 +248,42 @@ describe("analysis pipeline behavior", () => {
         {
           blocks: ["b1", "b2"],
           start: 0,
-          end: 80,
+          end: 400,
           score: 1,
           title: "Low score overlap",
         },
         {
           blocks: ["b2", "b3"],
-          start: 40,
-          end: 120,
+          start: 200,
+          end: 600,
           score: 9,
           title: "High score overlap",
         },
         {
           blocks: ["b4", "b5"],
-          start: 120,
-          end: 200,
+          start: 600,
+          end: 1100,
           score: 2,
           hook_reason: "Hook fallback",
         },
         {
           blocks: ["b6"],
-          start: 200,
-          end: 240,
+          start: 1100,
+          end: 1200,
           score: 10,
           title: "Starts mid sentence",
         },
         {
           blocks: ["b7"],
-          start: 240,
-          end: 280,
+          start: 1200,
+          end: 1300,
           score: 10,
           title: "No punctuation",
         },
         {
           blocks: ["b1", "b3"],
           start: 0,
-          end: 120,
+          end: 600,
           score: 10,
           title: "Gap in blocks",
         },
@@ -296,16 +296,16 @@ describe("analysis pipeline behavior", () => {
       {
         cut_id: "c1",
         block_ids: ["b2", "b3"],
-        start: 40,
-        end: 120,
+        start: 200,
+        end: 600,
         title: "High score overlap",
         status: "pending",
       },
       {
         cut_id: "c2",
         block_ids: ["b4", "b5"],
-        start: 120,
-        end: 200,
+        start: 600,
+        end: 1100,
         title: "Hook fallback",
         status: "pending",
       },
@@ -319,20 +319,21 @@ describe("analysis pipeline behavior", () => {
     expect(chatCalls[0].map((message) => message.role)).toEqual(["system", "system", "user"]);
     expect(chatCalls[0][0].content).toBe("custom system prompt");
     expect(chatCalls[0][1].content).toBe("You output JSON only.");
-    expect(chatCalls[0][2].content).toContain("b1 [0.00-40.00]: Strong complete thought.");
-    expect(chatCalls[0][2].content).toContain("b8 [280.00-320.00]: Eighth complete point.");
+    expect(chatCalls[0][2].content).toContain("[0.00-200.00]: Strong complete thought.");
+    expect(chatCalls[0][2].content).toContain("sentence_start=true");
+    expect(chatCalls[0][2].content).toContain("[1300.00-1600.00]: Eighth thought without ending");
   });
 
   test("medium analysis loads topic segments and runs one full pass per topic without pass 1", async () => {
     writeSemanticBlocks("job-medium");
     writeTopicSegments("job-medium");
     chatResponses = [
-      JSON.stringify([{ blocks: ["b1", "b2"], start: 0, end: 80, score: 1, title: "Topic one" }]),
+      JSON.stringify([{ blocks: ["b1", "b2"], start: 0, end: 400, score: 1, title: "Topic one" }]),
       JSON.stringify([
-        { blocks: ["b3", "b4"], start: 80, end: 160, score: 1, title: "Topic two" },
+        { blocks: ["b3", "b4"], start: 400, end: 800, score: 1, title: "Topic two" },
       ]),
       JSON.stringify([
-        { blocks: ["b4", "b5"], start: 120, end: 200, score: 1, title: "Topic three" },
+        { blocks: ["b4", "b5"], start: 600, end: 1100, score: 1, title: "Topic three" },
       ]),
     ];
 
@@ -346,13 +347,13 @@ describe("analysis pipeline behavior", () => {
     ]);
     expect(chatCalls).toHaveLength(3);
     expect(chatCalls.every((call) => call.length === 3)).toBe(true);
-    expect(chatCalls[0][2].content).toContain("b1 [0.00-40.00]");
-    expect(chatCalls[0][2].content).toContain("b2 [40.00-80.00]");
-    expect(chatCalls[0][2].content).not.toContain("b3 [80.00-120.00]");
-    expect(chatCalls[1][2].content).toContain("b3 [80.00-120.00]");
-    expect(chatCalls[1][2].content).toContain("b4 [120.00-160.00]");
-    expect(chatCalls[2][2].content).toContain("b4 [120.00-160.00]");
-    expect(chatCalls[2][2].content).toContain("b5 [160.00-200.00]");
+    expect(chatCalls[0][2].content).toContain("[0.00-200.00]");
+    expect(chatCalls[0][2].content).toContain("[200.00-400.00]");
+    expect(chatCalls[0][2].content).not.toContain("[400.00-600.00]");
+    expect(chatCalls[1][2].content).toContain("[400.00-600.00]");
+    expect(chatCalls[1][2].content).toContain("[600.00-800.00]");
+    expect(chatCalls[2][2].content).toContain("[800.00-1100.00]");
+    expect(chatCalls[2][2].content).not.toContain("[600.00-800.00]");
     expect(readCuts("job-medium")).toEqual(result.cuts);
     expect(savedStatusValues("job-medium")).toEqual([JobStatus.WAITING_APPROVAL]);
   });
@@ -362,10 +363,10 @@ describe("analysis pipeline behavior", () => {
     writeTopicSegments("job-long");
     chatResponses = [
       JSON.stringify({ is_candidate: false }),
-      "not-json",
+      JSON.stringify({ is_candidate: false }),
       JSON.stringify({ is_candidate: true }),
       JSON.stringify([
-        { blocks: ["b4", "b5"], start: 120, end: 200, score: 7, title: "Accepted topic" },
+        { blocks: ["b5"], start: 800, end: 1100, score: 7, title: "Accepted topic" },
       ]),
     ];
 
@@ -374,9 +375,9 @@ describe("analysis pipeline behavior", () => {
     expect(result.cuts).toEqual([
       {
         cut_id: "c1",
-        block_ids: ["b4", "b5"],
-        start: 120,
-        end: 200,
+        block_ids: ["b5"],
+        start: 800,
+        end: 1100,
         title: "Accepted topic",
         status: "pending",
       },
@@ -388,13 +389,13 @@ describe("analysis pipeline behavior", () => {
     expect(chatCalls[1][1].content).toContain("Topic: t2");
     expect(chatCalls[2][1].content).toContain("Topic: t3");
     expect(chatCalls[3].map((message) => message.role)).toEqual(["system", "system", "user"]);
-    expect(chatCalls[3][2].content).toContain("b4 [120.00-160.00]");
-    expect(chatCalls[3][2].content).toContain("b5 [160.00-200.00]");
+    expect(chatCalls[3][2].content).toContain("[800.00-1100.00]");
+    expect(chatCalls[3][2].content).not.toContain("[600.00-800.00]");
     expect(readCuts("job-long")).toEqual(result.cuts);
     expect(savedStatusValues("job-long")).toEqual([JobStatus.WAITING_APPROVAL]);
   });
 
-  test("invalid full-pass JSON throws without persisting cuts or marking ERROR", async () => {
+  test("invalid full-pass JSON throws, marks ERROR, and does not persist cuts", async () => {
     writeSemanticBlocks("job-invalid-json");
     chatResponses = ["not-json"];
 
@@ -402,7 +403,10 @@ describe("analysis pipeline behavior", () => {
       "LLM response is not valid JSON. Raw: not-json",
     );
 
-    expect(statusUpdateValues("job-invalid-json")).toEqual([JobStatus.ANALYZING]);
+    expect(statusUpdateValues("job-invalid-json")).toEqual([
+      JobStatus.ANALYZING,
+      JobStatus.ERROR,
+    ]);
     expect(savedStatusValues("job-invalid-json")).toEqual([]);
     expect(fs.existsSync(cutsPath("job-invalid-json"))).toBe(false);
   });

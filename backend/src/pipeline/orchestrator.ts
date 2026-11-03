@@ -4,6 +4,7 @@
 
 import { Job, JobStatus } from "../models/job";
 import * as jobLifecycleService from "../services/jobLifecycleService";
+import * as operationRuntimeService from "../services/operationRuntimeService";
 import { ingestVideo } from "./ingest";
 import { transcribeJob } from "./transcription";
 import {
@@ -12,6 +13,7 @@ import {
 } from "./analysis_prerequisites";
 import { analyzeBlocks } from "./analysis";
 import { renderSuggestedCuts } from "./rendering";
+import { NoApprovedCutsError, PipelineCancelledError } from "./errors";
 
 type Step = [JobStatus, (job: Job) => Promise<any> | any];
 
@@ -31,7 +33,7 @@ type Step = [JobStatus, (job: Job) => Promise<any> | any];
  * @param options - Optional flags, e.g. `{ includeRender: true }`.
  * @returns The updated Job after pipeline completion (or failure).
  */
-export async function runPipeline(
+async function runPipelineUnlocked(
   jobId: string,
   options: { includeRender?: boolean } = {},
 ): Promise<Job> {
@@ -55,18 +57,28 @@ export async function runPipeline(
         break;
       }
 
-      // Skip steps that already completed based on current status
       if (isStatusBefore(job.status, status)) {
         await action(job);
         job = jobLifecycleService.loadJob(jobId);
       }
     }
   } catch (error) {
-    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR);
+    if (error instanceof PipelineCancelledError || error instanceof NoApprovedCutsError) {
+      return jobLifecycleService.loadJob(jobId);
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR, message);
     throw error;
   }
 
   return jobLifecycleService.loadJob(jobId);
+}
+
+export async function runPipeline(
+  jobId: string,
+  options: { includeRender?: boolean } = {},
+): Promise<Job> {
+  return operationRuntimeService.runWithJobLock(jobId, () => runPipelineUnlocked(jobId, options));
 }
 
 /**
@@ -77,10 +89,11 @@ export async function runPipeline(
  * @param target - Target step status.
  * @returns true if the step should be executed.
  */
-function isStatusBefore(current: JobStatus, target: JobStatus): boolean {
+export function isStatusBefore(current: JobStatus, target: JobStatus): boolean {
   const order: JobStatus[] = [
     JobStatus.CREATED,
     JobStatus.DOWNLOADING,
+    JobStatus.DOWNLOADED,
     JobStatus.TRANSCRIBING,
     JobStatus.BUILDING_BLOCKS,
     JobStatus.BUILDING_TOPICS,
@@ -88,11 +101,13 @@ function isStatusBefore(current: JobStatus, target: JobStatus): boolean {
     JobStatus.WAITING_APPROVAL,
     JobStatus.RENDERING,
     JobStatus.DONE,
-    JobStatus.ERROR,
   ];
 
   const currentIndex = order.indexOf(current);
   const targetIndex = order.indexOf(target);
+  if (currentIndex < 0 || targetIndex < 0) {
+    return false;
+  }
 
   return currentIndex <= targetIndex;
 }

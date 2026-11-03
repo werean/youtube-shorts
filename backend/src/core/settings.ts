@@ -12,6 +12,8 @@ import * as path from "path";
 import { homedir } from "os";
 import { dataDir, jobsDir, projectRoot } from "./paths";
 import type { AppSettings as SharedAppSettings } from "@youtube-shorts/contracts";
+import { isVideoFileName } from "./videoFiles";
+import * as metadata from "../storage/metadata";
 
 export interface AppSettings extends SharedAppSettings {}
 
@@ -83,9 +85,6 @@ function defaultSettings(): AppSettings {
 }
 
 function ensureDir(dirPath: string): void {
-  if (ensuredDirs.has(dirPath)) {
-    return;
-  }
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
@@ -153,11 +152,8 @@ export function loadSettings(): AppSettings {
     setCachedSettings(settings);
     return cloneSettings(settings);
   } catch (error) {
-    const defaults = defaultSettings();
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(defaults, null, 2), "utf-8");
-    ensureDir(defaults.media.base_dir);
-    setCachedSettings(defaults);
-    return cloneSettings(defaults);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Settings file is invalid and was left unchanged (${SETTINGS_FILE}): ${message}`);
   }
 }
 
@@ -216,10 +212,42 @@ export function getVideoFolder(videoName: string): string {
  * Get the video directory for a specific job
  * Format: {baseDir}/{videoName}/
  */
+function primaryFolderHasForeignVideo(dir: string, jobId: string): boolean {
+  if (!fs.existsSync(dir)) {
+    return false;
+  }
+
+  let ownPath = "";
+  try {
+    ownPath = metadata.loadJob(jobId).source_video_path || "";
+  } catch {
+    ownPath = "";
+  }
+
+  if (ownPath && path.normalize(path.dirname(ownPath)) === path.normalize(dir)) {
+    return false;
+  }
+
+  try {
+    return fs.readdirSync(dir).some((name) => isVideoFileName(name));
+  } catch {
+    return false;
+  }
+}
+
 export function getVideoDir(jobId: string, videoName?: string): string {
   const settings = loadSettings();
-  const folderName = videoName ? getVideoFolder(videoName) : jobId;
-  return path.join(settings.media.base_dir, folderName);
+  if (!videoName) {
+    return path.join(settings.media.base_dir, jobId);
+  }
+
+  const folderName = getVideoFolder(videoName);
+  const primary = path.join(settings.media.base_dir, folderName);
+  if (!primaryFolderHasForeignVideo(primary, jobId)) {
+    return primary;
+  }
+
+  return path.join(settings.media.base_dir, `${folderName}-${jobId.slice(0, 8)}`);
 }
 
 /**

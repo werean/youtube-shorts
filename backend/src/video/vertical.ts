@@ -6,10 +6,17 @@ import { config } from "../core/config";
 import { loadActiveToolConfigs } from "../core/toolConfigs";
 import type { FFmpegToolConfig } from "../core/toolConfigs";
 
+function evenDimension(value: number): number {
+  const rounded = Math.max(2, Math.round(value));
+  return rounded - (rounded % 2);
+}
+
 export function buildVerticalFilter(width: number, height: number): string {
+  const backgroundWidth = evenDimension(width / 4);
+  const backgroundHeight = evenDimension(height / 4);
   return (
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
-    `crop=${width}:${height},boxblur=20:1,setsar=1[bg];` +
+    `[0:v]scale=${backgroundWidth}:${backgroundHeight}:force_original_aspect_ratio=increase,` +
+    `crop=${backgroundWidth}:${backgroundHeight},boxblur=20:1,scale=${width}:${height},setsar=1[bg];` +
     `[0:v]scale=${width}:-2:force_original_aspect_ratio=decrease,setsar=1[fg];` +
     `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`
   );
@@ -38,30 +45,40 @@ export function buildVerticalNvencCommand(params: {
   start: number;
   end: number;
   ffmpegConfig?: FFmpegToolConfig;
+  disableHardware?: boolean;
 }): string[] {
   const duration = Math.max(0, params.end - params.start);
   const filterGraph = buildVerticalFilter(config.RENDER_WIDTH, config.RENDER_HEIGHT);
   const ffmpeg = params.ffmpegConfig || loadActiveToolConfigs().ffmpeg;
-  const videoCodec = ffmpeg.video_codec || config.RENDER_VIDEO_CODEC;
+  const configuredCodec = ffmpeg.video_codec || config.RENDER_VIDEO_CODEC;
+  const videoCodec = params.disableHardware ? "libx264" : configuredCodec;
   const audioCodec = ffmpeg.audio_codec || config.RENDER_AUDIO_CODEC;
-  const videoPreset = ffmpeg.video_preset || config.RENDER_VIDEO_PRESET;
+  const videoPreset = params.disableHardware
+    ? "veryfast"
+    : ffmpeg.video_preset || config.RENDER_VIDEO_PRESET;
+  const useHardware = !params.disableHardware && /nvenc/i.test(videoCodec);
+  const prerollSeconds = 2;
+  const fastSeek = Math.max(0, params.start - prerollSeconds);
+  const fineSeek = Math.max(0, params.start - fastSeek);
 
   const hasVideo = !ffmpeg.disable_video;
   const hasAudio = !ffmpeg.disable_audio;
   const filterData = hasVideo ? buildVideoFilterGraph(filterGraph, ffmpeg.video_filter) : null;
 
-  const command: string[] = [
-    "ffmpeg",
-    "-y",
-    "-hwaccel",
-    "cuda",
+  const command: string[] = ["ffmpeg", "-y"];
+  if (useHardware) {
+    command.push("-hwaccel", "cuda");
+  }
+  command.push(
     "-ss",
-    params.start.toFixed(3),
+    fastSeek.toFixed(3),
     "-i",
     params.inputPath,
+    "-ss",
+    fineSeek.toFixed(3),
     "-t",
     duration.toFixed(3),
-  ];
+  );
 
   if (hasVideo && filterData) {
     command.push("-filter_complex", filterData.graph);

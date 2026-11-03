@@ -5,9 +5,8 @@
 import { Job, JobStatus } from "../models/job";
 import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as operationRuntimeService from "../services/operationRuntimeService";
-import { buildDownloadCommand } from "./ingest/command";
+import { buildDownloadArgs, formatDownloadCommand } from "./ingest/command";
 import { handleDownloadedArtifacts } from "./ingest/downloaded";
-import { createDummyFallback } from "./ingest/dummy";
 import { maybeUseExistingSource } from "./ingest/existing";
 import { runDownloadCommand } from "./ingest/process";
 import { beginIngest } from "./ingest/startup";
@@ -17,45 +16,44 @@ export type { IngestResult } from "./ingest/types";
 export async function ingestVideo(job: Job): Promise<IngestResult> {
   try {
     const { infoPath, outputPattern } = beginIngest(job);
-
-    // Check if video already exists
     const existingResult = maybeUseExistingSource(job, infoPath);
     if (existingResult) {
       return existingResult;
     }
 
-    // Baixar vídeo no formato original (sem conversão)
-    const downloadCommand = buildDownloadCommand(job, outputPattern);
+    const downloadArgs = buildDownloadArgs(job, outputPattern);
+    const downloadCommand = formatDownloadCommand(downloadArgs);
     console.log(`[ingest] Baixando vídeo original (sem conversão)...`);
     console.log(`[ingest] Command: ${downloadCommand}`);
     operationRuntimeService.appendTaskLog(job.job_id, "ingest", `[ingest] Command: ${downloadCommand}`);
 
-    try {
-      await runDownloadCommand(downloadCommand, (lines) =>
-        operationRuntimeService.appendTaskLogs(job.job_id, "ingest", lines),
-      );
-      console.log(`[ingest] ✓ Download completado`);
-      operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Download completed");
-
-      return handleDownloadedArtifacts(job, infoPath, outputPattern);
-    } catch (execError: any) {
-      console.error(`[ingest] ✗ Erro ao executar yt-dlp, tentando criar vídeo dummy...`);
-      console.error(`[ingest] ✗ Mensagem: ${execError.message}`);
-      operationRuntimeService.appendTaskLogs(job.job_id, "ingest", [
-        "[ingest] ERROR executing yt-dlp",
-        `[ingest] ${execError.message}`,
-      ]);
-
-      return createDummyFallback(job, infoPath);
-    }
+    await runDownloadCommand(job.job_id, downloadArgs, (lines) =>
+      operationRuntimeService.appendTaskLogs(job.job_id, "ingest", lines),
+    );
+    console.log(`[ingest] ✓ Download completado`);
+    operationRuntimeService.appendTaskLog(job.job_id, "ingest", "[ingest] Download completed");
+    return handleDownloadedArtifacts(job, infoPath, outputPattern);
   } catch (error: any) {
-    console.error(`[ingest] ✗ Erro crítico:`, error.message);
-    console.error(`[ingest] Stack:`, error.stack);
+    const message = error?.message || String(error);
+    console.error(`[ingest] ✗ Erro crítico:`, message);
     operationRuntimeService.appendTaskLogs(job.job_id, "ingest", [
+      "[ingest] ERROR executing yt-dlp",
+      `[ingest] ${message}`,
       "[ingest] CRITICAL ERROR",
-      `[ingest] ${error.message}`,
     ]);
-    jobLifecycleService.updateJobStatus(job.job_id, JobStatus.ERROR);
-    throw new Error(`Ingestion failed: ${error.message}`);
+    try {
+      const failed = jobLifecycleService.loadJob(job.job_id);
+      failed.status = JobStatus.ERROR;
+      failed.last_error = message;
+      failed.updated_at = new Date().toISOString();
+      jobLifecycleService.saveJob(failed);
+    } catch {
+      try {
+        jobLifecycleService.updateJobStatus(job.job_id, JobStatus.ERROR, message);
+      } catch {
+        // The original error is still reported to the caller.
+      }
+    }
+    throw new Error(`Ingestion failed: ${message}`);
   }
 }

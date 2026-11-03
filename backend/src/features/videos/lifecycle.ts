@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { isVideoFileName } from "../../core/videoFiles";
 import { jobDir } from "../../core/paths";
 import {
   archivedVideosDir,
@@ -26,7 +27,7 @@ export function archiveVideo(jobId: string): { ok: true; job_id: string } | { ok
   fs.renameSync(videoDir, targetDir);
 
   const filesInDir = fs.readdirSync(targetDir);
-  const videoFile = filesInDir.find((file) => file.startsWith("video."));
+  const videoFile = filesInDir.find((file) => file.startsWith("video.") && isVideoFileName(file));
   if (videoFile) {
     job.source_video_path = path.join(targetDir, videoFile);
   }

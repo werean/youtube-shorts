@@ -93,6 +93,7 @@ mock.module("../../../src/storage/files", () => ({
 
 mock.module("../../../src/pipeline/transcription", () => ({
   transcribeJob: transcribeJobMock,
+  cancelTranscription: () => false,
 }));
 
 mock.module("../../../src/pipeline/analysis_prerequisites", () => ({
@@ -107,6 +108,7 @@ mock.module("../../../src/pipeline/analysis", () => ({
 
 mock.module("../../../src/pipeline/rendering", () => ({
   renderSuggestedCuts: renderSuggestedCutsMock,
+  cancelRendering: () => false,
 }));
 
 const { registerBatchPipelineRoutes } = await import(

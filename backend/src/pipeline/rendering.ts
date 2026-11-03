@@ -5,6 +5,8 @@
 import { JobStatus } from "../models/job";
 import * as jobLifecycleService from "../services/jobLifecycleService";
 import * as operationRuntimeService from "../services/operationRuntimeService";
+import { NoApprovedCutsError } from "./errors";
+import { statusAfterInterruptedStep } from "./recoveryStatus";
 import { collectOrderedOutputs, listRenderOutputs as listStoredRenderOutputs } from "./rendering/outputs";
 import { beginRenderJob, prepareRenderInputs } from "./rendering/preconditions";
 import { renderCut, runWithConcurrency } from "./rendering/runner";
@@ -17,12 +19,12 @@ export function cancelRendering(jobId: string): boolean {
     return false;
   }
 
-  jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+  jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
   operationRuntimeService.appendTaskLog(jobId, "render", "[rendering] Cancelled");
   return true;
 }
 
-export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
+async function renderSuggestedCutsUnlocked(jobId: string): Promise<string[]> {
   // Check if another rendering is already running
   const activeJobId = operationRuntimeService.conflictingActiveRenderingJobId(jobId);
   if (activeJobId) {
@@ -40,6 +42,7 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
     const { videoPath, cuts, shortsDir, ffmpegConfig, concurrency } = prepareRenderInputs(jobId);
     const orderedOutputs = new Array<string>(cuts.length).fill("");
 
+    const hardware = { disabled: false };
     const tasks = cuts.map((cut, index) => async () => {
       await renderCut({
         jobId,
@@ -49,6 +52,7 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
         shortsDir,
         ffmpegConfig,
         orderedOutputs,
+        hardware,
       });
     });
 
@@ -57,7 +61,7 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
     outputs.push(...collectOrderedOutputs(orderedOutputs));
 
     if (operationRuntimeService.isRenderingCancelled(jobId)) {
-      jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+      jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
       operationRuntimeService.appendTaskLog(jobId, "render", "[rendering] Cancel acknowledged");
       return outputs;
     }
@@ -68,8 +72,14 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
 
     return outputs;
   } catch (error) {
+    if (error instanceof NoApprovedCutsError) {
+      jobLifecycleService.updateJobStatus(jobId, JobStatus.WAITING_APPROVAL);
+      operationRuntimeService.appendTaskLog(jobId, "render", `[rendering] ${error.message}`);
+      throw error;
+    }
+
     if (operationRuntimeService.isRenderingCancelled(jobId)) {
-      jobLifecycleService.updateJobStatus(jobId, JobStatus.DOWNLOADED);
+      jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
       operationRuntimeService.appendTaskLog(jobId, "render", "[rendering] Cancel acknowledged");
       return outputs;
     }
@@ -86,6 +96,10 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
     operationRuntimeService.cleanupRenderingState(jobId);
     console.log(`[rendering] Cleanup: Removed job ${jobId} from active renderings`);
   }
+}
+
+export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
+  return operationRuntimeService.runWithJobLock(jobId, () => renderSuggestedCutsUnlocked(jobId));
 }
 
 export function listRenderOutputs(jobId: string): string[] {

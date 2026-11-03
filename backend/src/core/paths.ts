@@ -10,14 +10,9 @@ export function projectRoot(): string {
   // Compatible with both Node and Bun
   try {
     if (typeof __dirname !== "undefined") {
-      const rootPath = path.resolve(__dirname, "..", "..", "..");
-      console.log(`[paths] Project root (Node): ${rootPath}`);
-      return rootPath;
+      return path.resolve(__dirname, "..", "..", "..");
     }
-    // Bun/ESM fallback
-    const rootPath = path.resolve(import.meta.dir, "..", "..", "..");
-    console.log(`[paths] Project root (Bun): ${rootPath}`);
-    return rootPath;
+    return path.resolve(import.meta.dir, "..", "..", "..");
   } catch (error) {
     console.error(`[paths] ✗ Erro ao resolver project root:`, error);
     throw error;

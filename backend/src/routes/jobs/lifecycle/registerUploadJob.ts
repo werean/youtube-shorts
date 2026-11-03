@@ -19,7 +19,8 @@ export function registerUploadJobRoutes(fastify: FastifyInstance) {
     } catch (error: any) {
       console.error(`[POST /jobs/upload] ✗ Erro:`, error.message);
       console.error(`[POST /jobs/upload] Stack:`, error.stack);
-      reply.code(500).send({ detail: error.message || "Internal server error" });
+      const statusCode = error?.statusCode === 400 ? 400 : 500;
+      return reply.code(statusCode).send({ detail: error.message || "Internal server error" });
     }
   });
 }

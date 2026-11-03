@@ -100,21 +100,21 @@ describe("embedding pipeline helpers", () => {
         block_id: "b1",
         start: 0,
         end: 10,
-        text: "primeiro",
+        text: "Primeiro assunto.",
         segment_ids: ["s1"],
       },
       {
         block_id: "b2",
         start: 10.1,
         end: 20,
-        text: "segundo",
+        text: "Segundo assunto.",
         segment_ids: ["s2"],
       },
       {
         block_id: "b3",
         start: 20.1,
         end: 30,
-        text: "terceiro",
+        text: "Terceiro assunto.",
         segment_ids: ["s3"],
       },
     ];
@@ -130,6 +130,32 @@ describe("embedding pipeline helpers", () => {
     );
 
     expect(Array.from(boundaries)).toEqual(["b3"]);
+  });
+
+  it("ignores an embedding boundary that would split a sentence", () => {
+    const blocks: SemanticBlock[] = [
+      {
+        block_id: "b1",
+        start: 0,
+        end: 10,
+        text: "A frase ainda nao terminou",
+        segment_ids: ["s1"],
+      },
+      {
+        block_id: "b2",
+        start: 10,
+        end: 20,
+        text: "continua aqui.",
+        segment_ids: ["s2"],
+      },
+    ];
+
+    const boundaries = detectEmbeddingBoundaries(blocks, [
+      [1, 0],
+      [-1, 0],
+    ]);
+
+    expect(Array.from(boundaries)).toEqual([]);
   });
 
   it("throws if detectEmbeddingBoundaries receives mismatched blocks and embeddings", () => {

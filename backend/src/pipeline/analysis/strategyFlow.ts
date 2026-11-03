@@ -1,9 +1,38 @@
 import { OllamaClient } from "../../llm/client";
 import { SemanticBlock } from "../../models/semantic_block";
-import { selectStrategy, validateLLMPayload } from "../strategy";
+import { TopicSegment } from "../../models/topic_segment";
+import {
+  selectStrategy,
+  splitBlocksByCharLimit,
+  validateLLMPayload,
+  type ProcessingStrategy,
+} from "../strategy";
 import { runFullPass, runPass1Candidacy } from "./llm";
 import { loadTopics } from "./preconditions";
 import { RawLLMCut } from "./types";
+
+async function collectFromBlocks(
+  jobId: string,
+  label: string,
+  blocks: SemanticBlock[],
+  client: OllamaClient,
+  systemPrompt: string,
+  topics: TopicSegment[] | undefined,
+  strategy: ProcessingStrategy,
+): Promise<RawLLMCut[]> {
+  const chunks = splitBlocksByCharLimit(blocks, strategy.maxCharsPerLLMRequest);
+  const rawCuts: RawLLMCut[] = [];
+
+  for (const chunk of chunks) {
+    const validation = validateLLMPayload(chunk, strategy);
+    if (!validation.valid) {
+      throw new Error(`LLM payload too large for job ${jobId} ${label}: ${validation.reason}`);
+    }
+    rawCuts.push(...(await runFullPass(jobId, chunk, client, systemPrompt, topics)));
+  }
+
+  return rawCuts;
+}
 
 export async function collectRawCutsForStrategy(
   jobId: string,
@@ -11,46 +40,24 @@ export async function collectRawCutsForStrategy(
   allBlocks: SemanticBlock[],
   client: OllamaClient,
   systemPrompt: string,
+  topics?: TopicSegment[],
 ): Promise<RawLLMCut[]> {
   const strategy = selectStrategy(videoDurationSeconds);
 
   console.log(
-    `[analysis] Strategy: useTopicSegmentation=${strategy.useTopicSegmentation} useTwoPass=${strategy.useTwoPass}`,
+    `[analysis] Strategy: useTopicSegmentation=${strategy.useTopicSegmentation} useTwoPass=${strategy.useTwoPass} duration=${videoDurationSeconds}`,
   );
 
-  const allRawCuts: RawLLMCut[] = [];
-
   if (!strategy.useTopicSegmentation) {
-    // ---- Single-pass: short videos ----
-    const validation = validateLLMPayload(allBlocks, strategy);
-    if (!validation.valid) {
-      console.warn(
-        `[analysis] job=${jobId} Payload exceeds limits: ${validation.reason}. blocks=${validation.blockCount} chars=${validation.charCount}`,
-      );
-      throw new Error(`LLM payload too large for job ${jobId}: ${validation.reason}`);
-    }
-
-    const raw = await runFullPass(jobId, allBlocks, client, systemPrompt);
-    allRawCuts.push(...raw);
-    return allRawCuts;
+    return collectFromBlocks(jobId, "short", allBlocks, client, systemPrompt, topics, strategy);
   }
 
-  // ---- Topic-aware pass: medium and long videos ----
-  const topics = loadTopics(jobId);
-  console.log(`[analysis] Processing ${topics.length} topic(s)`);
+  const resolvedTopics = topics && topics.length > 0 ? topics : loadTopics(jobId);
+  console.log(`[analysis] Processing ${resolvedTopics.length} topic(s)`);
+  const allRawCuts: RawLLMCut[] = [];
 
-  for (const topic of topics) {
-    const topicBlocks = allBlocks.filter((b) => topic.block_ids.includes(b.block_id));
-
-    const validation = validateLLMPayload(topicBlocks, strategy);
-    if (!validation.valid) {
-      console.warn(
-        `[analysis] job=${jobId} topic=${topic.topic_id} skipped — payload exceeds limits: ${validation.reason}. blocks=${validation.blockCount} chars=${validation.charCount}`,
-      );
-      continue;
-    }
-
-    // Pass 1: candidacy check (only for two-pass strategy)
+  for (const topic of resolvedTopics) {
+    const topicBlocks = allBlocks.filter((block) => topic.block_ids.includes(block.block_id));
     if (strategy.useTwoPass) {
       const isCandidate = await runPass1Candidacy(topic, allBlocks, client);
       if (!isCandidate) {
@@ -60,8 +67,15 @@ export async function collectRawCutsForStrategy(
       console.log(`[analysis] topic=${topic.topic_id} accepted by Pass 1 — running full pass`);
     }
 
-    // Pass 2 (or single pass for medium): full analysis
-    const raw = await runFullPass(jobId, topicBlocks, client, systemPrompt);
+    const raw = await collectFromBlocks(
+      jobId,
+      `topic=${topic.topic_id}`,
+      topicBlocks,
+      client,
+      systemPrompt,
+      resolvedTopics,
+      strategy,
+    );
     allRawCuts.push(...raw);
   }
 
