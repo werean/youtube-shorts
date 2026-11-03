@@ -39,14 +39,40 @@ describe("repairCutRange", () => {
     });
   });
 
-  it("finishes the open sentence without walking back through the whole video", () => {
-    const repaired = repairCutRange({ blocks: ["b4"], start: 60, end: 75 }, blocks);
+  it("does not treat a lowercase word after a finished sentence as a continuation", () => {
+    const sentences = [
+      block("b1", 0, 20, "The sentence is finished."),
+      block("b2", 20, 40, "and this is a new sentence."),
+      block("b3", 40, 60, "It has a middle."),
+      block("b4", 60, 80, "It ends here."),
+    ];
+
+    const repaired = repairCutRange(
+      { blocks: ["b2", "b3", "b4"], start: 20, end: 80 },
+      sentences,
+    );
 
     expect(repaired.ok).toBe(true);
     if (repaired.ok) {
-      expect(repaired.cut.blocks).toEqual(["b3", "b4", "b5"]);
-      expect(repaired.cut.start).toBe(40);
-      expect(repaired.cut.end).toBe(90);
+      expect(repaired.cut.blocks).toEqual(["b2", "b3", "b4"]);
+      expect(repaired.cut.start).toBe(20);
+    }
+  });
+
+  it("continues only while the previous sentence is still open", () => {
+    const open = [
+      block("b1", 0, 20, "The point is"),
+      block("b2", 20, 40, "still open"),
+      block("b3", 40, 60, "and now it ends."),
+    ];
+
+    const repaired = repairCutRange({ blocks: ["b3"], start: 40, end: 60 }, open);
+
+    expect(repaired.ok).toBe(true);
+    if (repaired.ok) {
+      expect(repaired.cut.blocks).toEqual(["b1", "b2", "b3"]);
+      expect(repaired.cut.start).toBe(0);
+      expect(repaired.cut.end).toBe(60);
     }
   });
 

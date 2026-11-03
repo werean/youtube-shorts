@@ -13,11 +13,11 @@ export const SYSTEM_PROMPT_TEMPLATE = `You are selecting highlight cuts for long
 Input consists of semantic blocks with timestamps. Each block is a coherent unit.
 You must propose MULTIPLE cuts that form complete mini-stories (beginning, middle, end) focused on a single topic.
 
-Each cut MUST be at least 5 minutes (300 seconds) long.
+Each cut should be about 15 to 90 seconds long and use at least 3 consecutive blocks.
 
 The first block of each cut MUST be a strong hook.
 
-IMPORTANT: Scan through ALL blocks and identify ALL potential cuts that meet the minimum duration requirement.
+IMPORTANT: Scan through ALL blocks and identify ALL potential cuts that fit the 15 to 90 second range.
 Depending on total content length and quality, a good output may contain 1–3 cuts or more.
 
 Each cut should be a standalone piece with:
@@ -43,7 +43,8 @@ Rules:
 * End at a natural conclusion (never cut off a thought).
 * The cut start time must match the first block start.
 * The cut end time must match the last block end.
-* Cuts must be ≥ 300 seconds in duration.
+* Cuts should be about 15 to 90 seconds long.
+* Use at least 3 consecutive blocks.
 * Do NOT edit or rewrite text.
 * Do NOT include any extra commentary.
 * Output JSON only, no markdown.
@@ -56,7 +57,7 @@ Output format (JSON array):
 {
 "blocks": ["b12", "b13", "b14", "b15"],
 "start": 42.1,
-"end": 372.4,
+"end": 98.4,
 "score": 94,
 "hook_reason": "...",
 "content_reason": "..."

@@ -27,6 +27,6 @@ export function startsWithLowercase(text: string): boolean {
   return character.toLowerCase() !== character.toUpperCase() && character === character.toLowerCase();
 }
 
-export function continuesSentence(previousText: string, currentText: string): boolean {
-  return !endsSentence(previousText) || startsWithLowercase(currentText);
+export function continuesSentence(previousText: string, _currentText: string): boolean {
+  return !endsSentence(previousText);
 }
