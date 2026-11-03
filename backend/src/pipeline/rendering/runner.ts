@@ -1,8 +1,10 @@
 import * as fs from "fs";
 import type { FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
+import type { Segment } from "../../models/segment";
 import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { runFfmpegAsync } from "../../video/ffmpeg";
+import type { ShortStylePreset } from "../../../../shared/stylePresets";
 import { buildRenderCommand } from "./commands";
 
 function isHardwareEncoderError(error: unknown): boolean {
@@ -59,6 +61,8 @@ export async function renderCut(params: {
   videoPath: string;
   shortsDir: string;
   ffmpegConfig: FFmpegToolConfig;
+  preset?: ShortStylePreset | null;
+  segments?: Segment[];
   orderedOutputs: string[];
   disableHardware?: boolean;
   hardware?: { disabled: boolean };
@@ -86,6 +90,8 @@ export async function renderCut(params: {
     shortsDir: params.shortsDir,
     ffmpegConfig: params.ffmpegConfig,
     disableHardware,
+    preset: params.preset,
+    segments: params.segments,
   });
 
   const partialPath = `${outputPath}.partial`;

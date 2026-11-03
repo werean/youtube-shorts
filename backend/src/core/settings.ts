@@ -14,6 +14,7 @@ import { dataDir, jobsDir, projectRoot } from "./paths";
 import type { AppSettings as SharedAppSettings } from "@youtube-shorts/contracts";
 import { isVideoFileName } from "./videoFiles";
 import * as metadata from "../storage/metadata";
+import { defaultStyleLibrary, normalizeStyleLibrary } from "../../../shared/stylePresets";
 
 export interface AppSettings extends SharedAppSettings {}
 
@@ -43,6 +44,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
       formats: [...settings.whisper.formats],
     },
     llm: { ...settings.llm },
+    style_library: normalizeStyleLibrary(settings.style_library ?? defaultStyleLibrary()),
   };
 }
 
@@ -81,6 +83,7 @@ function defaultSettings(): AppSettings {
     llm: {
       model: "llama2",
     },
+    style_library: defaultStyleLibrary(),
   };
 }
 
@@ -147,6 +150,7 @@ export function loadSettings(): AppSettings {
       llm: {
         model: parsed.llm?.model || defaults.llm.model,
       },
+      style_library: normalizeStyleLibrary(parsed.style_library ?? defaults.style_library),
     };
     ensureDir(settings.media.base_dir);
     setCachedSettings(settings);
@@ -195,6 +199,9 @@ export function updateSettings(partial: Partial<AppSettings>): AppSettings {
     llm: {
       model: partial.llm?.model ?? current.llm.model,
     },
+    style_library: partial.style_library
+      ? normalizeStyleLibrary(partial.style_library)
+      : normalizeStyleLibrary(current.style_library ?? defaultStyleLibrary()),
   };
   return saveSettings(next);
 }

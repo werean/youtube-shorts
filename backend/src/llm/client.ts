@@ -3,6 +3,7 @@
  */
 
 import { config } from "../core/config";
+import { optionsForModel } from "./localRuntime";
 
 interface Message {
   role: string;
@@ -57,8 +58,10 @@ export class OllamaClient {
         stream: false,
       };
 
-      if (options) {
-        payload.options = options;
+      const runtime = optionsForModel(model);
+      const merged = { ...runtime, ...(options || {}) };
+      if (Object.keys(merged).length > 0) {
+        payload.options = merged;
       }
 
       return payload;

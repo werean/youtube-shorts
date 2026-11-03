@@ -130,6 +130,7 @@ mock.module("../../../src/storage/files", () => ({
   },
   findSourceVideo: () => sourceVideoPath,
   listRenderOutputUrls: (jobId: string) => [`/media/shorts/${jobId}/existing.mp4`],
+  transcriptionPath: (jobId: string) => path.join(jobDir(jobId), "transcription.segments.json"),
 }));
 
 mock.module("../../../src/core/toolConfigs", () => ({
@@ -296,7 +297,7 @@ describe("rendering flow behavior", () => {
     expect(outputs).toEqual(["/media/shorts/job-success/4.00-9.25.mp4"]);
     expect(statusUpdateValues("job-success")).toEqual([JobStatus.RENDERING, JobStatus.DONE]);
     expect(commandParams).toEqual([
-      {
+      expect.objectContaining({
         inputPath: sourceVideoPath,
         outputPath: path.join(shortsDir("job-success"), "4.00-9.25.mp4"),
         start: 4,
@@ -307,8 +308,9 @@ describe("rendering flow behavior", () => {
           video_preset: "p1-test",
         },
         disableHardware: false,
-      },
+      }),
     ]);
+    expect(commandParams[0].preset?.blur).toBeDefined();
     expect(ffmpegCalls.map((call) => call.command.join(" "))).toEqual([
       `ffmpeg -i ${sourceVideoPath} -ss 4 -to 9.25 ${path.join(shortsDir("job-success"), "4.00-9.25.mp4.partial")}`,
     ]);

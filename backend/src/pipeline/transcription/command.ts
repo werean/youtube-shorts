@@ -1,6 +1,8 @@
 import { config } from "../../core/config";
 import { resolveModelDevice } from "../../core/gpu";
 import { loadActiveToolConfigs, type ToolConfigs } from "../../core/toolConfigs";
+import { cachedGpuAvailable } from "../../llm/localRuntime";
+import { resolveWhisperDevice } from "../../../../shared/localInference";
 import type { TranscriptionFormats } from "./artifacts";
 
 export function resolveTranscriptionFormats(): TranscriptionFormats {
@@ -15,6 +17,24 @@ export function resolveTranscriptionFormats(): TranscriptionFormats {
   };
 }
 
+export function whisperRuntimeDevice(
+  toolConfigs: ToolConfigs = loadActiveToolConfigs(),
+): "cpu" | "cuda" {
+  const requestedDevice = toolConfigs.whisper.device === "cpu" ? "cpu" : "cuda";
+  if (requestedDevice === "cpu" || process.env.YOUTUBE_SHORTS_FORCE_CPU === "1") {
+    return "cpu";
+  }
+
+  if (resolveModelDevice(requestedDevice) === "cuda") {
+    return "cuda";
+  }
+
+  return resolveWhisperDevice({
+    savedDevice: toolConfigs.whisper.device,
+    gpuAvailable: cachedGpuAvailable(),
+  });
+}
+
 export function buildWhisperCommand(
   videoPath: string,
   outputDir: string,
@@ -22,7 +42,7 @@ export function buildWhisperCommand(
 ): string[] {
   const whisper = toolConfigs.whisper;
   const requestedDevice = whisper.device === "cpu" ? "cpu" : "cuda";
-  const device = resolveModelDevice(requestedDevice);
+  const device = whisperRuntimeDevice(toolConfigs);
   if (requestedDevice === "cuda" && device === "cpu") {
     console.warn("[transcription] No local GPU detected. Whisper will use CPU.");
   }

@@ -50,10 +50,11 @@ describe("embedding pipeline helpers", () => {
 
     const [, request] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(request.body));
-    expect(body).toEqual({
-      model: "nomic-embed-text",
-      input: ["primeiro", "segundo"],
-    });
+    expect(body.model).toBe("nomic-embed-text");
+    expect(body.input).toEqual(["primeiro", "segundo"]);
+    if (body.options) {
+      expect(body.options).toEqual({ num_gpu: 0 });
+    }
   });
 
   it("throws descriptive error when Ollama embed endpoint returns non-200", async () => {

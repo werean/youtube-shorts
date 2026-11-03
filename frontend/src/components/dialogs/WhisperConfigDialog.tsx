@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { ActionState } from "../../hooks/useAppAction";
 import { WHISPER_MODELS, WHISPER_LANGUAGES, WHISPER_OUTPUT_FORMATS } from "../../types/whisper";
 import type { WhisperConfig } from "../../types/whisper";
@@ -19,6 +19,8 @@ interface WhisperConfigDialogProps {
   whisperFormats: string[];
   action: ActionState;
   initialConfig?: Partial<WhisperConfig>;
+  /** null while GPU detection has not finished. */
+  gpuAvailable?: boolean | null;
   onSave: (config: Partial<WhisperConfig>) => void;
   onCancel: () => void;
 }
@@ -28,6 +30,7 @@ export function WhisperConfigDialog({
   whisperFormats: initialFormats,
   action,
   initialConfig,
+  gpuAvailable = null,
   onSave,
   onCancel,
 }: WhisperConfigDialogProps) {
@@ -35,9 +38,15 @@ export function WhisperConfigDialog({
   const [model, setModel] = useState<string>(initialConfig?.model || "large-v3");
 
   // Device & Output
-  const [device, setDevice] = useState<"cpu" | "cuda">(
-    (initialConfig?.device as "cpu" | "cuda") || initialDevice,
-  );
+  const [device, setDevice] = useState<"cpu" | "cuda">(() => {
+    if (gpuAvailable === false) return "cpu";
+    const saved = (initialConfig?.device as "cpu" | "cuda") || initialDevice;
+    return saved === "cpu" ? "cpu" : "cuda";
+  });
+
+  useEffect(() => {
+    if (gpuAvailable === false) setDevice("cpu");
+  }, [gpuAvailable]);
   const [formats, setFormats] = useState<string[]>(
     Array.isArray(initialConfig?.output_format) ? initialConfig!.output_format : initialFormats,
   );
@@ -163,10 +172,12 @@ export function WhisperConfigDialog({
     }
   };
 
+  const runtimeDevice: "cpu" | "cuda" = gpuAvailable === false ? "cpu" : device;
+
   const handleSave = () => {
     const config: Partial<WhisperConfig> = {
       model: model as "turbo" | "large-v3" | "large" | "medium" | "small" | "base" | "tiny",
-      device: device as "cpu" | "cuda",
+      device: runtimeDevice,
       output_format: formats as any,
       verbose,
       task,
@@ -205,7 +216,7 @@ export function WhisperConfigDialog({
   const whisperCommand = useMemo(() => {
     const config: Partial<WhisperConfig> = {
       model: model as "turbo" | "large-v3" | "large" | "medium" | "small" | "base" | "tiny",
-      device: device as "cpu" | "cuda",
+      device: runtimeDevice,
       output_format: formats as any,
       verbose,
       task,
@@ -384,31 +395,23 @@ export function WhisperConfigDialog({
           <ConfigSection title="Dispositivo e Saída">
             <ConfigField
               label="Dispositivo"
-              description="Usar processador comum ou placa gráfica (GPU)"
-              tooltip="GPU (CUDA) é muito, muito mais rápido se você tiver placa NVIDIA. Processador (CPU) é mais compatível e funciona sempre, mas é bem mais lento."
+              description="A transcrição roda no modelo local. O padrão é a GPU."
+              tooltip="CUDA é o caminho padrão quando a máquina tem GPU. A CPU só entra se você marcar a opção, ou se não houver GPU."
             >
-              <div style={{ display: "flex", gap: "8px" }}>
-                {(["cpu", "cuda"] as const).map((dev) => (
-                  <AppButton
-                    key={dev}
-                    onClick={() => setDevice(dev)}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "8px",
-                      border:
-                        device === dev ? "2px solid var(--accent-2)" : "1px solid var(--border)",
-                      background: device === dev ? "var(--bg-3)" : "var(--panel)",
-                      cursor: "pointer",
-                      fontWeight: device === dev ? "600" : "400",
-                      color: device === dev ? "var(--accent-2)" : "var(--muted)",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {dev === "cpu" ? "CPU" : "CUDA"}
-                  </AppButton>
-                ))}
-              </div>
+              {gpuAvailable === false ? (
+                <p className="muted" style={{ margin: 0 }}>
+                  Esta máquina não tem GPU. A transcrição usa a CPU.
+                </p>
+              ) : (
+                <label className="app-checkbox-field" style={{ gap: "10px" }}>
+                  <input
+                    type="checkbox"
+                    checked={device === "cpu"}
+                    onChange={(event) => setDevice(event.target.checked ? "cpu" : "cuda")}
+                  />
+                  <span>Usar CPU</span>
+                </label>
+              )}
             </ConfigField>
 
             <ConfigField

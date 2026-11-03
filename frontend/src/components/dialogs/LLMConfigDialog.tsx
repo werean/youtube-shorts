@@ -26,6 +26,8 @@ interface LLMConfigDialogProps {
   localAvailable?: boolean;
   remoteAvailable?: boolean;
   llmSystemPrompt: string;
+  forceCpu?: boolean;
+  gpuAvailable?: boolean | null;
   action: ActionState;
   onRegisterModel: (
     name: string,
@@ -42,6 +44,7 @@ interface LLMConfigDialogProps {
     prompt: string,
     embeddingModel: string,
     registeredEmbeddingModels: string[],
+    forceCpu: boolean,
   ) => void;
   onCancel: () => void;
 }
@@ -97,6 +100,8 @@ export function LLMConfigDialog({
   availableModels,
   modelCatalog = [],
   llmSystemPrompt: initialPrompt,
+  forceCpu: initialForceCpu = false,
+  gpuAvailable = null,
   action,
   onRegisterModel,
   onRemoveModel,
@@ -123,7 +128,8 @@ export function LLMConfigDialog({
   const [isDownloadingEmbedding, setIsDownloadingEmbedding] = useState(false);
   const [downloadedEmbeddingHints, setDownloadedEmbeddingHints] = useState<string[]>([]);
   const [prompt, setPrompt] = useState(initialPrompt);
-  const [modelFilter, setModelFilter] = useState<ModelFilter>("all");
+  const [forceCpu, setForceCpu] = useState(initialForceCpu);
+  const [modelFilter, setModelFilter] = useState<ModelFilter>("local");
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [registerName, setRegisterName] = useState("");
   const [registerSource, setRegisterSource] = useState<"" | "cloud" | "local">("");
@@ -212,6 +218,13 @@ export function LLMConfigDialog({
     });
   }, [orderedCatalog, modelFilter]);
 
+  const selectableModels = useMemo(() => {
+    const source = modelFilter === "all" ? orderedCatalog : filteredCatalog;
+    const names = source.map((item) => item.name);
+    if (model && !names.includes(model)) names.unshift(model);
+    return names;
+  }, [orderedCatalog, filteredCatalog, modelFilter, model]);
+
   const embeddingModelOptions = useMemo(
     () =>
       normalizeUniqueNames([
@@ -293,7 +306,7 @@ export function LLMConfigDialog({
   function openRegisterModelForm() {
     setShowRegisterForm(true);
     setRegisterName("");
-    setRegisterSource("");
+    setRegisterSource("local");
     setRegisterStep("form");
     setRegisterMessage("");
   }
@@ -536,16 +549,33 @@ export function LLMConfigDialog({
                 color: "var(--ink)",
               }}
             >
-              {modelOptions.length === 0 ? (
-                <option value="">Nenhum modelo detectado</option>
+              {selectableModels.length === 0 ? (
+                <option value="">Nenhum modelo local detectado</option>
               ) : (
-                modelOptions.map((option) => (
+                selectableModels.map((option) => (
                   <option key={option} value={option}>
                     {buildOptionLabel(option)}
                   </option>
                 ))
               )}
             </AppSelect>
+            <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.85rem" }}>
+              Modelos locais usam a GPU. A CPU só entra se você marcar a opção, ou se não houver GPU.
+            </p>
+            {gpuAvailable === false ? (
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.85rem" }}>
+                Esta máquina não tem GPU. Modelos locais usam a CPU.
+              </p>
+            ) : (
+              <label className="app-checkbox-field" style={{ gap: "10px", marginTop: "10px" }}>
+                <input
+                  type="checkbox"
+                  checked={forceCpu}
+                  onChange={(event) => setForceCpu(event.target.checked)}
+                />
+                <span>Usar CPU para modelos locais</span>
+              </label>
+            )}
 
             <div
               style={{
@@ -1018,7 +1048,9 @@ export function LLMConfigDialog({
               Resetar prompt
             </AppButton>
             <AppButton
-              onClick={() => onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels)}
+              onClick={() =>
+                onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels, forceCpu)
+              }
               disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
               variant="secondary"
               style={{

@@ -1,10 +1,17 @@
 import { loadActiveToolConfigs, type FFmpegToolConfig } from "../../core/toolConfigs";
+import { loadSettings } from "../../core/settings";
 import { Cut } from "../../models/cut";
 import { JobStatus } from "../../models/job";
+import type { Segment } from "../../models/segment";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { NoApprovedCutsError } from "../errors";
+import {
+  defaultStyleLibrary,
+  normalizeStyleLibrary,
+  type ShortStylePreset,
+} from "../../../../shared/stylePresets";
 
 export type PreparedRenderInputs = {
   videoPath: string;
@@ -12,6 +19,8 @@ export type PreparedRenderInputs = {
   shortsDir: string;
   ffmpegConfig: FFmpegToolConfig;
   concurrency: number;
+  preset: ShortStylePreset;
+  segments: Segment[];
 };
 
 function resolveRenderConcurrency(totalCuts: number, videoCodec: string): number {
@@ -55,6 +64,29 @@ export function beginRenderJob(jobId: string): void {
   jobLifecycleService.updateJobStatus(jobId, JobStatus.RENDERING);
 }
 
+export function loadActiveShortPreset(): ShortStylePreset {
+  try {
+    const library = normalizeStyleLibrary(loadSettings().style_library);
+    return library.presets.find((preset) => preset.id === library.activeId) ?? library.presets[0];
+  } catch (error) {
+    console.warn("[rendering] Preset salvo indisponível. Usando o padrão.", error);
+    const library = defaultStyleLibrary();
+    return library.presets[0];
+  }
+}
+
+function loadTranscript(jobId: string): Segment[] {
+  try {
+    const transcriptPath = artifactService.transcriptionPath(jobId);
+    if (!transcriptPath || !artifactService.artifactExists(transcriptPath)) return [];
+    const parsed = artifactService.readJsonArtifact<Segment[]>(transcriptPath);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn("[rendering] Transcrição indisponível para as legendas.", error);
+    return [];
+  }
+}
+
 export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
   const videoPath = artifactService.findSourceVideo(jobId);
   if (!videoPath) {
@@ -80,5 +112,7 @@ export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
     shortsDir,
     ffmpegConfig,
     concurrency,
+    preset: loadActiveShortPreset(),
+    segments: loadTranscript(jobId),
   };
 }

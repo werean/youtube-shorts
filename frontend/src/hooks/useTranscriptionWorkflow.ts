@@ -5,7 +5,7 @@ import type { Segment } from "../types";
 import { getTranscriptionContent, type VideoItem } from "../utils/videoHelpers";
 
 type TranscriptionFormat = "text" | "vtt" | "segments";
-type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
+type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<T | undefined>;
 type UpdateVideo = (jobId: string, updates: Partial<VideoItem>) => void;
 
 interface UseTranscriptionWorkflowOptions {

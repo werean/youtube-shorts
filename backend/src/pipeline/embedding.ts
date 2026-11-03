@@ -3,6 +3,7 @@
  */
 
 import { config } from "../core/config";
+import { optionsForModel } from "../llm/localRuntime";
 import { SemanticBlock } from "../models/semantic_block";
 import { continuesSentence } from "./sentence";
 
@@ -18,6 +19,7 @@ const EMBEDDING_BATCH_SIZE = 48;
  */
 async function fetchEmbeddingBatch(texts: string[], model: string): Promise<number[][]> {
   const baseUrl = config.OLLAMA_BASE_URL.replace(/\/$/, "");
+  const runtimeOptions = optionsForModel(model);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.OLLAMA_TIMEOUT_SECONDS * 1000);
   let response: Response;
@@ -31,6 +33,7 @@ async function fetchEmbeddingBatch(texts: string[], model: string): Promise<numb
       body: JSON.stringify({
         model,
         input: texts,
+        ...(runtimeOptions ? { options: runtimeOptions } : {}),
       }),
       signal: controller.signal,
     });
