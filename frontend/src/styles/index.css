@@ -18,6 +18,7 @@
 
 /* Responsive */
 @import "./media.css";
+@import "./workspace.css";
 
 @tailwind base;
 @tailwind components;

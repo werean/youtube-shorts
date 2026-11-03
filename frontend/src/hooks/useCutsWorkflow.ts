@@ -4,7 +4,7 @@ import { saveSettings, type AppSettings } from "../api/config";
 import type { Cut } from "../types";
 
 type CutHoverAction = "edit" | "delete";
-type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
+type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<T | undefined>;
 
 interface UseCutsWorkflowOptions {
   activeJobId: string | null;

@@ -1,3 +1,5 @@
+import type { StyleLibrary } from "./stylePresets";
+
 export type JobStatus =
   | "CREATED"
   | "DOWNLOADING"
@@ -90,6 +92,8 @@ export interface AppSettings {
   llm: {
     model: string;
   };
+  /** Vertical short presets. Optional so older settings files still load. */
+  style_library?: StyleLibrary;
 }
 
 export interface InstallationGuide {

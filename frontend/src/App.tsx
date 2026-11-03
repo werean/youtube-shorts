@@ -23,6 +23,8 @@ import {
   listVideos,
   renameVideo,
   updateCuts,
+  listCuts,
+  openVideoFolder,
   uploadVideoFile,
   getSettings,
   saveSettings,
@@ -43,25 +45,23 @@ import { useBatchPipelineWorkflow } from "./hooks/useBatchPipelineWorkflow";
 import { WhisperConfigDialog } from "./components/dialogs/WhisperConfigDialog";
 import { FFmpegConfigDialog } from "./components/dialogs/FFmpegConfigDialog";
 import { InstallationInstructionsDialog } from "./components/dialogs/InstallationInstructionsDialog";
-import { ConfigurationSection } from "./components/ConfigurationSection";
 import { AppSupportDialogs } from "./components/app/AppSupportDialogs";
 import { BatchPipelineControls } from "./components/app/BatchPipelineControls";
 import { CutTimestampDialogs } from "./components/app/CutTimestampDialogs";
-import { SelectedVideoWorkspace } from "./components/app/SelectedVideoWorkspace";
 import { TranscriptionDialogs } from "./components/app/TranscriptionDialogs";
 import { DependenciesDialog } from "./components/dialogs/DependenciesDialog";
 import { LLMConfigDialog } from "./components/dialogs/LLMConfigDialog";
 import { ConfigureAppDialog } from "./components/dialogs/ConfigureAppDialog";
 import { SimpleDialogs } from "./components/dialogs/SimpleDialogs";
-import { RenderingSection } from "./components/RenderingSection";
-import { UploadSection } from "./components/UploadSection";
-import { VideoListSection } from "./components/VideoListSection";
 import { BlocksDialog } from "./components/dialogs/BlocksDialog";
 import { AiResponseDialog } from "./components/dialogs/AiResponseDialog";
 import { RegenerateAnalyzeDialog } from "./components/dialogs/RegenerateAnalyzeDialog";
 import { AppDialog } from "./components/shared";
 import { formatTimestamp, parseTimestampInput } from "./utils/formatters";
 import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
+import { useShortStyleLibrary } from "./hooks/useShortStyleLibrary";
+import { GlassWorkspace, type StageSelection } from "./components/workspace/GlassWorkspace";
+import type { Cut } from "./types";
 
 interface ActionState {
   busy: boolean;
@@ -155,7 +155,12 @@ export default function App() {
   const [expandIngestLogs, setExpandIngestLogs] = useState(false);
   const [ingestJobId, setIngestJobId] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+  const [uploadTick, setUploadTick] = useState(0);
+  const pendingStagesRef = useRef<StageSelection | null>(null);
+  const uploadingBatchRef = useRef(false);
+  const renderAfterSyncRef = useRef(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const styleLibraryApi = useShortStyleLibrary(appSettings, setAppSettings);
   const [configBaseDir, setConfigBaseDir] = useState<string>("");
   const [configDownloadResolution, setConfigDownloadResolution] = useState<
     "1080p" | "1440p" | "4k"
@@ -414,6 +419,7 @@ export default function App() {
       console.log(`[App] Ação completada com sucesso`);
       onSuccess?.(result);
       setAction({ busy: false });
+      return result;
     } catch (error: any) {
       console.error(`[App] Erro na ação:`, error);
       console.error(`[App] Mensagem:`, error.message);
@@ -421,6 +427,7 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
       console.error(`[App] Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
+      return undefined;
     }
   }
 
@@ -666,18 +673,19 @@ export default function App() {
     }
   }, [showAiResponseOnAnalyze, aiResponseRaw]);
 
-  function startUploadSelectedFiles() {
+  async function startUploadSelectedFiles() {
     if (selectedFiles.length === 0) return;
 
     console.log(`\n[UI] Botão "Upload de arquivos" clicado`);
     console.log(`[UI] Arquivos: ${selectedFiles.length}`);
 
-    // Upload all files sequentially
-    const uploadSequentially = async () => {
+    uploadingBatchRef.current = true;
+    let lastUploadedId: string | null = null;
+    try {
       for (const file of selectedFiles) {
         try {
-          await new Promise<void>((resolve, reject) => {
-            runAction(
+          await new Promise<void>((resolve) => {
+            void runAction(
               () => uploadVideoFile(file),
               (result) => {
                 console.log(`[UI] Upload completado: ${result.job.job_id}`);
@@ -688,9 +696,10 @@ export default function App() {
                 };
                 setVideos((current) => [newVideo, ...current]);
                 setActiveVideoId(result.job.job_id);
+                lastUploadedId = result.job.job_id;
                 resolve();
               },
-            );
+            ).finally(() => resolve());
           });
         } catch (error) {
           console.error(`[UI] Erro ao fazer upload de ${file.name}:`, error);
@@ -700,10 +709,12 @@ export default function App() {
       setSelectedFiles([]);
       const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
       if (fileInput) fileInput.value = "";
-      loadVideos();
-    };
-
-    uploadSequentially();
+      await loadVideos();
+    } finally {
+      uploadingBatchRef.current = false;
+      if (!lastUploadedId) pendingStagesRef.current = null;
+      setUploadTick((tick) => tick + 1);
+    }
   }
 
   async function handleMoveUploadDecision(moveUploads: boolean) {
@@ -914,292 +925,321 @@ export default function App() {
     return () => video.removeEventListener("timeupdate", handleTimeUpdate);
   }, [selectedSuggestedCutId, suggestedCuts]);
 
+  async function commitCutChange(
+    cutId: string,
+    changes: Partial<Pick<Cut, "start" | "end" | "title">>,
+  ) {
+    if (!activeVideo) return;
+    const source = cuts.length > 0 ? cuts : suggestedCuts;
+    const current = source.find((cut) => cut.cut_id === cutId);
+    if (!current) return;
+    const nextCut = { ...current, ...changes };
+    if (typeof nextCut.title === "string") {
+      nextCut.title = nextCut.title.trim() || null;
+    }
+    if (nextCut.end <= nextCut.start) {
+      setAction({ busy: false, error: "O fim do corte precisa ser depois do início." });
+      return;
+    }
+    const mapCuts = (list: Cut[]) =>
+      list.map((cut) => (cut.cut_id === cutId ? nextCut : cut));
+    const nextCuts = mapCuts(source);
+    const nextSuggested = mapCuts(suggestedCuts.length > 0 ? suggestedCuts : source);
+    setCuts(nextCuts);
+    setSuggestedCuts(nextSuggested);
+    setSelectedSuggestedCutId(cutId);
+    if (typeof changes.start === "number" && videoRef.current) {
+      videoRef.current.currentTime = changes.start;
+    }
+    try {
+      await updateCuts(activeVideo.job.job_id, nextCuts);
+    } catch (error) {
+      console.error("Failed to update cuts:", error);
+      setAction({ busy: false, error: "Não foi possível salvar o corte." });
+    }
+  }
+
+  async function runSelectedStages(stages: StageSelection) {
+    const video = activeVideo;
+    if (!video) {
+      setAction({ busy: false, error: "Selecione ou adicione um vídeo antes de iniciar." });
+      return;
+    }
+    const jobId = video.job.job_id;
+    const validation = canStartOperation(jobId);
+    if (!validation.allowed) {
+      alert(validation.message);
+      return;
+    }
+    if (!stages.transcribe && !stages.blocks && !stages.analyze && !stages.render) return;
+
+    if (stages.transcribe) {
+      if (hasAnyTranscription) {
+        requestTranscriptionStart();
+        return;
+      }
+      const transcribed = await requestTranscriptionStart();
+      if (transcribed === undefined) return;
+    }
+
+    if (stages.blocks) {
+      const value = await runAction(() => buildBlocks(jobId));
+      if (!value) return;
+      setBlocks(value);
+      setShowBlocksDialog(true);
+      void refreshVideo(jobId);
+    }
+
+    if (stages.analyze) {
+      if (suggestedCuts.length > 0) {
+        setShowRegenerateAnalyzeDialog(true);
+        return;
+      }
+      setIsAnalyzing(true);
+      const value = await runAction(async () => {
+        try {
+          return await analyzeJob(jobId);
+        } finally {
+          setIsAnalyzing(false);
+        }
+      });
+      if (!value) return;
+      handleAnalyzeResult(value);
+    }
+
+    if (stages.render) {
+      if (stages.transcribe || stages.blocks || stages.analyze) {
+        const latest = await listCuts(jobId);
+        if (latest.length === 0) {
+          setAction({ busy: false, error: "Não há cortes para renderizar." });
+          return;
+        }
+        setCuts(latest);
+        setSuggestedCuts(latest);
+        renderAfterSyncRef.current = true;
+        return;
+      }
+      if (cuts.length === 0) {
+        setAction({ busy: false, error: "Não há cortes para renderizar." });
+        return;
+      }
+      await startRenderFlow();
+    }
+  }
+
+  useEffect(() => {
+    if (!renderAfterSyncRef.current || cuts.length === 0) return;
+    renderAfterSyncRef.current = false;
+    void startRenderFlow();
+  }, [cuts]);
+
+  useEffect(() => {
+    if (uploadingBatchRef.current || isIngesting || action.busy) return;
+    if (!pendingStagesRef.current || !activeVideo) return;
+    const stages = pendingStagesRef.current;
+    pendingStagesRef.current = null;
+    void runSelectedStages(stages);
+  }, [activeVideo?.job.job_id, action.busy, isIngesting, uploadTick]);
+
+  async function handleIniciar(stages: StageSelection) {
+    const wantsStages = stages.transcribe || stages.blocks || stages.analyze || stages.render;
+    if (wantsStages) pendingStagesRef.current = stages;
+
+    if (uploadMode === "url" && youtubeUrl.trim()) {
+      try {
+        setAction({ busy: true });
+        setIsIngesting(true);
+        const job = await createJob(youtubeUrl.trim());
+        setYoutubeUrl("");
+        setIngestJobId(job.job_id);
+        const ingestResult = await ingestJob(job.job_id);
+        const updatedJob = await getJob(job.job_id);
+        const title = String(updatedJob?.video_name ?? updatedJob?.source_file_name ?? "").trim();
+        const videoPath = String(ingestResult?.video_path ?? "").trim();
+        if (title && videoPath) {
+          upsertVideoIntoList({
+            job: { ...updatedJob, video_name: title },
+            transcriptionLogs: [],
+            videoPath,
+          });
+        }
+        setAction({ busy: false });
+        setUploadTick((tick) => tick + 1);
+      } catch (error) {
+        pendingStagesRef.current = null;
+        const message = error instanceof Error ? error.message : "Falha ao adicionar o vídeo.";
+        setAction({ busy: false, error: message });
+      } finally {
+        setIsIngesting(false);
+      }
+      return;
+    }
+
+    if (uploadMode === "file" && selectedFiles.length > 0) {
+      const shouldAsk = appSettings?.preferences?.ask_move_on_upload ?? true;
+      if (shouldAsk) {
+        setDontAskMoveUpload(false);
+        setShowMoveUploadDialog(true);
+        return;
+      }
+      await startUploadSelectedFiles();
+      return;
+    }
+
+    pendingStagesRef.current = null;
+    await runSelectedStages(stages);
+  }
+
+  async function renderWithPreset() {
+    const validation = activeVideo ? canStartOperation(activeVideo.job.job_id) : { allowed: false, message: "Selecione um vídeo." };
+    if (!validation.allowed) {
+      alert(validation.message);
+      return;
+    }
+    const preset = styleLibraryApi.activePreset;
+    const videoFilter = preset?.ffmpegVideoFilter.trim();
+    const audioFilter = preset?.ffmpegAudioFilter.trim();
+    if (videoFilter || audioFilter) {
+      try {
+        const response = await saveToolConfigs({
+          ffmpeg: {
+            ...(videoFilter ? { video_filter: videoFilter } : {}),
+            ...(audioFilter ? { audio_filter: audioFilter } : {}),
+          } as FFmpegConfig,
+        });
+        applyToolConfigs(response);
+      } catch (error) {
+        console.error("[style] Falha ao aplicar filtro do preset:", error);
+        setAction({ busy: false, error: "Não foi possível aplicar o filtro do preset." });
+        return;
+      }
+    }
+    return startRenderFlow();
+  }
+
   return (
-    <div className="page">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">YouTube Shorts MVP</p>
-          <h1>Pipeline local</h1>
-          <p className="sub">
-            Interface leve para orquestrar ingestão, transcrição, análise e renderização.
-          </p>
-        </div>
-      </header>
-
-      {/* Configurações */}
-      <ConfigurationSection
-        onConfigureApp={() => setShowConfigureAppDialog(true)}
-        onManageDependencies={async () => {
-          setShowDependenciesDialog(true);
-          await prepareDependenciesDialog();
-        }}
-        onConfigureLLM={() => {
-          setShowLLMConfigDialog(true);
-          void refreshOllamaModelOptions(false);
-        }}
-        onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
-        onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
-        onShowHowToUse={() => setShowHowToUseDialog(true)}
-      />
-
-      {/* 1. Upload Section */}
-      <UploadSection
-        action={action}
-        onVideoAdded={(video) => {
-          upsertVideoIntoList(video);
-        }}
-        onLoadVideos={loadVideos}
-        appSettings={appSettings}
-        onShowMoveUploadDialog={() => {
-          setDontAskMoveUpload(false);
-          setShowMoveUploadDialog(true);
-        }}
-        isExpanded={expandUploadSection}
-        onToggle={() => setExpandUploadSection((current) => !current)}
-      />
-
-      {/* 2. Video List */}
-      <VideoListSection
+    <>
+      <GlassWorkspace
+        uploadMode={uploadMode}
+        youtubeUrl={youtubeUrl}
+        selectedFiles={selectedFiles}
+        isDraggingFile={isDraggingFile}
+        onUploadMode={setUploadMode}
+        onYoutubeUrl={setYoutubeUrl}
+        onSelectedFiles={setSelectedFiles}
+        onDraggingFile={setIsDraggingFile}
         videos={videos}
         archivedVideos={archivedVideos}
         activeVideoId={activeVideoId}
+        activeVideo={activeVideo}
         videoView={videoView}
-        action={action}
         onSelectVideo={(videoId) => {
           if (videoId === null) {
-            console.log(`[UI] Vídeo desmarcado`);
             setActiveVideoId(null);
-          } else {
-            const validation = canStartOperation(videoId);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-            const video = videos.find((v) => v.job.job_id === videoId);
-            console.log(`\n[UI] Vídeo selecionado:`);
-            console.log(`[UI]   Job ID: ${videoId}`);
-            console.log(`[UI]   Video Path: ${video?.videoPath}`);
-            console.log(`[UI]   Status: ${video?.job.status}`);
-            console.log(`[UI]   URL completa: ${apiBaseUrl}${video?.videoPath}`);
-            setActiveVideoId(videoId);
+            return;
           }
+          const validation = canStartOperation(videoId);
+          if (!validation.allowed) {
+            alert(validation.message);
+            return;
+          }
+          setActiveVideoId(videoId);
         }}
         onSetView={setView}
-        onLoadVideos={loadVideos}
-        onShowRenameDialog={(videoId, currentName) => {
-          setRenameVideoId(videoId);
-          setRenameVideoNewName(currentName);
+        onOpenFolder={(videoId) => {
+          void runAction(() => openVideoFolder(videoId));
         }}
-        onRunAction={runAction}
-        isExpanded={expandVideoListSection}
-        onToggle={() => setExpandVideoListSection((current) => !current)}
-      />
-      {/* 3. Video Player */}
-      {activeVideo && (
-        <SelectedVideoWorkspace
-          activeVideo={activeVideo}
-          videoRef={videoRef}
-          taskLogsContainerRef={taskLogsContainerRef}
-          apiBaseUrl={apiBaseUrl}
-          isExpanded={expandVideoPlayerSection}
-          onToggleExpanded={() => setExpandVideoPlayerSection(!expandVideoPlayerSection)}
-          action={action}
-          isBatchProcessing={isBatchProcessing}
-          batchProcessingLogs={batchProcessingLogs}
-          activeTaskLogType={activeTaskLogType}
-          activeTaskLogs={activeTaskLogs}
-          expandTaskLogs={expandTaskLogs}
-          onShowMoreTaskLogs={showMoreTaskLogs}
-          onCancelTranscription={cancelActiveTranscription}
-          onCancelRendering={cancelActiveRendering}
-          hasAnyTranscription={hasAnyTranscription}
-          hasAnyBlocks={hasAnyBlocks}
-          isAnalyzing={isAnalyzing}
-          isRendering={isRendering}
-          cuts={cuts}
-          suggestedCuts={suggestedCuts}
-          selectedSuggestedCutId={selectedSuggestedCutId}
-          hoveredCutId={hoveredCutId}
-          hoveredCutAction={hoveredCutAction}
-          renderOutputs={renderOutputs}
-          expectedRenderCount={expectedRenderCount}
-          showAiResponseOnAnalyze={showAiResponseOnAnalyze}
-          isLoadingCuts={isLoadingCuts}
-          showContinueBatchPipeline={batchWaitingForApproval && Boolean(activeBatchId)}
-          onTranscribeClick={() => {
-            const validation = canStartOperation(activeVideo.job.job_id);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-
-            return requestTranscriptionStart();
-          }}
-          onShowTranscriptionFormats={openTranscriptionFormatList}
-          onBuildBlocksClick={() =>
-            runAction(
-              () => buildBlocks(activeVideo.job.job_id),
-              (value) => {
-                setBlocks(value);
-                setShowBlocksDialog(true);
-                refreshVideo(activeVideo.job.job_id);
-              },
-            )
-          }
-          onAnalyzeClick={() => {
-            if (suggestedCuts.length > 0) {
-              setShowRegenerateAnalyzeDialog(true);
-              return;
-            }
-
-            runAction(
-              async () => {
-                setIsAnalyzing(true);
-                try {
-                  return await analyzeJob(activeVideo.job.job_id);
-                } finally {
-                  setIsAnalyzing(false);
-                }
-              },
-              (value) => handleAnalyzeResult(value),
-            );
-          }}
-          onRenderClick={() => {
-            const validation = canStartOperation(activeVideo.job.job_id);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-
-            return startRenderFlow();
-          }}
-          onAddManualCutClick={openAddManualCutDialog}
-          onBatchPipelineClick={openBatchPipelineDialog}
-          onContinueBatchPipeline={continueActiveBatchPipeline}
-          onShowAiResponseOnAnalyzeChange={(show) => setShowAiResponseOnAnalyze(show)}
-          onSelectSuggestedCut={selectSuggestedCut}
-          onEditSuggestedCut={openEditCutDialog}
-          onDeleteSuggestedCut={requestDeleteSuggestedCut}
-          onCutActionHover={setCutActionHover}
-          onCutActionLeave={clearCutActionHover}
-        />
-      )}
-      <AppSupportDialogs
-        showTranscriptionRegenerateConfirmDialog={showTranscriptionRegenerateConfirmDialog}
-        showDeleteCutConfirmDialog={showDeleteCutConfirmDialog}
-        showHowToUseDialog={showHowToUseDialog}
-        dontAskDeleteCutAgain={dontAskDeleteCutAgain}
-        onCloseTranscriptionRegenerateConfirm={() =>
-          closeTranscriptionRegenerateConfirm()
-        }
-        onConfirmTranscriptionRegenerate={() => void confirmTranscriptionRegenerate()}
-        onCloseDeleteCutConfirm={closeDeleteCutConfirmDialog}
-        onConfirmDeleteCut={() => void confirmDeleteSuggestedCut()}
-        onDontAskDeleteCutAgainChange={setDontAskDeleteCutAgain}
-        onCloseHowToUse={() => setShowHowToUseDialog(false)}
-      />
-
-      <TranscriptionDialogs
-        showTranscriptionFormatListDialog={showTranscriptionFormatListDialog}
-        showTranscriptionContentDialog={showTranscriptionContentDialog}
-        showTranscriptionDeleteDialog={showTranscriptionDeleteDialog}
-        hasActiveVideo={Boolean(activeVideo)}
-        activeVideoHasText={activeVideoHasText}
-        activeVideoHasVtt={activeVideoHasVtt}
-        activeVideoHasSegments={activeVideoHasSegments}
-        deletingTranscription={action.busy}
-        transcriptionContent={transcriptionContent}
-        selectedTranscriptionFormat={selectedTranscriptionFormat}
-        pendingDeleteFormat={pendingDeleteFormat}
-        action={action}
-        onSelectFormat={selectTranscriptionFormat}
-        onDeleteAll={deleteAllTranscriptionFormats}
-        onCloseFormatList={closeTranscriptionFormatList}
-        onCloseContent={closeTranscriptionContent}
-        onRequestDeleteFormat={requestDeleteTranscriptionFormat}
-        onCancelDelete={cancelDeleteTranscriptionFormat}
-        onConfirmDelete={confirmDeleteTranscriptionFormat}
-      />
-
-      {/* Blocks Dialog */}
-      {showBlocksDialog && blocks.length > 0 && (
-        <BlocksDialog blocks={blocks} onClose={() => setShowBlocksDialog(false)} />
-      )}
-
-      {/* AI Response Dialog */}
-      {showAiResponseDialog && aiResponseRaw && (
-        <AiResponseDialog
-          aiResponseRaw={aiResponseRaw}
-          onClose={() => setShowAiResponseDialog(false)}
-        />
-      )}
-
-      {/* Regenerate Analyze Dialog */}
-      {showRegenerateAnalyzeDialog && suggestedCuts.length > 0 && activeVideo && (
-        <RegenerateAnalyzeDialog
-          suggestedCuts={suggestedCuts}
-          action={{ busy: isAnalyzing }}
-          onCancel={() => setShowRegenerateAnalyzeDialog(false)}
-          onMaintainSelected={(keptCutIds) => {
-            const keptCuts = suggestedCuts.filter((cut) => keptCutIds.includes(cut.cut_id));
-            setShowRegenerateAnalyzeDialog(false);
-            runAction(
-              async () => {
-                setIsAnalyzing(true);
-                try {
-                  return await analyzeJob(activeVideo.job.job_id);
-                } finally {
-                  setIsAnalyzing(false);
-                }
-              },
-              (value) => handleAnalyzeResult(value, keptCuts),
-            );
-          }}
-          onRegenerateAll={() => {
-            setShowRegenerateAnalyzeDialog(false);
-            runAction(
-              async () => {
-                setIsAnalyzing(true);
-                try {
-                  return await analyzeJob(activeVideo.job.job_id);
-                } finally {
-                  setIsAnalyzing(false);
-                }
-              },
-              (value) => handleAnalyzeResult(value),
-            );
-          }}
-        />
-      )}
-
-      <CutTimestampDialogs
-        showCutEditDialog={showCutEditDialog}
-        editingCutId={editingCutId}
-        editCutStartMinutes={editCutStartMinutes}
-        editCutStartSeconds={editCutStartSeconds}
-        editCutEndMinutes={editCutEndMinutes}
-        editCutEndSeconds={editCutEndSeconds}
-        showAddManualCutDialog={showAddManualCutDialog}
-        onCloseEditCutDialog={closeEditCutDialog}
-        onSaveEditedCut={saveEditedCutTimestamps}
-        onCloseAddManualCutDialog={closeAddManualCutDialog}
-        onSaveManualCut={saveManualCutTimestamps}
-      />
-
-      {/* 4. Rendering Section */}
-      <RenderingSection
-        isLoadingRenderOutputs={isLoadingRenderOutputs}
+        onRename={(videoId, name) => {
+          setRenameVideoId(videoId);
+          setRenameVideoNewName(name);
+        }}
+        onArchive={(videoId) => {
+          void runAction(
+            () => archiveVideo(videoId),
+            () => {
+              if (activeVideoId === videoId) setActiveVideoId(null);
+              void loadVideos();
+            },
+          );
+        }}
+        onDelete={(videoId) => {
+          void runAction(
+            () => deleteVideo(videoId),
+            () => {
+              if (activeVideoId === videoId) setActiveVideoId(null);
+              void loadVideos();
+            },
+          );
+        }}
+        onStart={(stages) => {
+          void handleIniciar(stages);
+        }}
+        busy={action.busy || isIngesting}
+        videoRef={videoRef}
+        apiBaseUrl={apiBaseUrl}
+        suggestedCuts={suggestedCuts}
+        selectedSuggestedCutId={selectedSuggestedCutId}
+        onSelectCut={selectSuggestedCut}
+        onAdjustCut={openEditCutDialog}
+        onCommitCut={(cutId, changes) => {
+          void commitCutChange(cutId, changes);
+        }}
+        onRender={() => {
+          void renderWithPreset();
+        }}
         isRendering={isRendering}
         renderOutputs={renderOutputs}
         renderTitlesByFileName={renderTitlesByFileName}
-        buildRenderUrl={buildRenderUrl}
-        onOpenRenderFolder={openRenderOutputFolder}
-        onDeleteRender={deleteRenderOutputFile}
-        isExpanded={expandRenderingSection}
-        onToggle={() => setExpandRenderingSection((current) => !current)}
+        onOpenRenderFolder={(fileName) => {
+          void openRenderOutputFolder(fileName);
+        }}
+        onDeleteRender={(fileName) => {
+          void deleteRenderOutputFile(fileName);
+        }}
+        onOpenSettings={(which) => {
+          if (which === "app") setShowConfigureAppDialog(true);
+          if (which === "deps") {
+            setShowDependenciesDialog(true);
+            void prepareDependenciesDialog();
+          }
+          if (which === "llm") {
+            setShowLLMConfigDialog(true);
+            void refreshOllamaModelOptions(false);
+          }
+          if (which === "whisper") setShowWhisperConfigDialog(true);
+          if (which === "ffmpeg") setShowFFmpegConfigDialog(true);
+          if (which === "help") setShowHowToUseDialog(true);
+        }}
+        onShowTranscription={openTranscriptionFormatList}
+        onAddManualCut={openAddManualCutDialog}
+        onBatch={openBatchPipelineDialog}
+        showContinueBatch={batchWaitingForApproval && Boolean(activeBatchId)}
+        onContinueBatch={() => {
+          void continueActiveBatchPipeline();
+        }}
+        batchLogs={batchProcessingLogs}
+        taskLogsContainerRef={taskLogsContainerRef}
+        activeTaskLogType={activeTaskLogType}
+        activeTaskLogs={activeTaskLogs}
+        expandTaskLogs={expandTaskLogs}
+        onShowMoreTaskLogs={showMoreTaskLogs}
+        onCancelTranscription={() => {
+          void cancelActiveTranscription();
+        }}
+        onCancelRendering={() => {
+          void cancelActiveRendering();
+        }}
+        isTranscribing={Boolean(activeVideo?.isTranscribing)}
+        styleLibrary={styleLibraryApi.library}
+        activePreset={styleLibraryApi.activePreset}
+        onSelectPreset={styleLibraryApi.selectPreset}
+        onUpdatePreset={styleLibraryApi.updateActive}
+        onCreatePreset={styleLibraryApi.createPreset}
+        onDuplicatePreset={styleLibraryApi.duplicateActive}
+        onRemovePreset={styleLibraryApi.removeActive}
+        onResetPreset={styleLibraryApi.resetActiveBuiltin}
+        onAddExtra={styleLibraryApi.addExtra}
+        onRemoveExtra={styleLibraryApi.removeExtra}
       />
 
       {/* LLM Config Dialog */}
@@ -1374,6 +1414,6 @@ export default function App() {
       />
 
       {action.error && <div className="toast error">{action.error}</div>}
-    </div>
+    </>
   );
 }

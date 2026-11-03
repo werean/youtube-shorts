@@ -12,7 +12,7 @@ import type { Cut } from "../types";
 import { buildRenderUrl as buildRenderUrlUtil } from "../utils/formatters";
 import type { VideoItem } from "../utils/videoHelpers";
 
-type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
+type RunAction = <T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<T | undefined>;
 type UpdateVideo = (jobId: string, updates: Partial<VideoItem>) => void;
 
 interface UseRenderingWorkflowOptions {
