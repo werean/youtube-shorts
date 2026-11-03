@@ -184,7 +184,12 @@ export function GlassWorkspace(props: GlassWorkspaceProps) {
 
   const settingsAnchor = (
     <div style={{ position: "relative" }}>
-      <button type="button" className="corte-settings" onClick={() => setSettingsOpen((open) => !open)}>
+      <button
+        id="corte-settings"
+        type="button"
+        className="corte-settings"
+        onClick={() => setSettingsOpen((open) => !open)}
+      >
         <span className="material-icons corte-icon">settings</span>
         Configurações
       </button>

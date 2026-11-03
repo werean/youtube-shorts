@@ -28,6 +28,7 @@ import {
   uploadVideoFile,
   getSettings,
   saveSettings,
+  getDependencies,
   getToolConfigs,
   getOllamaModels,
   registerOllamaModel,
@@ -143,6 +144,8 @@ export default function App() {
   const [ollamaLocalAvailable, setOllamaLocalAvailable] = useState(false);
   const [ollamaRemoteAvailable, setOllamaRemoteAvailable] = useState(false);
   const [llmSystemPrompt, setLlmSystemPrompt] = useState<string>("");
+  const [llmForceCpu, setLlmForceCpu] = useState(false);
+  const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null);
   const [whisperDevice, setWhisperDevice] = useState<"cpu" | "cuda">("cuda");
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
   const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
@@ -764,6 +767,16 @@ export default function App() {
     setRegisteredEmbeddingModels(Array.from(embeddingModelSet));
     setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
     setLlmSystemPrompt(active.llm.system_prompt || "");
+    setLlmForceCpu(active.llm.force_cpu === true);
+  }
+
+  async function refreshGpuAvailability() {
+    try {
+      const snapshot = await getDependencies();
+      setGpuAvailable(snapshot.dependencies.cuda?.installed === true);
+    } catch (error) {
+      console.error("[UI] Não foi possível detectar a GPU:", error);
+    }
   }
 
   async function saveWhisperConfig(config: Partial<WhisperConfig>) {
@@ -792,6 +805,7 @@ export default function App() {
     prompt: string,
     nextEmbeddingModel: string,
     nextRegisteredEmbeddingModels: string[],
+    forceCpu: boolean,
   ) {
     try {
       const response = await saveToolConfigs({
@@ -800,6 +814,7 @@ export default function App() {
           system_prompt: prompt,
           embedding_model: nextEmbeddingModel,
           registered_embedding_models: nextRegisteredEmbeddingModels,
+          force_cpu: forceCpu,
         },
       });
       applyToolConfigs(response);
@@ -874,6 +889,7 @@ export default function App() {
         const toolConfigs = await getToolConfigs();
         applyToolConfigs(toolConfigs);
         await refreshOllamaModelOptions(false);
+        void refreshGpuAvailability();
       } catch (error) {
         console.error("Failed to load tool configs:", error);
       }
@@ -1205,8 +1221,12 @@ export default function App() {
           if (which === "llm") {
             setShowLLMConfigDialog(true);
             void refreshOllamaModelOptions(false);
+            void refreshGpuAvailability();
           }
-          if (which === "whisper") setShowWhisperConfigDialog(true);
+          if (which === "whisper") {
+            setShowWhisperConfigDialog(true);
+            void refreshGpuAvailability();
+          }
           if (which === "ffmpeg") setShowFFmpegConfigDialog(true);
           if (which === "help") setShowHowToUseDialog(true);
         }}
@@ -1242,6 +1262,103 @@ export default function App() {
         onRemoveExtra={styleLibraryApi.removeExtra}
       />
 
+      <AppSupportDialogs
+        showTranscriptionRegenerateConfirmDialog={showTranscriptionRegenerateConfirmDialog}
+        showDeleteCutConfirmDialog={showDeleteCutConfirmDialog}
+        showHowToUseDialog={showHowToUseDialog}
+        dontAskDeleteCutAgain={dontAskDeleteCutAgain}
+        onCloseTranscriptionRegenerateConfirm={() => closeTranscriptionRegenerateConfirm()}
+        onConfirmTranscriptionRegenerate={() => void confirmTranscriptionRegenerate()}
+        onCloseDeleteCutConfirm={closeDeleteCutConfirmDialog}
+        onConfirmDeleteCut={() => void confirmDeleteSuggestedCut()}
+        onDontAskDeleteCutAgainChange={setDontAskDeleteCutAgain}
+        onCloseHowToUse={() => setShowHowToUseDialog(false)}
+      />
+
+      <TranscriptionDialogs
+        showTranscriptionFormatListDialog={showTranscriptionFormatListDialog}
+        showTranscriptionContentDialog={showTranscriptionContentDialog}
+        showTranscriptionDeleteDialog={showTranscriptionDeleteDialog}
+        hasActiveVideo={Boolean(activeVideo)}
+        activeVideoHasText={activeVideoHasText}
+        activeVideoHasVtt={activeVideoHasVtt}
+        activeVideoHasSegments={activeVideoHasSegments}
+        deletingTranscription={action.busy}
+        transcriptionContent={transcriptionContent}
+        selectedTranscriptionFormat={selectedTranscriptionFormat}
+        pendingDeleteFormat={pendingDeleteFormat}
+        action={action}
+        onSelectFormat={selectTranscriptionFormat}
+        onDeleteAll={deleteAllTranscriptionFormats}
+        onCloseFormatList={closeTranscriptionFormatList}
+        onCloseContent={closeTranscriptionContent}
+        onRequestDeleteFormat={requestDeleteTranscriptionFormat}
+        onCancelDelete={cancelDeleteTranscriptionFormat}
+        onConfirmDelete={confirmDeleteTranscriptionFormat}
+      />
+
+      {showBlocksDialog && blocks.length > 0 && (
+        <BlocksDialog blocks={blocks} onClose={() => setShowBlocksDialog(false)} />
+      )}
+
+      {showAiResponseDialog && aiResponseRaw && (
+        <AiResponseDialog
+          aiResponseRaw={aiResponseRaw}
+          onClose={() => setShowAiResponseDialog(false)}
+        />
+      )}
+
+      {showRegenerateAnalyzeDialog && suggestedCuts.length > 0 && activeVideo && (
+        <RegenerateAnalyzeDialog
+          suggestedCuts={suggestedCuts}
+          action={{ busy: isAnalyzing }}
+          onCancel={() => setShowRegenerateAnalyzeDialog(false)}
+          onMaintainSelected={(keptCutIds) => {
+            const keptCuts = suggestedCuts.filter((cut) => keptCutIds.includes(cut.cut_id));
+            setShowRegenerateAnalyzeDialog(false);
+            runAction(
+              async () => {
+                setIsAnalyzing(true);
+                try {
+                  return await analyzeJob(activeVideo.job.job_id);
+                } finally {
+                  setIsAnalyzing(false);
+                }
+              },
+              (value) => handleAnalyzeResult(value, keptCuts),
+            );
+          }}
+          onRegenerateAll={() => {
+            setShowRegenerateAnalyzeDialog(false);
+            runAction(
+              async () => {
+                setIsAnalyzing(true);
+                try {
+                  return await analyzeJob(activeVideo.job.job_id);
+                } finally {
+                  setIsAnalyzing(false);
+                }
+              },
+              (value) => handleAnalyzeResult(value),
+            );
+          }}
+        />
+      )}
+
+      <CutTimestampDialogs
+        showCutEditDialog={showCutEditDialog}
+        editingCutId={editingCutId}
+        editCutStartMinutes={editCutStartMinutes}
+        editCutStartSeconds={editCutStartSeconds}
+        editCutEndMinutes={editCutEndMinutes}
+        editCutEndSeconds={editCutEndSeconds}
+        showAddManualCutDialog={showAddManualCutDialog}
+        onCloseEditCutDialog={closeEditCutDialog}
+        onSaveEditedCut={saveEditedCutTimestamps}
+        onCloseAddManualCutDialog={closeAddManualCutDialog}
+        onSaveManualCut={saveManualCutTimestamps}
+      />
+
       {/* LLM Config Dialog */}
       {showLLMConfigDialog && (
         <LLMConfigDialog
@@ -1253,16 +1370,25 @@ export default function App() {
           localAvailable={ollamaLocalAvailable}
           remoteAvailable={ollamaRemoteAvailable}
           llmSystemPrompt={llmSystemPrompt}
+          forceCpu={llmForceCpu}
+          gpuAvailable={gpuAvailable}
           action={action}
           onRegisterModel={registerNewOllamaModel}
           onRemoveModel={removeRegisteredOllamaModel}
           onRefreshModels={() => refreshOllamaModelOptions(true)}
-          onSave={(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels) => {
+          onSave={(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels, forceCpu) => {
             setLlmModel(model);
             setLlmSystemPrompt(prompt);
             setEmbeddingModel(nextEmbeddingModel);
             setRegisteredEmbeddingModels(nextRegisteredEmbeddingModels);
-            void saveLLMConfig(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels);
+            setLlmForceCpu(forceCpu);
+            void saveLLMConfig(
+              model,
+              prompt,
+              nextEmbeddingModel,
+              nextRegisteredEmbeddingModels,
+              forceCpu,
+            );
           }}
           onCancel={() => setShowLLMConfigDialog(false)}
         />
@@ -1273,6 +1399,7 @@ export default function App() {
           whisperDevice={whisperDevice}
           whisperFormats={whisperFormats}
           initialConfig={whisperConfig}
+          gpuAvailable={gpuAvailable}
           action={action}
           onSave={saveWhisperConfig}
           onCancel={() => setShowWhisperConfigDialog(false)}

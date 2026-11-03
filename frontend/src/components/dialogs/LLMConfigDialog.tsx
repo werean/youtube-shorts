@@ -26,6 +26,8 @@ interface LLMConfigDialogProps {
   localAvailable?: boolean;
   remoteAvailable?: boolean;
   llmSystemPrompt: string;
+  forceCpu?: boolean;
+  gpuAvailable?: boolean | null;
   action: ActionState;
   onRegisterModel: (
     name: string,
@@ -42,6 +44,7 @@ interface LLMConfigDialogProps {
     prompt: string,
     embeddingModel: string,
     registeredEmbeddingModels: string[],
+    forceCpu: boolean,
   ) => void;
   onCancel: () => void;
 }
@@ -97,6 +100,8 @@ export function LLMConfigDialog({
   availableModels,
   modelCatalog = [],
   llmSystemPrompt: initialPrompt,
+  forceCpu: initialForceCpu = false,
+  gpuAvailable = null,
   action,
   onRegisterModel,
   onRemoveModel,
@@ -123,6 +128,7 @@ export function LLMConfigDialog({
   const [isDownloadingEmbedding, setIsDownloadingEmbedding] = useState(false);
   const [downloadedEmbeddingHints, setDownloadedEmbeddingHints] = useState<string[]>([]);
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [forceCpu, setForceCpu] = useState(initialForceCpu);
   const [modelFilter, setModelFilter] = useState<ModelFilter>("local");
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [registerName, setRegisterName] = useState("");
@@ -554,8 +560,22 @@ export function LLMConfigDialog({
               )}
             </AppSelect>
             <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.85rem" }}>
-              A análise de cortes usa um modelo local. Com GPU, o Ollama executa nela.
+              Modelos locais usam a GPU. A CPU só entra se você marcar a opção, ou se não houver GPU.
             </p>
+            {gpuAvailable === false ? (
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: "0.85rem" }}>
+                Esta máquina não tem GPU. Modelos locais usam a CPU.
+              </p>
+            ) : (
+              <label className="app-checkbox-field" style={{ gap: "10px", marginTop: "10px" }}>
+                <input
+                  type="checkbox"
+                  checked={forceCpu}
+                  onChange={(event) => setForceCpu(event.target.checked)}
+                />
+                <span>Usar CPU para modelos locais</span>
+              </label>
+            )}
 
             <div
               style={{
@@ -1028,7 +1048,9 @@ export function LLMConfigDialog({
               Resetar prompt
             </AppButton>
             <AppButton
-              onClick={() => onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels)}
+              onClick={() =>
+                onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels, forceCpu)
+              }
               disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
               variant="secondary"
               style={{

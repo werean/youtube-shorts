@@ -15,6 +15,7 @@ export interface ToolConfigs {
       name: string;
       source: "cloud" | "local";
     }>;
+    force_cpu?: boolean;
   };
 }
 
@@ -30,6 +31,7 @@ export interface ToolConfigsPatch {
       name: string;
       source: "cloud" | "local";
     }>;
+    force_cpu: boolean;
   }>;
 }
 

@@ -71,6 +71,8 @@ export type LlmToolConfig = {
   registered_models?: LlmRegisteredModel[];
   embedding_model?: string;
   registered_embedding_models?: string[];
+  /** Explicit CPU opt-in for local models. Absent or false keeps the GPU default. */
+  force_cpu?: boolean;
 };
 
 export interface ToolConfigs {
@@ -361,6 +363,7 @@ function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
     registered_models: registered,
     embedding_model: embeddingModel,
     registered_embedding_models: registeredEmbeddingModels,
+    force_cpu: llmConfig.force_cpu === true,
   };
 }
 
@@ -427,6 +430,7 @@ function defaultToolConfigs(): ToolConfigs {
       ],
       embedding_model: "nomic-embed-text",
       registered_embedding_models: ["nomic-embed-text"],
+      force_cpu: false,
     },
   };
 }

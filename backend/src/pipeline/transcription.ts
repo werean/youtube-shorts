@@ -14,7 +14,11 @@ import {
   writeTranscriptionArtifacts,
   writeTranscriptionSegments,
 } from "./transcription/artifacts";
-import { buildWhisperCommand, resolveTranscriptionFormats } from "./transcription/command";
+import {
+  buildWhisperCommand,
+  resolveTranscriptionFormats,
+  whisperRuntimeDevice,
+} from "./transcription/command";
 import { runWhisperProcess } from "./transcription/process";
 import {
   ensureTranscriptionCanStart,
@@ -48,7 +52,7 @@ export async function transcribeJob(
 
   try {
     const toolConfigs = loadActiveToolConfigs();
-    const device = toolConfigs.whisper.device === "cpu" ? "cpu" : "cuda";
+    const device = whisperRuntimeDevice(toolConfigs);
 
     const command = buildWhisperCommand(videoPath, tempDir, toolConfigs);
     console.log(`[transcription] 💻 Command: ${command}`);

@@ -73,8 +73,9 @@ export function StylePresetPanel({
           <div>
             <h2 className="corte-title">Estilo do short</h2>
             <p className="corte-hint">
-              Presets verticais. Desfoque, música e legendas ficam salvos. O render atual aplica o
-              desfoque de fundo e, se preenchidos, os filtros FFmpeg extras.
+              Presets verticais. Desfoque, música, legendas e opções extras ficam salvos. O arquivo
+              do render só muda quando o filtro de vídeo ou de áudio está preenchido. O pipeline
+              continua com o desfoque de fundo fixo.
             </p>
           </div>
           <button type="button" className="corte-adjust" onClick={onClose}>
@@ -131,12 +132,9 @@ export function StylePresetPanel({
                 <h3>Desfoque</h3>
                 <Mark stored />
               </div>
-              <div className="corte-inline">
-                <span>Desfoque de fundo do render</span>
-                <Mark />
-              </div>
               <p className="corte-hint">
-                O comando vertical já desfoca o fundo atrás do vídeo. As opções abaixo ficam no preset.
+                Estas opções ficam no preset. O arquivo vertical segue o desfoque de fundo fixo do
+                pipeline, sem usar intensidade ou região daqui.
               </p>
               <div className="corte-inline">
                 <span>Ativar no preset</span>
@@ -261,8 +259,10 @@ export function StylePresetPanel({
                   }
                 />
                 <input
+                  id="corte-music-file"
                   type="file"
                   accept="audio/*"
+                  hidden
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (!file) return;
@@ -272,6 +272,13 @@ export function StylePresetPanel({
                     }));
                   }}
                 />
+                <button
+                  type="button"
+                  className="corte-ghost"
+                  onClick={() => document.getElementById("corte-music-file")?.click()}
+                >
+                  Escolher faixa
+                </button>
               </label>
               <label className="corte-stack">
                 <span className="corte-hint">Volume {preset.music.volume}%</span>

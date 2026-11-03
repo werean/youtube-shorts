@@ -1,5 +1,7 @@
 import { config } from "../../core/config";
 import { loadActiveToolConfigs, type ToolConfigs } from "../../core/toolConfigs";
+import { cachedGpuAvailable } from "../../llm/localRuntime";
+import { resolveWhisperDevice } from "../../../../shared/localInference";
 import type { TranscriptionFormats } from "./artifacts";
 
 export function resolveTranscriptionFormats(): TranscriptionFormats {
@@ -12,6 +14,15 @@ export function resolveTranscriptionFormats(): TranscriptionFormats {
     text: useAll || formats.includes("txt"),
     vtt: useAll || formats.includes("vtt"),
   };
+}
+
+export function whisperRuntimeDevice(
+  toolConfigs: ToolConfigs = loadActiveToolConfigs(),
+): "cpu" | "cuda" {
+  return resolveWhisperDevice({
+    savedDevice: toolConfigs.whisper.device,
+    gpuAvailable: cachedGpuAvailable(),
+  });
 }
 
 export function buildWhisperCommand(
@@ -41,7 +52,7 @@ export function buildWhisperCommand(
     "--output_dir",
     `"${outputDir}"`,
     "--device",
-    whisper.device === "cpu" ? "cpu" : "cuda",
+    whisperRuntimeDevice(toolConfigs),
   ];
 
   if (whisper.verbose !== undefined) {

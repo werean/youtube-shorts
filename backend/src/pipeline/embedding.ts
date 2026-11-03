@@ -3,6 +3,7 @@
  */
 
 import { config } from "../core/config";
+import { optionsForModel } from "../llm/localRuntime";
 import { SemanticBlock } from "../models/semantic_block";
 
 /**
@@ -22,6 +23,7 @@ export async function fetchEmbeddings(
   }
 
   const baseUrl = config.OLLAMA_BASE_URL.replace(/\/$/, "");
+  const runtimeOptions = optionsForModel(model);
   const response = await fetch(`${baseUrl}/api/embed`, {
     method: "POST",
     headers: {
@@ -31,6 +33,7 @@ export async function fetchEmbeddings(
     body: JSON.stringify({
       model,
       input: texts,
+      ...(runtimeOptions ? { options: runtimeOptions } : {}),
     }),
   });
 
