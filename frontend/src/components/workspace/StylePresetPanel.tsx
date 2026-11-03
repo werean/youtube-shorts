@@ -354,7 +354,7 @@ export function StylePresetPanel({
                   }
                 />
               </label>
-              <div className="corte-seg" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+              <div className="corte-seg">
                 {CAPTION_POSITIONS.map((position) => (
                   <button
                     key={position.id}

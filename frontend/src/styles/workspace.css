@@ -28,6 +28,9 @@ body:has(.corte-app) {
 }
 
 .corte-app {
+  --corte-radius-sm: 8px;
+  --corte-radius-md: 12px;
+  --corte-radius-lg: 16px;
   height: 100vh;
   min-height: 100vh;
   display: flex;
@@ -98,7 +101,7 @@ body:has(.corte-app) {
 
 .corte-settings {
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(16px);
@@ -125,7 +128,7 @@ body:has(.corte-app) {
   width: 100%;
   text-align: left;
   padding: 9px 10px;
-  border-radius: 10px;
+  border-radius: var(--corte-radius-sm);
   color: #e4e4e7;
   font-size: 13px;
 }
@@ -154,7 +157,7 @@ body:has(.corte-app) {
 }
 
 .corte-col {
-  border-radius: 22px;
+  border-radius: var(--corte-radius-lg);
   min-height: 0;
   overflow: auto;
   padding: 18px 16px 14px;
@@ -178,10 +181,11 @@ body:has(.corte-app) {
 
 .corte-seg {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -192,8 +196,9 @@ body:has(.corte-app) {
   justify-content: center;
   gap: 8px;
   min-height: 36px;
+  min-width: 0;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-md);
   color: #a1a1aa;
   font-size: 13px;
 }
@@ -201,7 +206,6 @@ body:has(.corte-app) {
 .corte-seg button.active {
   color: #fafafa;
   background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .corte-field,
@@ -210,7 +214,7 @@ body:has(.corte-app) {
 .corte-app textarea.corte-field {
   width: 100%;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--corte-radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.35);
   color: #fafafa;
@@ -252,13 +256,13 @@ body:has(.corte-app) {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 16px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
 }
 
 .corte-stage {
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   min-height: 42px;
   padding-right: 8px;
 }
@@ -282,7 +286,7 @@ body:has(.corte-app) {
 .corte-switch {
   width: 44px;
   height: 26px;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.06);
   position: relative;
@@ -296,7 +300,7 @@ body:has(.corte-app) {
   left: 3px;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--corte-radius-md);
   background: #a1a1aa;
   transition: left 160ms ease, background 160ms ease;
 }
@@ -314,7 +318,7 @@ body:has(.corte-app) {
 .corte-start {
   width: 100%;
   min-height: 46px;
-  border-radius: 12px;
+  border-radius: var(--corte-radius-md);
   background: #f5f5f5;
   color: #111113;
   font-weight: 650;
@@ -355,7 +359,7 @@ body:has(.corte-app) {
 .corte-thumb {
   width: 86px;
   height: 54px;
-  border-radius: 10px;
+  border-radius: var(--corte-radius-sm);
   overflow: hidden;
   position: relative;
   background: #09090b;
@@ -376,7 +380,7 @@ body:has(.corte-app) {
   left: 4px;
   bottom: 4px;
   padding: 1px 5px;
-  border-radius: 6px;
+  border-radius: var(--corte-radius-sm);
   background: rgba(0, 0, 0, 0.72);
   color: #fff;
   font-size: 10px;
@@ -408,7 +412,7 @@ body:has(.corte-app) {
 .corte-more {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--corte-radius-sm);
   color: #d4d4d8;
   flex: none;
 }
@@ -424,7 +428,7 @@ body:has(.corte-app) {
   z-index: 5;
   min-width: 160px;
   padding: 6px;
-  border-radius: 14px;
+  border-radius: var(--corte-radius-md);
 }
 
 .corte-link {
@@ -439,7 +443,7 @@ body:has(.corte-app) {
 
 .corte-drop {
   min-height: 92px;
-  border-radius: 14px;
+  border-radius: var(--corte-radius-md);
   border: 1px dashed rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.03);
   color: #d4d4d8;
@@ -458,7 +462,7 @@ body:has(.corte-app) {
 
 .corte-player-wrap {
   position: relative;
-  border-radius: 16px;
+  border-radius: var(--corte-radius-lg);
   overflow: hidden;
   background: #000;
   aspect-ratio: 16 / 9;
@@ -494,7 +498,7 @@ body:has(.corte-app) {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   background: rgba(10, 10, 12, 0.46);
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(16px);
@@ -504,7 +508,7 @@ body:has(.corte-app) {
 .corte-controls button {
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--corte-radius-lg);
   color: #fafafa;
 }
 
@@ -524,7 +528,7 @@ body:has(.corte-app) {
   height: 2px;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   background: rgba(255, 255, 255, 0.28);
   box-shadow: none;
   appearance: none;
@@ -534,7 +538,7 @@ body:has(.corte-app) {
   appearance: none;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--corte-radius-lg);
   background: #fafafa;
   border: none;
 }
@@ -556,7 +560,7 @@ body:has(.corte-app) {
 .corte-app input.corte-timebox {
   width: 68px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--corte-radius-sm);
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-size: 13px;
@@ -565,7 +569,7 @@ body:has(.corte-app) {
 .corte-adjust,
 .corte-render,
 .corte-ghost {
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   color: #f4f4f5;
@@ -586,7 +590,7 @@ body:has(.corte-app) {
   appearance: none;
   width: 16px;
   height: 16px;
-  border-radius: 4px;
+  border-radius: var(--corte-radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.03);
   display: grid;
@@ -616,7 +620,7 @@ body:has(.corte-app) {
 }
 
 .corte-style-launch {
-  border-radius: 999px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 6px 10px;
   color: #f4f4f5;
@@ -637,7 +641,7 @@ body:has(.corte-app) {
 
 .corte-style {
   width: min(1120px, 100%);
-  border-radius: 24px;
+  border-radius: var(--corte-radius-lg);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
@@ -665,7 +669,7 @@ body:has(.corte-app) {
 .corte-preset {
   text-align: left;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--corte-radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
   color: #f4f4f5;
@@ -693,7 +697,7 @@ body:has(.corte-app) {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -713,7 +717,7 @@ body:has(.corte-app) {
 
 .corte-mark {
   flex: none;
-  border-radius: 999px;
+  border-radius: var(--corte-radius-sm);
   padding: 2px 8px;
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -731,7 +735,7 @@ body:has(.corte-app) {
   width: 168px;
   aspect-ratio: 9 / 16;
   margin: 8px auto 0;
-  border-radius: 22px;
+  border-radius: var(--corte-radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: #0a0a0c;
   position: relative;
