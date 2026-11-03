@@ -196,6 +196,14 @@ export function useShortStyleLibrary(
     }));
   }
 
+  async function flush() {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    await persist(libraryRef.current, true);
+  }
+
   return {
     library,
     activePreset,
@@ -207,5 +215,6 @@ export function useShortStyleLibrary(
     resetActiveBuiltin,
     addExtra,
     removeExtra,
+    flush,
   };
 }

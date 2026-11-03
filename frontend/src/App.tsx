@@ -1112,6 +1112,13 @@ export default function App() {
       alert(validation.message);
       return;
     }
+    try {
+      await styleLibraryApi.flush();
+    } catch (error) {
+      console.error("[style] Falha ao salvar o preset antes do render:", error);
+      setAction({ busy: false, error: "Não foi possível salvar o preset antes do render." });
+      return;
+    }
     const preset = styleLibraryApi.activePreset;
     const videoFilter = preset?.ffmpegVideoFilter.trim();
     const audioFilter = preset?.ffmpegAudioFilter.trim();

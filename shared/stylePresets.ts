@@ -1,7 +1,6 @@
 /**
  * Vertical-short style presets.
- * Stored with app settings. Only ffmpegVideoFilter and ffmpegAudioFilter
- * are applied by the current render command.
+ * Stored with app settings and applied by the vertical render command.
  */
 
 export type BlurTarget = "background" | "top" | "bottom" | "custom";

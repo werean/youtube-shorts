@@ -37,7 +37,8 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
   const outputs: string[] = [];
 
   try {
-    const { videoPath, cuts, shortsDir, ffmpegConfig, concurrency } = prepareRenderInputs(jobId);
+    const { videoPath, cuts, shortsDir, ffmpegConfig, concurrency, preset, segments } =
+      prepareRenderInputs(jobId);
     const orderedOutputs = new Array<string>(cuts.length).fill("");
 
     const tasks = cuts.map((cut, index) => async () => {
@@ -48,6 +49,8 @@ export async function renderSuggestedCuts(jobId: string): Promise<string[]> {
         videoPath,
         shortsDir,
         ffmpegConfig,
+        preset,
+        segments,
         orderedOutputs,
       });
     });

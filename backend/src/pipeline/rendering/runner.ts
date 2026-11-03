@@ -1,7 +1,9 @@
 import type { FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
+import type { Segment } from "../../models/segment";
 import * as operationRuntimeService from "../../services/operationRuntimeService";
 import { runFfmpegAsync } from "../../video/ffmpeg";
+import type { ShortStylePreset } from "../../../../shared/stylePresets";
 import { buildRenderCommand } from "./commands";
 
 export async function runWithConcurrency(
@@ -36,6 +38,8 @@ export async function renderCut(params: {
   videoPath: string;
   shortsDir: string;
   ffmpegConfig: FFmpegToolConfig;
+  preset?: ShortStylePreset | null;
+  segments?: Segment[];
   orderedOutputs: string[];
 }): Promise<void> {
   if (operationRuntimeService.isRenderingCancelled(params.jobId)) {
@@ -56,6 +60,8 @@ export async function renderCut(params: {
     videoPath: params.videoPath,
     shortsDir: params.shortsDir,
     ffmpegConfig: params.ffmpegConfig,
+    preset: params.preset,
+    segments: params.segments,
   });
 
   operationRuntimeService.appendTaskLog(

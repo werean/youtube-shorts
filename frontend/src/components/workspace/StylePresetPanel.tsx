@@ -73,9 +73,9 @@ export function StylePresetPanel({
           <div>
             <h2 className="corte-title">Estilo do short</h2>
             <p className="corte-hint">
-              Presets verticais. Desfoque, música, legendas e opções extras ficam salvos. O arquivo
-              do render só muda quando o filtro de vídeo ou de áudio está preenchido. O pipeline
-              continua com o desfoque de fundo fixo.
+              O preset entra no comando do render. Sem desfoque, o fundo não é borrado. Com
+              desfoque, valem o lugar e a intensidade. Música mistura o caminho da faixa. Legendas
+              queimam a transcrição do corte.
             </p>
           </div>
           <button type="button" className="corte-adjust" onClick={onClose}>
@@ -130,11 +130,11 @@ export function StylePresetPanel({
             <section className="corte-section">
               <div className="corte-inline">
                 <h3>Desfoque</h3>
-                <Mark stored />
+                <Mark />
               </div>
               <p className="corte-hint">
-                Estas opções ficam no preset. O arquivo vertical segue o desfoque de fundo fixo do
-                pipeline, sem usar intensidade ou região daqui.
+                Desligado, o quadro só é ajustado na vertical. Ligado, o desfoque usa o lugar e a
+                intensidade daqui.
               </p>
               <div className="corte-inline">
                 <span>Ativar no preset</span>
@@ -227,7 +227,7 @@ export function StylePresetPanel({
             <section className="corte-section">
               <div className="corte-inline">
                 <h3>Música de fundo</h3>
-                <Mark stored />
+                <Mark />
               </div>
               <div className="corte-inline">
                 <span>Ativar</span>
@@ -246,11 +246,11 @@ export function StylePresetPanel({
                 </button>
               </div>
               <label className="corte-stack">
-                <span className="corte-hint">Faixa</span>
+                <span className="corte-hint">Caminho da faixa</span>
                 <input
                   className="corte-field"
                   value={preset.music.trackName}
-                  placeholder="Nome ou caminho da faixa"
+                  placeholder="Caminho do arquivo de áudio"
                   onChange={(event) =>
                     onUpdate((current) => ({
                       ...current,
@@ -301,7 +301,7 @@ export function StylePresetPanel({
             <section className="corte-section">
               <div className="corte-inline">
                 <h3>Legendas</h3>
-                <Mark stored />
+                <Mark />
               </div>
               <div className="corte-inline">
                 <span>Ativar</span>
