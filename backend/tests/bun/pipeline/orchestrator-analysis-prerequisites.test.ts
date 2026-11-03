@@ -131,6 +131,21 @@ describe("orchestrator analysis prerequisites", () => {
     expect(result.status).toBe(JobStatus.WAITING_APPROVAL);
   });
 
+  test("short videos skip topic segmentation on the same gate as direct analysis", async () => {
+    selectStrategyMock.mockReturnValue({
+      useTopicSegmentation: false,
+      useEmbeddings: false,
+      useTwoPass: false,
+      maxBlocksPerLLMRequest: 150,
+      maxCharsPerLLMRequest: 18000,
+    });
+
+    await runPipeline("job-orchestrated", { includeRender: false });
+
+    expect(callOrder).toEqual(["ingest", "transcribe", "semantic_blocks", "analysis"]);
+    expect(buildTopicSegmentsMock).not.toHaveBeenCalled();
+  });
+
   test("marks the job as ERROR when a pipeline step fails", async () => {
     loadJobMock.mockReturnValue(makeJob(JobStatus.CREATED));
     ingestVideoMock.mockRejectedValue(new Error("ingest failed"));

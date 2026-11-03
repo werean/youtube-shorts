@@ -38,6 +38,7 @@ export function runFfmpegAsync(
     }
     const stdoutBuffer = { value: "" };
     const stderrBuffer = { value: "" };
+    let stderrAll = "";
 
     child.stdout?.on("data", (chunk) => {
       const text = chunk.toString();
@@ -49,6 +50,7 @@ export function runFfmpegAsync(
 
     child.stderr?.on("data", (chunk) => {
       const text = chunk.toString();
+      stderrAll += text;
       process.stderr.write(text);
       if (!onLog) return;
       stderrBuffer.value += text;
@@ -82,7 +84,7 @@ export function runFfmpegAsync(
         finish(() => resolve());
         return;
       }
-      const detail = stderrBuffer.value.trim().slice(-500);
+      const detail = stderrAll.trim().slice(-500);
       finish(() =>
         reject(new Error(`FFmpeg failed with code ${code ?? "unknown"}${detail ? `: ${detail}` : ""}`)),
       );

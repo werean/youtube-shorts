@@ -1,12 +1,9 @@
 import { loadActiveToolConfigs, type FFmpegToolConfig } from "../../core/toolConfigs";
 import { Cut } from "../../models/cut";
 import { JobStatus } from "../../models/job";
-import { SemanticBlock } from "../../models/semantic_block";
-import { TopicSegment } from "../../models/topic_segment";
 import * as artifactService from "../../services/artifactService";
 import * as jobLifecycleService from "../../services/jobLifecycleService";
 import * as operationRuntimeService from "../../services/operationRuntimeService";
-import { repairCutRange } from "../analysis/cuts";
 import { NoApprovedCutsError } from "../errors";
 
 export type PreparedRenderInputs = {
@@ -27,12 +24,27 @@ function resolveRenderConcurrency(totalCuts: number, videoCodec: string): number
   return Math.max(1, Math.min(fallback, totalCuts));
 }
 
-function loadCuts(jobId: string): Cut[] {
+export function selectCutsToRender(cuts: Cut[], cutsFileExists: boolean): Cut[] {
+  const approved = cuts.filter((cut) => cut.status === "approved");
+  if (approved.length > 0) {
+    return approved;
+  }
+  if (cutsFileExists) {
+    throw new NoApprovedCutsError(
+      cuts.length === 0
+        ? "Analysis produced no cuts to render"
+        : "No approved cuts to render",
+    );
+  }
+  throw new Error("No cuts found to render");
+}
+
+function loadCuts(jobId: string): { cuts: Cut[]; exists: boolean } {
   const cutsFilePath = artifactService.cutsPath(jobId);
   if (!artifactService.artifactExists(cutsFilePath)) {
-    return [];
+    return { cuts: [], exists: false };
   }
-  return artifactService.readJsonArtifact<Cut[]>(cutsFilePath);
+  return { cuts: artifactService.readJsonArtifact<Cut[]>(cutsFilePath), exists: true };
 }
 
 export function beginRenderJob(jobId: string): void {
@@ -43,53 +55,6 @@ export function beginRenderJob(jobId: string): void {
   jobLifecycleService.updateJobStatus(jobId, JobStatus.RENDERING);
 }
 
-function snapApprovedCuts(jobId: string, cuts: Cut[]): Cut[] {
-  const blocksPath = artifactService.semanticBlocksPath(jobId);
-  if (!artifactService.artifactExists(blocksPath)) {
-    return cuts;
-  }
-
-  const blocks = artifactService.readJsonArtifact<SemanticBlock[]>(blocksPath);
-  let topics: TopicSegment[] | undefined;
-  const topicsPath = artifactService.topicSegmentsPath(jobId);
-  if (artifactService.artifactExists(topicsPath)) {
-    try {
-      topics = artifactService.readJsonArtifact<TopicSegment[]>(topicsPath);
-    } catch {
-      topics = undefined;
-    }
-  }
-
-  const ready: Cut[] = [];
-  for (const cut of cuts) {
-    const repaired = repairCutRange(
-      {
-        blocks: cut.block_ids,
-        start: cut.start,
-        end: cut.end,
-        title: cut.title ?? undefined,
-      },
-      blocks,
-      topics,
-    );
-    if (!repaired.ok) {
-      operationRuntimeService.appendTaskLog(
-        jobId,
-        "render",
-        `[rendering] skipping ${cut.cut_id}: ${repaired.reason}`,
-      );
-      continue;
-    }
-    ready.push({
-      ...cut,
-      block_ids: repaired.cut.blocks,
-      start: repaired.cut.start,
-      end: repaired.cut.end,
-    });
-  }
-  return ready;
-}
-
 export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
   const videoPath = artifactService.findSourceVideo(jobId);
   if (!videoPath) {
@@ -97,20 +62,8 @@ export function prepareRenderInputs(jobId: string): PreparedRenderInputs {
   }
   operationRuntimeService.appendTaskLog(jobId, "render", `[rendering] Source: ${videoPath}`);
 
-  const cuts = loadCuts(jobId);
-  if (cuts.length === 0) {
-    throw new Error("No cuts found to render");
-  }
-
-  const approved = cuts.filter((cut) => cut.status === "approved");
-  if (approved.length === 0) {
-    throw new NoApprovedCutsError();
-  }
-
-  const renderable = snapApprovedCuts(jobId, approved);
-  if (renderable.length === 0) {
-    throw new NoApprovedCutsError("No coherent approved cuts to render");
-  }
+  const loaded = loadCuts(jobId);
+  const renderable = selectCutsToRender(loaded.cuts, loaded.exists);
 
   const shortsDir = artifactService.ensureShortsJobDir(jobId);
   const ffmpegConfig = loadActiveToolConfigs().ffmpeg;

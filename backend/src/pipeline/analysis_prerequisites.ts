@@ -42,6 +42,10 @@ export function buildSemanticBlocksForAnalysis(jobId: string) {
 
 export function buildTopicSegmentsForAnalysis(job: Job) {
   const strategy = selectStrategy(job.video_duration_seconds ?? 0);
+  if (!strategy.useTopicSegmentation) {
+    return Promise.resolve([]);
+  }
+
   const configs = loadActiveToolConfigs();
   const embeddingModel =
     String(configs.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
@@ -59,10 +63,7 @@ export async function prepareAnalysisPrerequisites(
     await ensureSemanticBlocksForAnalysis(job.job_id, options.onMissingSemanticBlocks);
   }
 
-  const strategy = selectStrategy(job.video_duration_seconds ?? 0);
-  if (strategy.useTopicSegmentation) {
-    await buildTopicSegmentsForAnalysis(job);
-  }
+  await buildTopicSegmentsForAnalysis(job);
 }
 
 export async function analyzeWithPreparedPrerequisites(

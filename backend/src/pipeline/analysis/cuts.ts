@@ -1,19 +1,22 @@
 import { Cut } from "../../models/cut";
 import { SemanticBlock } from "../../models/semantic_block";
-import { TopicSegment } from "../../models/topic_segment";
-import { continuesSentence, endsSentence, startsWithLowercase } from "../sentence";
-import { TOPIC_MIN_DURATION_SECONDS } from "../topic_segmentation/topics";
+import { continuesSentence, endsConclusion, startsWithLowercase } from "../sentence";
 import { RawLLMCut } from "./types";
 
-export const MIN_CUT_SECONDS = 300;
+export const MIN_CUT_SECONDS = 15;
+export const MAX_CUT_SECONDS = 90;
+export const MIN_CUT_BLOCKS = 3;
+const MAX_CONTINUATION_BLOCKS = 2;
+const MAX_SENTENCE_FINISH_BLOCKS = 3;
 
 export type CutRepairReason =
   | "missing-block"
   | "gap"
   | "mid-sentence-start"
-  | "mid-topic"
   | "no-conclusion"
   | "too-short"
+  | "too-long"
+  | "too-few-blocks"
   | "invalid-duration";
 
 export type CutRepairResult =
@@ -64,15 +67,20 @@ function rejectCut(reason: CutRepairReason): CutRepairResult {
   return { ok: false, reason };
 }
 
+function stillContinuesSentence(blocks: SemanticBlock[], startIdx: number): boolean {
+  if (startIdx === 0) {
+    return startsWithLowercase(blocks[0].text);
+  }
+  return continuesSentence(blocks[startIdx - 1].text, blocks[startIdx].text);
+}
+
 /**
- * Snap a model cut to sentence and topic edges, or reject it.
- * The returned cut keeps the same JSON fields. Times come from the blocks.
+ * Snap a model cut onto block edges.
+ * The start may move back only a couple of blocks to leave a mid-sentence opening.
+ * The end may move forward only far enough to finish the open sentence.
+ * A question mark is not a conclusion. Topic boundaries are not rewritten here.
  */
-export function repairCutRange(
-  cut: RawLLMCut,
-  blocks: SemanticBlock[],
-  topics?: TopicSegment[],
-): CutRepairResult {
+export function repairCutRange(cut: RawLLMCut, blocks: SemanticBlock[]): CutRepairResult {
   const indexById = new Map(blocks.map((block, index) => [block.block_id, index]));
   const indices: number[] = [];
   for (const blockId of cut.blocks) {
@@ -95,43 +103,30 @@ export function repairCutRange(
   }
 
   let startIdx = indices[0];
+  let walkedBack = 0;
   while (
     startIdx > 0 &&
+    walkedBack < MAX_CONTINUATION_BLOCKS &&
     continuesSentence(blocks[startIdx - 1].text, blocks[startIdx].text)
   ) {
     startIdx -= 1;
+    walkedBack += 1;
   }
-  if (startIdx === 0 && startsWithLowercase(blocks[0].text)) {
+  if (stillContinuesSentence(blocks, startIdx)) {
     return rejectCut("mid-sentence-start");
   }
 
-  if (topics && topics.length > 0) {
-    const topic = topics.find((candidate) => candidate.block_ids.includes(blocks[startIdx].block_id));
-    const topicStartId = topic?.block_ids[0];
-    const topicStartIdx = topicStartId ? indexById.get(topicStartId) : undefined;
-    if (topic && topicStartIdx !== undefined && topicStartIdx < startIdx) {
-      const prefixDuration = blocks[startIdx].start - blocks[topicStartIdx].start;
-      if (prefixDuration > TOPIC_MIN_DURATION_SECONDS) {
-        return rejectCut("mid-topic");
-      }
-      startIdx = topicStartIdx;
-      while (
-        startIdx > 0 &&
-        continuesSentence(blocks[startIdx - 1].text, blocks[startIdx].text)
-      ) {
-        startIdx -= 1;
-      }
-      if (startIdx === 0 && startsWithLowercase(blocks[0].text)) {
-        return rejectCut("mid-sentence-start");
-      }
-    }
-  }
-
   let endIdx = Math.max(indices[indices.length - 1], startIdx);
-  while (endIdx < blocks.length - 1 && !endsSentence(blocks[endIdx].text)) {
+  let walkedForward = 0;
+  while (
+    endIdx < blocks.length - 1 &&
+    !endsConclusion(blocks[endIdx].text) &&
+    walkedForward < MAX_SENTENCE_FINISH_BLOCKS
+  ) {
     endIdx += 1;
+    walkedForward += 1;
   }
-  if (!endsSentence(blocks[endIdx].text)) {
+  if (!endsConclusion(blocks[endIdx].text)) {
     return rejectCut("no-conclusion");
   }
 
@@ -141,8 +136,14 @@ export function repairCutRange(
   if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) {
     return rejectCut("invalid-duration");
   }
+  if (selected.length < MIN_CUT_BLOCKS) {
+    return rejectCut("too-few-blocks");
+  }
   if (end - start < MIN_CUT_SECONDS) {
     return rejectCut("too-short");
+  }
+  if (end - start > MAX_CUT_SECONDS) {
+    return rejectCut("too-long");
   }
 
   const blockIds = selected.map((block) => block.block_id);
@@ -216,15 +217,11 @@ export function deduplicateCuts(cuts: Cut[], rawCuts: RawLLMCut[]): Cut[] {
   return result;
 }
 
-export function normalizeCuts(
-  rawCuts: RawLLMCut[],
-  allBlocks: SemanticBlock[],
-  topics?: TopicSegment[],
-): Cut[] {
+export function normalizeCuts(rawCuts: RawLLMCut[], allBlocks: SemanticBlock[]): Cut[] {
   const repairedRaw: RawLLMCut[] = [];
   let rejected = 0;
   for (const raw of rawCuts) {
-    const repaired = repairCutRange(raw, allBlocks, topics);
+    const repaired = repairCutRange(raw, allBlocks);
     if (!repaired.ok) {
       rejected += 1;
       console.warn(`[analysis] rejecting cut [${raw.blocks.join(",")}]: ${repaired.reason}`);

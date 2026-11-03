@@ -69,16 +69,23 @@ function writeSemanticBlocks(jobId: string): void {
       {
         block_id: "b1",
         start: 0,
-        end: 320,
+        end: 20,
         text: "This is a complete thought.",
         segment_ids: ["s1"],
       },
       {
         block_id: "b2",
-        start: 10,
-        end: 20,
+        start: 20,
+        end: 40,
         text: "Another complete thought.",
         segment_ids: ["s2"],
+      },
+      {
+        block_id: "b3",
+        start: 40,
+        end: 60,
+        text: "A third complete thought.",
+        segment_ids: ["s3"],
       },
     ]),
     "utf-8",
@@ -115,9 +122,9 @@ mock.module("../../../src/llm/client", () => ({
     async chat() {
       return JSON.stringify([
         {
-          blocks: ["b1"],
+          blocks: ["b1", "b2", "b3"],
           start: 0,
-          end: 10,
+          end: 60,
           score: 1,
           title: "Generated cut",
         },
@@ -191,9 +198,9 @@ describe("cuts ownership and mutation behavior", () => {
     expect(result.cuts).toEqual([
       {
         cut_id: "c1",
-        block_ids: ["b1"],
+        block_ids: ["b1", "b2", "b3"],
         start: 0,
-        end: 320,
+        end: 60,
         title: "Generated cut",
         status: "pending",
       },

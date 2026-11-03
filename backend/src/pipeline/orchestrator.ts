@@ -14,6 +14,7 @@ import {
 import { analyzeBlocks } from "./analysis";
 import { renderSuggestedCuts } from "./rendering";
 import { NoApprovedCutsError, PipelineCancelledError } from "./errors";
+import { selectStrategy } from "./strategy";
 
 type Step = [JobStatus, (job: Job) => Promise<any> | any];
 
@@ -41,7 +42,15 @@ async function runPipelineUnlocked(
     [JobStatus.DOWNLOADING, async (job: Job) => ingestVideo(job)],
     [JobStatus.TRANSCRIBING, (job: Job) => transcribeJob(job.job_id)],
     [JobStatus.BUILDING_BLOCKS, (job: Job) => buildSemanticBlocksForAnalysis(job.job_id)],
-    [JobStatus.BUILDING_TOPICS, (job: Job) => buildTopicSegmentsForAnalysis(job)],
+    [
+      JobStatus.BUILDING_TOPICS,
+      (job: Job) => {
+        if (!selectStrategy(job.video_duration_seconds ?? 0).useTopicSegmentation) {
+          return undefined;
+        }
+        return buildTopicSegmentsForAnalysis(job);
+      },
+    ],
     [JobStatus.ANALYZING, (job: Job) => analyzeBlocks(job.job_id, job.video_duration_seconds ?? 0)],
   ];
 

@@ -75,6 +75,15 @@ async function transcribeJobUnlocked(
 
     console.log(`[transcription] ⏳ Executando Whisper com ${device.toUpperCase()}...`);
     await runWhisperProcess(jobId, command);
+    if (operationRuntimeService.isTranscriptionCancelled(jobId)) {
+      jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
+      operationRuntimeService.appendTaskLog(
+        jobId,
+        "transcription",
+        "[transcription] Cancel acknowledged",
+      );
+      throw new PipelineCancelledError("Transcription cancelled");
+    }
     console.log(`[transcription] ✓ Whisper completado com sucesso`);
     operationRuntimeService.appendTaskLog(
       jobId,

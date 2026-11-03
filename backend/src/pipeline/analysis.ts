@@ -16,6 +16,7 @@ import { buildClient } from "./analysis/llm";
 import { persistAnalysisOutput } from "./analysis/persistence";
 import { loadBlocks } from "./analysis/preconditions";
 import { collectRawCutsForStrategy } from "./analysis/strategyFlow";
+import { selectStrategy } from "./strategy";
 
 /**
  * Analyse semantic blocks with the LLM and produce suggested cuts.
@@ -25,7 +26,7 @@ import { collectRawCutsForStrategy } from "./analysis/strategyFlow";
  * - Medium (20-60 min): topic-aware, single pass per topic
  * - Long   (>=60 min): topic-aware, two-pass (candidacy + full analysis)
  *
- * Cuts are snapped to sentence and topic edges or rejected.
+ * Cuts are snapped to block edges. A repair may only finish the open sentence.
  * Overlapping cuts (>30s overlap) are deduplicated by score.
  *
  * @param jobId - Job identifier.
@@ -59,7 +60,8 @@ async function analyzeBlocksUnlocked(
   const toolConfigs = loadActiveToolConfigs();
   const systemPrompt = toolConfigs.llm.system_prompt || "You output JSON only.";
   const client = buildClient(toolConfigs);
-  const topics = loadTopicsIfPresent(jobId);
+  const strategy = selectStrategy(videoDurationSeconds);
+  const topics = strategy.useTopicSegmentation ? loadTopicsIfPresent(jobId) : undefined;
 
   let allRawCuts;
   try {
@@ -77,7 +79,7 @@ async function analyzeBlocksUnlocked(
     throw error;
   }
 
-  const numberedCuts = normalizeCuts(allRawCuts, allBlocks, topics);
+  const numberedCuts = normalizeCuts(allRawCuts, allBlocks);
   persistAnalysisOutput(jobId, numberedCuts);
 
   const rawResponse = JSON.stringify(allRawCuts);

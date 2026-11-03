@@ -1,4 +1,5 @@
 const FINAL_PUNCTUATION_RE = /[.!?…]["')\]]*$/;
+const CONCLUSION_RE = /[.!…]["')\]]*$/;
 
 export function endsSentence(text: string): boolean {
   const trimmed = text.trim();
@@ -6,6 +7,15 @@ export function endsSentence(text: string): boolean {
     return false;
   }
   return FINAL_PUNCTUATION_RE.test(trimmed);
+}
+
+/** A question mark by itself does not close a cut. */
+export function endsConclusion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return CONCLUSION_RE.test(trimmed);
 }
 
 export function startsWithLowercase(text: string): boolean {

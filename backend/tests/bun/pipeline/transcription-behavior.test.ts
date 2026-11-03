@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { JobStatus, type Job } from "../../../src/models/job";
 
-type SpawnScenario = "success" | "failure";
+type SpawnScenario = "success" | "failure" | "hold";
 
 type SpawnedChild = EventEmitter & {
   stdout: EventEmitter;
@@ -17,6 +17,7 @@ type SpawnedChild = EventEmitter & {
 let tempRoot = "";
 let sourceVideoPath: string | null = null;
 let spawnScenario: SpawnScenario = "success";
+let releaseWhisper: (() => void) | null = null;
 let latestOutputDir = "";
 
 const jobs = new Map<string, Job>();
@@ -121,6 +122,15 @@ const spawnMock = mock((command: string, args: string[] | any = [], options: any
   }
 
   queueMicrotask(() => {
+    if (spawnScenario === "hold") {
+      releaseWhisper = () => {
+        latestOutputDir = parseOutputDir(argv);
+        writeWhisperJson(latestOutputDir);
+        child.emit("exit", 0);
+      };
+      return;
+    }
+
     if (spawnScenario === "success") {
       latestOutputDir = parseOutputDir(argv);
       writeWhisperJson(latestOutputDir);
@@ -162,6 +172,8 @@ mock.module("../../../src/storage/files", () => ({
   transcriptionPath: transcriptionSegmentsPath,
   transcriptionTextPath,
   transcriptionVttPath,
+  cutsPath: (jobId: string) => path.join(jobDir(jobId), "cuts.suggested.json"),
+  semanticBlocksPath: (jobId: string) => path.join(jobDir(jobId), "semantic.blocks.json"),
 }));
 
 mock.module("../../../src/core/toolConfigs", () => ({
@@ -225,6 +237,7 @@ describe("transcription flow behavior", () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "youtube-shorts-transcription-"));
     sourceVideoPath = null;
     spawnScenario = "success";
+    releaseWhisper = null;
     latestOutputDir = "";
     jobs.clear();
     statusUpdates.length = 0;
@@ -323,6 +336,23 @@ describe("transcription flow behavior", () => {
       ]),
     );
     expect(cancelTranscription("job-success")).toBe(false);
+  });
+
+  test("cancel sticks when Whisper later exits 0", async () => {
+    sourceVideoPath = path.join(tempRoot, "source.mp4");
+    fs.writeFileSync(sourceVideoPath, "fake video", "utf-8");
+    spawnScenario = "hold";
+
+    const pending = transcribeJob("job-cancel-zero");
+    await Bun.sleep(0);
+    expect(cancelTranscription("job-cancel-zero")).toBe(true);
+    releaseWhisper?.();
+
+    await expect(pending).rejects.toThrow("Transcription cancelled");
+    expect(savedStatusValues("job-cancel-zero")).not.toContain(JobStatus.BUILDING_BLOCKS);
+    expect(savedStatusValues("job-cancel-zero")).not.toContain(JobStatus.ERROR);
+    expect(statusUpdateValues("job-cancel-zero")).toContain(JobStatus.DOWNLOADED);
+    expect(statusUpdateValues("job-cancel-zero")).not.toContain(JobStatus.ERROR);
   });
 
   test("Whisper process failure marks the job ERROR and preserves process output logs", async () => {

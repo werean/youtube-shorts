@@ -33,6 +33,33 @@ function copyInfoJson(outputDir: string, fileNames: string[], videoFile: string,
   }
 }
 
+/**
+ * Move a finished download directory onto the titled folder.
+ * Creating the destination and then renaming the source directory onto it
+ * fails on Windows, so an existing destination receives the files instead.
+ */
+export function relocateDownloadDirectory(outputDir: string, newVideoDir: string): void {
+  if (path.resolve(outputDir) === path.resolve(newVideoDir)) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(newVideoDir), { recursive: true });
+  if (!fs.existsSync(newVideoDir)) {
+    fs.renameSync(outputDir, newVideoDir);
+    return;
+  }
+
+  for (const name of fs.readdirSync(outputDir)) {
+    const from = path.join(outputDir, name);
+    const to = path.join(newVideoDir, name);
+    if (fs.existsSync(to)) {
+      fs.rmSync(to, { recursive: true, force: true });
+    }
+    fs.renameSync(from, to);
+  }
+  fs.rmSync(outputDir, { recursive: true, force: true });
+}
+
 function readInfo(infoPath: string): { title?: string; duration?: number } | null {
   if (!fs.existsSync(infoPath)) {
     return null;
@@ -80,13 +107,8 @@ export function handleDownloadedArtifacts(
 
   if (updatedJob.video_name && updatedJob.video_name !== updatedJob.job_id) {
     const newVideoDir = getVideoDir(updatedJob.job_id, updatedJob.video_name);
-    if (!fs.existsSync(newVideoDir)) {
-      fs.mkdirSync(newVideoDir, { recursive: true });
-    }
-    if (outputDir !== newVideoDir) {
-      fs.renameSync(outputDir, newVideoDir);
-      downloadedPath = path.join(newVideoDir, path.basename(downloadedPath));
-    }
+    relocateDownloadDirectory(outputDir, newVideoDir);
+    downloadedPath = path.join(newVideoDir, path.basename(downloadedPath));
   }
 
   updatedJob.source_video_path = downloadedPath;

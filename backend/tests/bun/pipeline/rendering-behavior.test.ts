@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { JobStatus, type Job } from "../../../src/models/job";
 
-type FfmpegScenario = "success" | "failure" | "pending";
+type FfmpegScenario = "success" | "failure" | "pending" | "nvenc";
 
 type SpawnedChild = EventEmitter & {
   pid?: number;
@@ -15,6 +15,7 @@ type SpawnedChild = EventEmitter & {
 let tempRoot = "";
 let sourceVideoPath: string | null = null;
 let ffmpegScenario: FfmpegScenario = "success";
+let nvencAttempts = 0;
 let pendingFfmpeg: { resolve: () => void; reject: (error: Error) => void } | null = null;
 
 const jobs = new Map<string, Job>();
@@ -205,6 +206,12 @@ mock.module("../../../src/video/ffmpeg", () => ({
       throw new Error("FFmpeg failed with code 9");
     }
 
+    if (ffmpegScenario === "nvenc" && nvencAttempts === 0) {
+      nvencAttempts += 1;
+      fs.writeFileSync(command.at(-1)!, "partial-nvenc", "utf-8");
+      throw new Error("FFmpeg failed with code 1: h264_nvenc: No capable devices found");
+    }
+
     fs.writeFileSync(command.at(-1)!, "rendered", "utf-8");
     child.emit("exit", 0);
   },
@@ -219,6 +226,7 @@ describe("rendering flow behavior", () => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "youtube-shorts-rendering-"));
     sourceVideoPath = null;
     ffmpegScenario = "success";
+    nvencAttempts = 0;
     pendingFfmpeg = null;
     process.env.RENDER_MAX_CONCURRENCY = "1";
     jobs.clear();
@@ -302,7 +310,7 @@ describe("rendering flow behavior", () => {
       },
     ]);
     expect(ffmpegCalls.map((call) => call.command.join(" "))).toEqual([
-      `ffmpeg -i ${sourceVideoPath} -ss 4 -to 9.25 ${path.join(shortsDir("job-success"), "4.00-9.25.mp4")}`,
+      `ffmpeg -i ${sourceVideoPath} -ss 4 -to 9.25 ${path.join(shortsDir("job-success"), "4.00-9.25.mp4.partial")}`,
     ]);
     expect(fs.existsSync(path.join(shortsDir("job-success"), "4.00-9.25.mp4"))).toBe(true);
     expect(logLines("job-success")).toEqual(
@@ -312,7 +320,7 @@ describe("rendering flow behavior", () => {
         "[rendering] Concurrency: 1",
         "[rendering] Cut c1 4.00-9.25",
         expect.stringContaining("[rendering] Command: ffmpeg -i"),
-        "ffmpeg started " + path.join(shortsDir("job-success"), "4.00-9.25.mp4"),
+        "ffmpeg started " + path.join(shortsDir("job-success"), "4.00-9.25.mp4.partial"),
         "[rendering] ✓ Render complete",
       ]),
     );
@@ -330,7 +338,7 @@ describe("rendering flow behavior", () => {
     expect(logLines("job-failure")).toEqual(
       expect.arrayContaining([
         "[rendering] Cut c1 4.00-9.25",
-        "ffmpeg started " + path.join(shortsDir("job-failure"), "4.00-9.25.mp4"),
+        "ffmpeg started " + path.join(shortsDir("job-failure"), "4.00-9.25.mp4.partial"),
         "[rendering] ✗ Error: FFmpeg failed with code 9",
       ]),
     );
@@ -368,6 +376,22 @@ describe("rendering flow behavior", () => {
     ]);
     expect(logLines("job-cancel")).toContain("[rendering] Cancel acknowledged");
     expect(cancelRendering("job-cancel")).toBe(false);
+  });
+
+  test("NVENC failure is retried on CPU and a partial file is not kept as a short", async () => {
+    sourceVideoPath = path.join(tempRoot, "source.mp4");
+    fs.writeFileSync(sourceVideoPath, "fake video", "utf-8");
+    writeCuts("job-nvenc");
+    ffmpegScenario = "nvenc";
+
+    const outputs = await renderSuggestedCuts("job-nvenc");
+    const finalPath = path.join(shortsDir("job-nvenc"), "4.00-9.25.mp4");
+
+    expect(outputs).toEqual(["/media/shorts/job-nvenc/4.00-9.25.mp4"]);
+    expect(commandParams.map((params) => params.disableHardware)).toEqual([false, true]);
+    expect(fs.readFileSync(finalPath, "utf-8")).toBe("rendered");
+    expect(fs.existsSync(`${finalPath}.partial`)).toBe(false);
+    expect(logLines("job-nvenc").join("\n")).toContain("h264_nvenc");
   });
 
   test("listRenderOutputs delegates to storage output URLs", () => {
