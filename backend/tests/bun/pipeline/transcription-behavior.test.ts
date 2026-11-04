@@ -184,6 +184,7 @@ mock.module("../../../src/core/toolConfigs", () => ({
       system_prompt: "JSON only",
     },
     whisper: {
+      engine: "openai-whisper",
       append_punctuations: ".",
       beam_size: 2,
       best_of: 3,

@@ -8,6 +8,7 @@ export interface ToolConfigs {
   ffmpeg: FFmpegConfig;
   llm: {
     model: string;
+    base_url?: string;
     system_prompt: string;
     embedding_model?: string;
     registered_embedding_models?: string[];
@@ -24,6 +25,7 @@ export interface ToolConfigsPatch {
   ffmpeg?: FFmpegConfig;
   llm?: Partial<{
     model: string;
+    base_url: string;
     system_prompt: string;
     embedding_model: string;
     registered_embedding_models: string[];

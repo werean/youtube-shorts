@@ -1,8 +1,12 @@
 import { SemanticBlock } from "../../models/semantic_block";
 import { TopicSegment } from "../../models/topic_segment";
 
-/** Topics shorter than this are merged into the previous topic. */
-export const TOPIC_MIN_DURATION_SECONDS = 90;
+/**
+ * Only unfinished scraps shorter than this are folded into the previous topic.
+ * This is not a target length. A finished news item above the scrap floor stays
+ * its own topic even when it is well under 90 seconds.
+ */
+export const TOPIC_MIN_DURATION_SECONDS = 8;
 
 /**
  * Finalizes the current open topic accumulator and pushes to `topics`.

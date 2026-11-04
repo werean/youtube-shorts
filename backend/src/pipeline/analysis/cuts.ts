@@ -3,11 +3,19 @@ import { SemanticBlock } from "../../models/semantic_block";
 import { continuesSentence, endsConclusion, startsWithLowercase } from "../sentence";
 import { RawLLMCut } from "./types";
 
-export const MIN_CUT_SECONDS = 15;
-export const MAX_CUT_SECONDS = 90;
-export const MIN_CUT_BLOCKS = 3;
+/** Preferred window. A finished item outside it is kept. */
+export const PREFERRED_MIN_CUT_SECONDS = 15;
+export const PREFERRED_MAX_CUT_SECONDS = 90;
+/** Hard floor and ceiling. Only scraps and runaway spans are rejected. */
+export const HARD_MIN_CUT_SECONDS = 8;
+export const HARD_MAX_CUT_SECONDS = 240;
 const MAX_CONTINUATION_BLOCKS = 2;
 const MAX_SENTENCE_FINISH_BLOCKS = 3;
+
+export type DurationNote =
+  | "within-preferred-window"
+  | "shorter-than-preferred"
+  | "longer-than-preferred";
 
 export type CutRepairReason =
   | "missing-block"
@@ -17,11 +25,32 @@ export type CutRepairReason =
   | "too-short"
   | "too-long"
   | "too-few-blocks"
-  | "invalid-duration";
+  | "invalid-duration"
+  | "overlap";
 
 export type CutRepairResult =
-  | { ok: true; cut: RawLLMCut; note: string }
+  | { ok: true; cut: RawLLMCut; note: string; duration_note: DurationNote }
   | { ok: false; reason: CutRepairReason };
+
+export type CutRejection = {
+  blocks: string[];
+  start: number;
+  end: number;
+  reason: CutRepairReason;
+  title?: string;
+};
+
+export type CutNormalization = {
+  cuts: Cut[];
+  rejections: CutRejection[];
+  kept_notes: Array<{
+    blocks: string[];
+    start: number;
+    end: number;
+    duration_note: DurationNote;
+    repair_note: string;
+  }>;
+};
 
 /**
  * Parse raw LLM JSON array into RawLLMCut objects.
@@ -136,16 +165,16 @@ export function repairCutRange(cut: RawLLMCut, blocks: SemanticBlock[]): CutRepa
   if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) {
     return rejectCut("invalid-duration");
   }
-  if (selected.length < MIN_CUT_BLOCKS) {
-    return rejectCut("too-few-blocks");
-  }
-  if (end - start < MIN_CUT_SECONDS) {
+
+  const duration = end - start;
+  if (duration < HARD_MIN_CUT_SECONDS) {
     return rejectCut("too-short");
   }
-  if (end - start > MAX_CUT_SECONDS) {
+  if (duration > HARD_MAX_CUT_SECONDS) {
     return rejectCut("too-long");
   }
 
+  const durationNote = durationNoteFor(duration);
   const blockIds = selected.map((block) => block.block_id);
   const original = `${cut.blocks.join(",")} @ ${cut.start}-${cut.end}`;
   const repaired = `${blockIds.join(",")} @ ${start}-${end}`;
@@ -158,7 +187,18 @@ export function repairCutRange(cut: RawLLMCut, blocks: SemanticBlock[]): CutRepa
       end,
     },
     note: `${original} → ${repaired}`,
+    duration_note: durationNote,
   };
+}
+
+function durationNoteFor(duration: number): DurationNote {
+  if (duration < PREFERRED_MIN_CUT_SECONDS) {
+    return "shorter-than-preferred";
+  }
+  if (duration > PREFERRED_MAX_CUT_SECONDS) {
+    return "longer-than-preferred";
+  }
+  return "within-preferred-window";
 }
 
 /**
@@ -189,13 +229,17 @@ export function toCuts(raw: RawLLMCut[], startIndex: number): Cut[] {
  * @param rawCuts - Parallel array of raw cuts (for score access).
  * @returns Deduplicated cut list.
  */
-export function deduplicateCuts(cuts: Cut[], rawCuts: RawLLMCut[]): Cut[] {
+export function deduplicateCuts(
+  cuts: Cut[],
+  rawCuts: RawLLMCut[],
+): { kept: Cut[]; dropped: Cut[] } {
   const scoreOf = (cut: Cut): number => {
     const raw = rawCuts.find((r) => r.blocks.join() === cut.block_ids.join());
     return raw?.score ?? 0;
   };
 
   const result: Cut[] = [];
+  const dropped: Cut[] = [];
 
   for (const candidate of cuts) {
     const overlappingIndex = result.findIndex((existing) => {
@@ -209,33 +253,75 @@ export function deduplicateCuts(cuts: Cut[], rawCuts: RawLLMCut[]): Cut[] {
     } else {
       const existing = result[overlappingIndex];
       if (scoreOf(candidate) > scoreOf(existing)) {
+        dropped.push(existing);
         result[overlappingIndex] = candidate;
+      } else {
+        dropped.push(candidate);
       }
     }
   }
 
-  return result;
+  return { kept: result, dropped };
 }
 
-export function normalizeCuts(rawCuts: RawLLMCut[], allBlocks: SemanticBlock[]): Cut[] {
+function rejectionFromCut(cut: Cut, reason: CutRepairReason): CutRejection {
+  return {
+    blocks: cut.block_ids,
+    start: cut.start,
+    end: cut.end,
+    reason,
+    title: cut.title ?? undefined,
+  };
+}
+
+export function normalizeCuts(rawCuts: RawLLMCut[], allBlocks: SemanticBlock[]): CutNormalization {
   const repairedRaw: RawLLMCut[] = [];
-  let rejected = 0;
+  const rejections: CutRejection[] = [];
+  const keptNotes: CutNormalization["kept_notes"] = [];
+
   for (const raw of rawCuts) {
     const repaired = repairCutRange(raw, allBlocks);
     if (!repaired.ok) {
-      rejected += 1;
+      rejections.push({
+        blocks: raw.blocks,
+        start: raw.start,
+        end: raw.end,
+        reason: repaired.reason,
+        title: raw.title,
+      });
       console.warn(`[analysis] rejecting cut [${raw.blocks.join(",")}]: ${repaired.reason}`);
       continue;
     }
-    console.log(`[analysis] cut repaired: ${repaired.note}`);
+    console.log(`[analysis] cut repaired: ${repaired.note} (${repaired.duration_note})`);
     repairedRaw.push(repaired.cut);
+    keptNotes.push({
+      blocks: repaired.cut.blocks,
+      start: repaired.cut.start,
+      end: repaired.cut.end,
+      duration_note: repaired.duration_note,
+      repair_note: repaired.note,
+    });
   }
 
+  const preDedupCuts = toCuts(repairedRaw, 0);
+  const deduped = deduplicateCuts(preDedupCuts, repairedRaw);
+  for (const dropped of deduped.dropped) {
+    rejections.push(rejectionFromCut(dropped, "overlap"));
+    const noteIndex = keptNotes.findIndex(
+      (note) => note.blocks.join() === dropped.block_ids.join() && note.start === dropped.start,
+    );
+    if (noteIndex >= 0) {
+      keptNotes.splice(noteIndex, 1);
+    }
+    console.warn(
+      `[analysis] rejecting cut [${dropped.block_ids.join(",")}]: overlap`,
+    );
+  }
+
+  const cuts = deduped.kept.map((cut, index) => ({ ...cut, cut_id: `c${index + 1}` }));
   console.log(
-    `[analysis] kept ${repairedRaw.length} cut(s), rejected ${rejected} of ${rawCuts.length}`,
+    `[analysis] kept ${cuts.length} cut(s), rejected ${rejections.length} of ${rawCuts.length}`,
   );
 
-  const preDedupCuts = toCuts(repairedRaw, 0);
-  const finalCuts = deduplicateCuts(preDedupCuts, repairedRaw);
-  return finalCuts.map((cut, index) => ({ ...cut, cut_id: `c${index + 1}` }));
+  return { cuts, rejections, kept_notes: keptNotes };
 }

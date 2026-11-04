@@ -137,6 +137,7 @@ export default function App() {
   const [aiResponseRaw, setAiResponseRaw] = useState<string | null>(null);
   const [showHowToUseDialog, setShowHowToUseDialog] = useState(false);
   const [llmModel, setLlmModel] = useState<string>("");
+  const [llmBaseUrl, setLlmBaseUrl] = useState("http://localhost:1234/v1");
   const [embeddingModel, setEmbeddingModel] = useState<string>("nomic-embed-text");
   const [registeredEmbeddingModels, setRegisteredEmbeddingModels] = useState<string[]>([]);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -763,6 +764,7 @@ export default function App() {
     embeddingModelSet.add(configuredEmbeddingModel);
 
     setLlmModel(configuredModel);
+    setLlmBaseUrl(String(active.llm.base_url || "http://localhost:1234/v1"));
     setEmbeddingModel(configuredEmbeddingModel);
     setRegisteredEmbeddingModels(Array.from(embeddingModelSet));
     setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
@@ -806,11 +808,13 @@ export default function App() {
     nextEmbeddingModel: string,
     nextRegisteredEmbeddingModels: string[],
     forceCpu: boolean,
+    baseUrl: string,
   ) {
     try {
       const response = await saveToolConfigs({
         llm: {
           model,
+          base_url: baseUrl,
           system_prompt: prompt,
           embedding_model: nextEmbeddingModel,
           registered_embedding_models: nextRegisteredEmbeddingModels,
@@ -1370,6 +1374,7 @@ export default function App() {
       {showLLMConfigDialog && (
         <LLMConfigDialog
           llmModel={llmModel}
+          llmBaseUrl={llmBaseUrl}
           embeddingModel={embeddingModel}
           registeredEmbeddingModels={registeredEmbeddingModels}
           availableModels={ollamaModels}
@@ -1383,8 +1388,16 @@ export default function App() {
           onRegisterModel={registerNewOllamaModel}
           onRemoveModel={removeRegisteredOllamaModel}
           onRefreshModels={() => refreshOllamaModelOptions(true)}
-          onSave={(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels, forceCpu) => {
+          onSave={(
+            model,
+            prompt,
+            nextEmbeddingModel,
+            nextRegisteredEmbeddingModels,
+            forceCpu,
+            baseUrl,
+          ) => {
             setLlmModel(model);
+            setLlmBaseUrl(baseUrl);
             setLlmSystemPrompt(prompt);
             setEmbeddingModel(nextEmbeddingModel);
             setRegisteredEmbeddingModels(nextRegisteredEmbeddingModels);
@@ -1395,6 +1408,7 @@ export default function App() {
               nextEmbeddingModel,
               nextRegisteredEmbeddingModels,
               forceCpu,
+              baseUrl,
             );
           }}
           onCancel={() => setShowLLMConfigDialog(false)}

@@ -1,224 +1,139 @@
 /**
- * LLM client wrapper for semantic analysis requests.
+ * Local chat client for analysis.
+ * Speaks the OpenAI-compatible API used by LM Studio. It does not call Ollama
+ * and it never sends an API key.
  */
 
 import { config } from "../core/config";
-import { optionsForModel } from "./localRuntime";
+import { resolveAnalysisEndpoint } from "../../../shared/localInference";
+import { redactSecrets } from "./redact";
 
 interface Message {
   role: string;
   content: string;
 }
 
-interface ChatOptions {
-  [key: string]: any;
+interface ChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
 }
 
-interface ChatResponse {
-  message?: {
-    content?: string;
-  };
-}
-
-class OllamaHttpError extends Error {
+class LocalChatHttpError extends Error {
   status: number;
   responseText: string;
 
   constructor(status: number, responseText: string) {
-    super(`Ollama HTTP error: ${status} ${responseText}`.trim());
-    this.name = "OllamaHttpError";
+    super(`LM Studio HTTP error: ${status} ${responseText}`.trim());
+    this.name = "LocalChatHttpError";
     this.status = status;
     this.responseText = responseText;
   }
 }
 
-export class OllamaClient {
-  private baseUrl: string;
-  private model: string;
-  private apiKey: string;
+export interface AnalysisChatClient {
+  readonly model: string;
+  readonly baseUrl: string;
+  chat(messages: Message[]): Promise<string>;
+}
+
+export class LocalChatClient implements AnalysisChatClient {
+  readonly baseUrl: string;
+  readonly model: string;
   private timeoutSeconds: number;
 
   constructor(
-    baseUrl: string = config.OLLAMA_BASE_URL,
-    model: string = config.OLLAMA_MODEL,
-    apiKey: string = config.OLLAMA_API_KEY,
-    timeoutSeconds: number = config.OLLAMA_TIMEOUT_SECONDS,
+    baseUrl: string = config.LM_STUDIO_BASE_URL,
+    model: string = config.LM_STUDIO_MODEL,
+    timeoutSeconds: number = config.LLM_TIMEOUT_SECONDS,
   ) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.model = model;
-    this.apiKey = apiKey;
+    const resolved = resolveAnalysisEndpoint({ baseUrl, model });
+    this.baseUrl = resolved.baseUrl;
+    this.model = resolved.model;
     this.timeoutSeconds = timeoutSeconds;
   }
 
-  async chat(messages: Message[], options?: ChatOptions): Promise<string> {
-    const buildPayload = (model: string): any => {
-      const payload: any = {
-        model,
-        messages,
-        stream: false,
-      };
-
-      const runtime = optionsForModel(model);
-      const merged = { ...runtime, ...(options || {}) };
-      if (Object.keys(merged).length > 0) {
-        payload.options = merged;
-      }
-
-      return payload;
+  async chat(messages: Message[]): Promise<string> {
+    const payload = {
+      model: this.model,
+      messages,
+      temperature: 0,
+      stream: false,
     };
 
     try {
-      const response = await this.postJson("/api/chat", buildPayload(this.model));
-      const message = response.message || {};
-      return String(message.content || "");
-    } catch (error: any) {
-      const unauthorized = this.isUnauthorizedError(error);
-      const cloudModel = this.model.endsWith("-cloud");
-
-      if (unauthorized && cloudModel) {
-        const fallbackModel = await this.findLocalFallbackModel();
-        if (fallbackModel) {
-          console.warn(
-            `[analysis] Cloud model '${this.model}' unauthorized. Retrying with local model '${fallbackModel}'.`,
-          );
-          const response = await this.postJson("/api/chat", buildPayload(fallbackModel));
-          const retryMessage = response.message || {};
-          return String(retryMessage.content || "");
-        }
-
-        throw new Error(
-          "Você está usando um modelo cloud e o Ollama não autorizou a requisição. Faça login com 'ollama signin', configure OLLAMA_API_KEY, ou selecione um modelo local já baixado.",
-        );
-      }
-
+      const response = await this.postJson("/chat/completions", payload);
+      const content = response.choices?.[0]?.message?.content;
+      return String(content || "");
+    } catch (error: unknown) {
       throw new Error(this.toUserFriendlyError(error));
     }
   }
 
-  private isUnauthorizedError(error: unknown): boolean {
-    if (error instanceof OllamaHttpError) {
-      return error.status === 401 || error.status === 403;
-    }
-
-    const message = String((error as any)?.message || "");
-    return /\b401\b|\b403\b|unauthorized|forbidden|not\s+authenticated/i.test(message);
-  }
-
   private toUserFriendlyError(error: unknown): string {
-    if (error instanceof OllamaHttpError) {
-      const detail = String(error.responseText || "").trim();
-      const modelLabel = this.model || "modelo configurado";
-
-      if (error.status === 401 || error.status === 403) {
-        if (this.model.endsWith("-cloud")) {
-          return `Falha de autenticação no Ollama Cloud para o modelo '${modelLabel}'. Faça login com 'ollama signin' ou configure OLLAMA_API_KEY.`;
-        }
-        return `Falha de autenticação ao acessar o Ollama para o modelo '${modelLabel}'. Verifique credenciais e permissões.`;
-      }
+    if (error instanceof LocalChatHttpError) {
+      const detail = redactSecrets(String(error.responseText || "")).trim();
+      const modelLabel = this.model || "modelo local";
 
       if (error.status === 404) {
-        return `Modelo '${modelLabel}' não encontrado no Ollama. Se for local, baixe com 'ollama pull ${modelLabel}'. Se for cloud, confirme o nome do modelo e login.`;
-      }
-
-      if (error.status === 429) {
-        return "Ollama retornou limite de requisições (429). Aguarde alguns instantes e tente novamente.";
+        return `Modelo '${modelLabel}' não encontrado em ${this.baseUrl}. Carregue um modelo local no LM Studio e atualize o nome nas configurações.`;
       }
 
       if (error.status >= 500) {
-        return `Ollama retornou erro interno (${error.status}). ${detail || "Tente novamente em instantes."}`;
+        return `LM Studio retornou erro interno (${error.status}). ${detail || "Tente novamente em instantes."}`;
       }
 
-      return `Falha na chamada ao Ollama (${error.status}). ${detail || "Sem detalhes."}`;
+      return `Falha na chamada ao LM Studio (${error.status}). ${detail || "Sem detalhes."}`;
     }
 
-    const message = String((error as any)?.message || "");
+    const message = redactSecrets(String((error as { message?: string })?.message || ""));
 
     if (/timed out|timeout/i.test(message)) {
-      return "A requisição para o Ollama excedeu o tempo limite. Verifique se o modelo está disponível e tente novamente.";
+      return `A requisição para o LM Studio em ${this.baseUrl} excedeu o tempo limite. Confirme se o modelo local está carregado.`;
     }
 
-    if (
-      /Failed to reach Ollama server|fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(message)
-    ) {
-      return `Não foi possível conectar ao Ollama em ${this.baseUrl}. Confirme se o Ollama está em execução.`;
+    if (/Failed to reach LM Studio|fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(message)) {
+      return `Não foi possível conectar ao LM Studio em ${this.baseUrl}. Confirme se o servidor local está em execução.`;
     }
 
-    return message || "Falha inesperada ao comunicar com o Ollama.";
+    return message || "Falha inesperada ao comunicar com o LM Studio.";
   }
 
-  private async findLocalFallbackModel(): Promise<string | null> {
-    const url = `${this.baseUrl}/api/tags`;
+  private async postJson(path: string, payload: unknown): Promise<ChatCompletionResponse> {
+    const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutSeconds * 1000);
 
     try {
       const response = await fetch(url, {
-        method: "GET",
-        headers: this.buildHeaders(),
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        return null;
+        const errorText = await response.text();
+        throw new LocalChatHttpError(response.status, errorText);
       }
 
-      const data = (await response.json()) as { models?: Array<{ name?: string }> };
-      const modelNames = Array.isArray(data.models)
-        ? data.models.map((m) => String(m?.name || "").trim()).filter(Boolean)
-        : [];
-
-      // Prefer non-cloud models to avoid auth requirements.
-      const localModel = modelNames.find((name) => !name.endsWith("-cloud"));
-      return localModel || null;
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
-    return headers;
-  }
-
-  private async postJson(path: string, payload: any): Promise<ChatResponse> {
-    const url = `${this.baseUrl}${path}`;
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.timeoutSeconds * 1000);
-
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: this.buildHeaders(),
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new OllamaHttpError(response.status, errorText);
-        }
-
-        return (await response.json()) as ChatResponse;
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (error: any) {
-      if (error instanceof OllamaHttpError) {
+      return (await response.json()) as ChatCompletionResponse;
+    } catch (error: unknown) {
+      if (error instanceof LocalChatHttpError) {
         throw error;
       }
-      if (error.name === "AbortError") {
-        throw new Error("Ollama request timed out");
+      const name = (error as { name?: string })?.name;
+      const message = (error as { message?: string })?.message || "";
+      if (name === "AbortError") {
+        throw new Error("LM Studio request timed out");
       }
-      throw new Error(`Failed to reach Ollama server: ${error.message}`);
+      throw new Error(`Failed to reach LM Studio: ${message}`);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

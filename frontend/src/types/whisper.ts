@@ -4,6 +4,8 @@
  */
 
 export interface WhisperConfig {
+  /** faster-whisper is the default. openai-whisper keeps the original CLI. */
+  engine?: "faster-whisper" | "openai-whisper";
   // Model options
   model: "turbo" | "large-v3" | "large" | "medium" | "small" | "base" | "tiny";
   model_dir?: string;

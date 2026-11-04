@@ -1,4 +1,4 @@
-import { OllamaClient } from "../../llm/client";
+import type { AnalysisChatClient } from "../../llm/client";
 import { SemanticBlock } from "../../models/semantic_block";
 import { TopicSegment } from "../../models/topic_segment";
 import {
@@ -15,7 +15,7 @@ async function collectFromBlocks(
   jobId: string,
   label: string,
   blocks: SemanticBlock[],
-  client: OllamaClient,
+  client: AnalysisChatClient,
   systemPrompt: string,
   topics: TopicSegment[] | undefined,
   strategy: ProcessingStrategy,
@@ -34,14 +34,38 @@ async function collectFromBlocks(
   return rawCuts;
 }
 
+export type TopicDispositionName = "analyzed" | "pass-1-not-candidate";
+
+export type TopicDisposition = {
+  topic_id: string;
+  start: number;
+  end: number;
+  duration_seconds: number;
+  block_count: number;
+  block_ids: string[];
+  disposition: TopicDispositionName;
+};
+
+function describeTopic(topic: TopicSegment, disposition: TopicDispositionName): TopicDisposition {
+  return {
+    topic_id: topic.topic_id,
+    start: topic.start,
+    end: topic.end,
+    duration_seconds: topic.durationSeconds,
+    block_count: topic.blockCount,
+    block_ids: topic.block_ids,
+    disposition,
+  };
+}
+
 export async function collectRawCutsForStrategy(
   jobId: string,
   videoDurationSeconds: number,
   allBlocks: SemanticBlock[],
-  client: OllamaClient,
+  client: AnalysisChatClient,
   systemPrompt: string,
   topics?: TopicSegment[],
-): Promise<RawLLMCut[]> {
+): Promise<{ rawCuts: RawLLMCut[]; topics: TopicDisposition[] }> {
   const strategy = selectStrategy(videoDurationSeconds);
 
   console.log(
@@ -49,24 +73,38 @@ export async function collectRawCutsForStrategy(
   );
 
   if (!strategy.useTopicSegmentation) {
-    return collectFromBlocks(jobId, "short", allBlocks, client, systemPrompt, topics, strategy);
+    return {
+      rawCuts: await collectFromBlocks(
+        jobId,
+        "short",
+        allBlocks,
+        client,
+        systemPrompt,
+        topics,
+        strategy,
+      ),
+      topics: [],
+    };
   }
 
   const resolvedTopics = topics && topics.length > 0 ? topics : loadTopics(jobId);
   console.log(`[analysis] Processing ${resolvedTopics.length} topic(s)`);
   const allRawCuts: RawLLMCut[] = [];
+  const dispositions: TopicDisposition[] = [];
 
   for (const topic of resolvedTopics) {
     const topicBlocks = allBlocks.filter((block) => topic.block_ids.includes(block.block_id));
     if (strategy.useTwoPass) {
       const isCandidate = await runPass1Candidacy(topic, allBlocks, client);
       if (!isCandidate) {
+        dispositions.push(describeTopic(topic, "pass-1-not-candidate"));
         console.log(`[analysis] topic=${topic.topic_id} rejected by Pass 1 — skipping`);
         continue;
       }
       console.log(`[analysis] topic=${topic.topic_id} accepted by Pass 1 — running full pass`);
     }
 
+    dispositions.push(describeTopic(topic, "analyzed"));
     const raw = await collectFromBlocks(
       jobId,
       `topic=${topic.topic_id}`,
@@ -79,5 +117,5 @@ export async function collectRawCutsForStrategy(
     allRawCuts.push(...raw);
   }
 
-  return allRawCuts;
+  return { rawCuts: allRawCuts, topics: dispositions };
 }

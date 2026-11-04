@@ -36,6 +36,9 @@ export function WhisperConfigDialog({
 }: WhisperConfigDialogProps) {
   // Model options
   const [model, setModel] = useState<string>(initialConfig?.model || "large-v3");
+  const [engine, setEngine] = useState<"faster-whisper" | "openai-whisper">(
+    initialConfig?.engine === "openai-whisper" ? "openai-whisper" : "faster-whisper",
+  );
 
   // Device & Output
   const [device, setDevice] = useState<"cpu" | "cuda">(() => {
@@ -176,6 +179,7 @@ export function WhisperConfigDialog({
 
   const handleSave = () => {
     const config: Partial<WhisperConfig> = {
+      engine,
       model: model as "turbo" | "large-v3" | "large" | "medium" | "small" | "base" | "tiny",
       device: runtimeDevice,
       output_format: formats as any,
@@ -215,6 +219,7 @@ export function WhisperConfigDialog({
   // Gerar comando Whisper dinamicamente
   const whisperCommand = useMemo(() => {
     const config: Partial<WhisperConfig> = {
+      engine,
       model: model as "turbo" | "large-v3" | "large" | "medium" | "small" | "base" | "tiny",
       device: runtimeDevice,
       output_format: formats as any,
@@ -250,6 +255,7 @@ export function WhisperConfigDialog({
     };
     return generateWhisperCommand(config, ".\\Nome_Do_Seu_Video");
   }, [
+    engine,
     model,
     device,
     formats,
@@ -295,6 +301,23 @@ export function WhisperConfigDialog({
         <div className="dialog-content" style={{ padding: "20px" }}>
           {/* Basic Options Section */}
           <ConfigSection title="Opções Básicas" showTopSeparator={false}>
+            <ConfigField
+              label="Engine"
+              description="faster-whisper é o padrão. openai-whisper fica disponível como alternativa."
+              tooltip="faster-whisper usa o mesmo large-v3 via CTranslate2. A GPU é o padrão. openai-whisper é o CLI anterior, só quando você escolhe essa opção."
+            >
+              <SelectInput
+                value={engine}
+                onChange={(value) =>
+                  setEngine(value === "openai-whisper" ? "openai-whisper" : "faster-whisper")
+                }
+                options={[
+                  { label: "faster-whisper (padrão)", value: "faster-whisper" },
+                  { label: "openai-whisper (CLI)", value: "openai-whisper" },
+                ]}
+              />
+            </ConfigField>
+
             <ConfigField
               label="Modelo"
               description="Escolha entre modelos rápidos ou precisos"

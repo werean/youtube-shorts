@@ -7,8 +7,16 @@ import * as path from "path";
 import { dataDir } from "./paths";
 import { config } from "./config";
 import { SYSTEM_PROMPT_TEMPLATE } from "../llm/prompts";
+import {
+  isCloudModelName,
+  resolveAnalysisEndpoint,
+} from "../../../shared/localInference";
+
+export type WhisperEngine = "faster-whisper" | "openai-whisper";
 
 export type WhisperToolConfig = {
+  /** faster-whisper is the default. openai-whisper is the explicit CLI alternative. */
+  engine?: WhisperEngine;
   model?: string;
   device?: "cpu" | "cuda";
   output_format?: string[];
@@ -67,6 +75,8 @@ export type LlmRegisteredModel = {
 
 export type LlmToolConfig = {
   model: string;
+  /** OpenAI-compatible base URL. Analysis uses LM Studio, typically http://localhost:1234/v1. */
+  base_url?: string;
   system_prompt: string;
   registered_models?: LlmRegisteredModel[];
   embedding_model?: string;
@@ -214,6 +224,7 @@ function toStringOrNull(value: any): string | null {
 function normalizeWhisperConfig(whisperConfig: WhisperToolConfig): WhisperToolConfig {
   return {
     ...whisperConfig,
+    engine: whisperConfig.engine === "openai-whisper" ? "openai-whisper" : "faster-whisper",
     model: whisperConfig.model || config.WHISPER_MODEL_NAME,
     device: whisperConfig.device === "cpu" ? "cpu" : "cuda",
     output_format:
@@ -335,33 +346,43 @@ function normalizeRegisteredEmbeddingModels(value: unknown): string[] {
 }
 
 function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
-  const model = String(llmConfig.model || config.OLLAMA_MODEL).trim() || config.OLLAMA_MODEL;
+  const resolved = resolveAnalysisEndpoint({
+    model: llmConfig.model,
+    baseUrl: llmConfig.base_url,
+  });
+  const model = resolved.model || config.LM_STUDIO_MODEL;
   const embeddingModel =
     String(llmConfig.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
+  const safeEmbeddingModel = isCloudModelName(embeddingModel) ? "nomic-embed-text" : embeddingModel;
   const prompt = String(llmConfig.system_prompt || SYSTEM_PROMPT_TEMPLATE);
-  const registered = normalizeRegisteredModels(llmConfig.registered_models);
+  const registered = normalizeRegisteredModels(llmConfig.registered_models).filter(
+    (item) => !isCloudModelName(item.name),
+  );
   const registeredEmbeddingModels = normalizeRegisteredEmbeddingModels(
     llmConfig.registered_embedding_models,
-  );
+  ).filter((item) => !isCloudModelName(item));
 
   if (!registered.some((item) => item.name.toLowerCase() === model.toLowerCase())) {
     registered.unshift({
       name: model,
-      source: model.endsWith("-cloud") ? "cloud" : "local",
+      source: "local",
     });
   }
 
   if (
-    !registeredEmbeddingModels.some((item) => item.toLowerCase() === embeddingModel.toLowerCase())
+    !registeredEmbeddingModels.some(
+      (item) => item.toLowerCase() === safeEmbeddingModel.toLowerCase(),
+    )
   ) {
-    registeredEmbeddingModels.unshift(embeddingModel);
+    registeredEmbeddingModels.unshift(safeEmbeddingModel);
   }
 
   return {
     model,
+    base_url: resolved.baseUrl,
     system_prompt: prompt,
     registered_models: registered,
-    embedding_model: embeddingModel,
+    embedding_model: safeEmbeddingModel,
     registered_embedding_models: registeredEmbeddingModels,
     force_cpu: llmConfig.force_cpu === true,
   };
@@ -370,6 +391,7 @@ function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
 function defaultToolConfigs(): ToolConfigs {
   return {
     whisper: {
+      engine: "faster-whisper",
       model: config.WHISPER_MODEL_NAME,
       device: "cuda",
       output_format: ["json", "vtt", "txt"],
@@ -420,12 +442,13 @@ function defaultToolConfigs(): ToolConfigs {
       metadata: null,
     },
     llm: {
-      model: config.OLLAMA_MODEL,
+      model: config.LM_STUDIO_MODEL,
+      base_url: config.LM_STUDIO_BASE_URL,
       system_prompt: SYSTEM_PROMPT_TEMPLATE,
       registered_models: [
         {
-          name: config.OLLAMA_MODEL,
-          source: config.OLLAMA_MODEL.endsWith("-cloud") ? "cloud" : "local",
+          name: config.LM_STUDIO_MODEL,
+          source: "local",
         },
       ],
       embedding_model: "nomic-embed-text",
@@ -508,13 +531,15 @@ export function loadActiveToolConfigs(): ToolConfigs {
 
   const custom = loadCustomToolConfigs();
   if (custom) {
-    setActiveConfigsCache("custom", custom);
-    return cloneToolConfigs(custom);
+    const normalized = mergeWithDefaults(custom);
+    setActiveConfigsCache("custom", normalized);
+    return cloneToolConfigs(normalized);
   }
 
   const defaults = loadDefaultToolConfigs();
-  setActiveConfigsCache("default", defaults);
-  return cloneToolConfigs(defaults);
+  const normalized = mergeWithDefaults(defaults);
+  setActiveConfigsCache("default", normalized);
+  return cloneToolConfigs(normalized);
 }
 
 function mergeWithDefaults(partial: Partial<ToolConfigs>): ToolConfigs {

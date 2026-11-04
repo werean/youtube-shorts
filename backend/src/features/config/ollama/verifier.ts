@@ -1,9 +1,16 @@
 import { config } from "../../../core/config";
+import { isCloudModelName } from "../../../../../shared/localInference";
 
 export async function testOllamaModel(
   model: string,
 ): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
-  const isCloudModel = model.endsWith("-cloud");
+  if (isCloudModelName(model)) {
+    return {
+      ok: false,
+      error:
+        "Modelos cloud do Ollama não são usados. A análise roda em um servidor local compatível com a API do LM Studio.",
+    };
+  }
 
   try {
     const baseUrl = config.OLLAMA_BASE_URL.replace(/\/$/, "");
@@ -11,7 +18,6 @@ export async function testOllamaModel(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(config.OLLAMA_API_KEY ? { Authorization: `Bearer ${config.OLLAMA_API_KEY}` } : {}),
       },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
@@ -25,17 +31,9 @@ export async function testOllamaModel(
       const detail = (await response.text()).trim();
 
       if (response.status === 401 || response.status === 403) {
-        if (isCloudModel) {
-          return {
-            ok: false,
-            error:
-              "Autenticação necessária para usar modelo cloud. Faça login com 'ollama signin' ou configure OLLAMA_API_KEY.",
-          };
-        }
-
         return {
           ok: false,
-          error: "Ollama rejeitou a autenticação da requisição. Verifique suas credenciais.",
+          error: "Ollama local rejeitou a requisição. A análise não usa esse servidor.",
         };
       }
 

@@ -116,20 +116,23 @@ mock.module("../../../src/core/taskLogs", () => ({
   clearTaskLogs: () => undefined,
 }));
 
+const MockChatClient = class {
+  async chat() {
+    return JSON.stringify([
+      {
+        blocks: ["b1"],
+        start: 0,
+        end: 10,
+        score: 1,
+        title: "Valid cut",
+      },
+    ]);
+  }
+};
+
 mock.module("../../../src/llm/client", () => ({
-  OllamaClient: class {
-    async chat() {
-      return JSON.stringify([
-        {
-          blocks: ["b1"],
-          start: 0,
-          end: 10,
-          score: 1,
-          title: "Valid cut",
-        },
-      ]);
-    }
-  },
+  OllamaClient: MockChatClient,
+  LocalChatClient: MockChatClient,
 }));
 
 mock.module("../../../src/video/ffmpeg", () => ({

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { OllamaClient } from "../../../src/llm/client";
+import { LocalChatClient } from "../../../src/llm/client";
 
-describe("OllamaClient", () => {
+describe("LocalChatClient", () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
@@ -13,59 +13,46 @@ describe("OllamaClient", () => {
     global.fetch = originalFetch;
   });
 
-  it("retries with local model when cloud model returns 401", async () => {
-    const fetchMock = vi.fn();
+  it("posts to the LM Studio chat endpoint and does not send an API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "[]" } }],
+      }),
+    });
+    global.fetch = fetchMock as typeof fetch;
 
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        text: async () => '{"error":"unauthorized"}',
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          models: [{ name: "llama3.2:3b" }, { name: "gpt-oss:120b-cloud" }],
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: { content: "[]" } }),
-      });
-
-    global.fetch = fetchMock as any;
-
-    const client = new OllamaClient("http://localhost:11434", "gpt-oss:120b-cloud", "", 5);
+    const client = new LocalChatClient("http://localhost:1234/v1", "qwen2.5-7b-instruct", 5);
     const result = await client.chat([{ role: "user", content: "hello" }]);
 
     expect(result).toBe("[]");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-
-    const thirdCall = fetchMock.mock.calls[2];
-    expect(thirdCall?.[0]).toContain("/api/chat");
-    expect(String(thirdCall?.[1]?.body)).toContain("llama3.2:3b");
+    expect(client.model).toBe("qwen2.5-7b-instruct");
+    expect(client.baseUrl).toBe("http://localhost:1234/v1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:1234/v1/chat/completions");
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(init.body)).toMatchObject({
+      model: "qwen2.5-7b-instruct",
+      stream: false,
+    });
+    expect(JSON.stringify(init.headers)).not.toMatch(/authorization/i);
   });
 
-  it("throws actionable message when cloud model unauthorized and no local fallback", async () => {
-    const fetchMock = vi.fn();
+  it("replaces a cloud Ollama model and Ollama URL before any request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "[]" } }] }),
+    });
+    global.fetch = fetchMock as typeof fetch;
 
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        text: async () => '{"error":"unauthorized"}',
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ models: [{ name: "gpt-oss:120b-cloud" }] }),
-      });
+    const client = new LocalChatClient("http://localhost:11434", "gpt-oss:120b-cloud", 5);
+    await client.chat([{ role: "user", content: "hello" }]);
 
-    global.fetch = fetchMock as any;
-
-    const client = new OllamaClient("http://localhost:11434", "gpt-oss:120b-cloud", "", 5);
-
-    await expect(client.chat([{ role: "user", content: "hello" }])).rejects.toThrow(
-      "Você está usando um modelo cloud e o Ollama não autorizou a requisição",
-    );
+    expect(client.model).toBe("local-model");
+    expect(client.baseUrl).toBe("http://localhost:1234/v1");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:1234/v1/chat/completions");
+    expect(String(fetchMock.mock.calls[0][1].body)).not.toContain("gpt-oss");
+    expect(String(fetchMock.mock.calls[0][1].body)).not.toContain("11434");
   });
 });

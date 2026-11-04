@@ -1,5 +1,6 @@
 import { loadActiveToolConfigs } from "../../core/toolConfigs";
-import { OllamaClient } from "../../llm/client";
+import { LocalChatClient, type AnalysisChatClient } from "../../llm/client";
+import { resolveAnalysisEndpoint } from "../../../../shared/localInference";
 import { buildCutSelectionPrompt, buildTopicCandidacyPrompt } from "../../llm/prompts";
 import { SemanticBlock } from "../../models/semantic_block";
 import { TopicSegment } from "../../models/topic_segment";
@@ -7,9 +8,12 @@ import { parseRawCuts } from "./cuts";
 import { parseJsonContent } from "./jsonText";
 import { RawLLMCut } from "./types";
 
-export function buildClient(toolConfigs: ReturnType<typeof loadActiveToolConfigs>): OllamaClient {
-  const model = toolConfigs.llm.model || undefined;
-  return new OllamaClient(undefined, model);
+export function buildClient(toolConfigs: ReturnType<typeof loadActiveToolConfigs>): LocalChatClient {
+  const resolved = resolveAnalysisEndpoint({
+    model: toolConfigs.llm.model,
+    baseUrl: toolConfigs.llm.base_url,
+  });
+  return new LocalChatClient(resolved.baseUrl, resolved.model);
 }
 
 /**
@@ -17,13 +21,13 @@ export function buildClient(toolConfigs: ReturnType<typeof loadActiveToolConfigs
  *
  * @param topic - Topic to evaluate.
  * @param allBlocks - Full semantic block list for the job.
- * @param client - Ollama client instance.
+ * @param client - Local chat client instance.
  * @returns true if the topic is a candidate, false if it should be skipped.
  */
 export async function runPass1Candidacy(
   topic: TopicSegment,
   allBlocks: SemanticBlock[],
-  client: OllamaClient,
+  client: AnalysisChatClient,
 ): Promise<boolean> {
   const prompt = buildTopicCandidacyPrompt(topic, allBlocks);
   let lastError: unknown;
@@ -56,14 +60,14 @@ export async function runPass1Candidacy(
  *
  * @param jobId - Job identifier (for logging).
  * @param blocks - Semantic blocks to analyse.
- * @param client - Ollama client instance.
+ * @param client - Local chat client instance.
  * @param systemPrompt - System prompt from tool config.
  * @returns Array of validated RawLLMCut (may be empty if LLM returned nothing useful).
  */
 export async function runFullPass(
   jobId: string,
   blocks: SemanticBlock[],
-  client: OllamaClient,
+  client: AnalysisChatClient,
   systemPrompt: string,
   topics?: TopicSegment[],
 ): Promise<RawLLMCut[]> {

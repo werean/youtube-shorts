@@ -19,6 +19,7 @@ interface OllamaModelCatalogItem {
 
 interface LLMConfigDialogProps {
   llmModel: string;
+  llmBaseUrl?: string;
   embeddingModel: string;
   registeredEmbeddingModels?: string[];
   availableModels: string[];
@@ -45,6 +46,7 @@ interface LLMConfigDialogProps {
     embeddingModel: string,
     registeredEmbeddingModels: string[],
     forceCpu: boolean,
+    baseUrl: string,
   ) => void;
   onCancel: () => void;
 }
@@ -95,6 +97,7 @@ function formatDisplayModelName(name: string, source: "cloud" | "local"): string
 
 export function LLMConfigDialog({
   llmModel: initialModel,
+  llmBaseUrl: initialBaseUrl = "http://localhost:1234/v1",
   embeddingModel: initialEmbeddingModel,
   registeredEmbeddingModels = [],
   availableModels,
@@ -110,6 +113,7 @@ export function LLMConfigDialog({
   onCancel,
 }: LLMConfigDialogProps) {
   const [model, setModel] = useState(initialModel);
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl || "http://localhost:1234/v1");
   const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState(
     initialEmbeddingModel || DEFAULT_EMBEDDING_MODELS[0],
   );
@@ -535,8 +539,49 @@ export function LLMConfigDialog({
                 marginBottom: "8px",
               }}
             >
-              Modelo do Ollama
+              Modelo local (LM Studio)
             </label>
+            <AppInput
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="local-model"
+              fullWidth
+              style={{
+                padding: "10px",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+                backgroundColor: "var(--bg-contrast)",
+                color: "var(--ink)",
+                marginBottom: "8px",
+              }}
+            />
+            <label
+              style={{
+                display: "block",
+                fontSize: "13px",
+                fontWeight: "500",
+                marginBottom: "8px",
+              }}
+            >
+              Endpoint local
+            </label>
+            <AppInput
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="http://localhost:1234/v1"
+              fullWidth
+              style={{
+                padding: "10px",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+                backgroundColor: "var(--bg-contrast)",
+                color: "var(--ink)",
+                marginBottom: "8px",
+              }}
+            />
+            <p className="muted" style={{ margin: "0 0 8px", fontSize: "0.85rem" }}>
+              A análise usa este servidor local. O nome do modelo é o que estiver carregado no LM Studio.
+            </p>
             <AppSelect
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -1049,7 +1094,14 @@ export function LLMConfigDialog({
             </AppButton>
             <AppButton
               onClick={() =>
-                onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels, forceCpu)
+                onSave(
+                  model,
+                  prompt,
+                  selectedEmbeddingModel,
+                  customEmbeddingModels,
+                  forceCpu,
+                  baseUrl.trim() || "http://localhost:1234/v1",
+                )
               }
               disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
               variant="secondary"

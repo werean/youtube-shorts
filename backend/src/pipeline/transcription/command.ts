@@ -1,9 +1,27 @@
+import { fileURLToPath } from "url";
 import { config } from "../../core/config";
 import { resolveModelDevice } from "../../core/gpu";
 import { loadActiveToolConfigs, type ToolConfigs } from "../../core/toolConfigs";
 import { cachedGpuAvailable } from "../../llm/localRuntime";
 import { resolveWhisperDevice } from "../../../../shared/localInference";
 import type { TranscriptionFormats } from "./artifacts";
+
+export type WhisperEngine = "faster-whisper" | "openai-whisper";
+
+export function resolveWhisperEngine(toolConfigs: ToolConfigs = loadActiveToolConfigs()): WhisperEngine {
+  return toolConfigs.whisper.engine === "openai-whisper" ? "openai-whisper" : "faster-whisper";
+}
+
+export function fasterWhisperComputeType(device: "cpu" | "cuda", fp16: boolean | undefined): string {
+  if (device === "cpu") {
+    return "int8";
+  }
+  return fp16 === false ? "float32" : "float16";
+}
+
+export function fasterWhisperScriptPath(): string {
+  return fileURLToPath(new URL("./faster_whisper_runner.py", import.meta.url));
+}
 
 export function resolveTranscriptionFormats(): TranscriptionFormats {
   const toolConfigs = loadActiveToolConfigs();
@@ -47,6 +65,68 @@ export function buildWhisperCommand(
     console.warn("[transcription] No local GPU detected. Whisper will use CPU.");
   }
 
+  if (resolveWhisperEngine(toolConfigs) === "openai-whisper") {
+    return buildOpenAiWhisperCommand(videoPath, outputDir, toolConfigs, device);
+  }
+
+  return buildFasterWhisperCommand(videoPath, outputDir, toolConfigs, device);
+}
+
+function buildFasterWhisperCommand(
+  videoPath: string,
+  outputDir: string,
+  toolConfigs: ToolConfigs,
+  device: "cpu" | "cuda",
+): string[] {
+  const whisper = toolConfigs.whisper;
+  const args: string[] = [
+    "python",
+    fasterWhisperScriptPath(),
+    videoPath,
+    "--model",
+    String(whisper.model || config.WHISPER_MODEL_NAME),
+    "--device",
+    device,
+    "--compute_type",
+    fasterWhisperComputeType(device, whisper.fp16),
+    "--output_dir",
+    outputDir,
+    "--beam_size",
+    String(whisper.beam_size ?? 5),
+  ];
+
+  if (whisper.task) {
+    args.push("--task", whisper.task);
+  }
+  if (whisper.language) {
+    args.push("--language", whisper.language);
+  }
+  if (whisper.temperature !== undefined) {
+    args.push("--temperature", String(whisper.temperature));
+  }
+  if (whisper.initial_prompt) {
+    args.push("--initial_prompt", whisper.initial_prompt);
+  }
+  if (whisper.condition_on_previous_text !== undefined) {
+    args.push(
+      "--condition_on_previous_text",
+      whisper.condition_on_previous_text ? "True" : "False",
+    );
+  }
+  if (whisper.word_timestamps !== undefined) {
+    args.push("--word_timestamps", whisper.word_timestamps ? "True" : "False");
+  }
+
+  return args;
+}
+
+function buildOpenAiWhisperCommand(
+  videoPath: string,
+  outputDir: string,
+  toolConfigs: ToolConfigs,
+  device: "cpu" | "cuda",
+): string[] {
+  const whisper = toolConfigs.whisper;
   const args: string[] = [
     "whisper",
     videoPath,

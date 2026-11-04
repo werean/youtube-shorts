@@ -30,6 +30,7 @@ describe("repairCutRange", () => {
     expect(repaired).toEqual({
       ok: true,
       note: "b1,b2,b3 @ 4.2-58.4 → b1,b2,b3 @ 0-60",
+      duration_note: "within-preferred-window",
       cut: {
         blocks: ["b1", "b2", "b3"],
         start: 0,
@@ -116,7 +117,38 @@ describe("repairCutRange", () => {
     }
   });
 
-  it("rejects gaps, missing blocks, short ranges, long ranges, and missing conclusions", () => {
+  it("keeps a finished item outside the 15 to 90 second preference", () => {
+    const shortItem = repairCutRange(
+      { blocks: ["s1", "s2", "s3"], start: 0, end: 12 },
+      [
+        block("s1", 0, 4, "One."),
+        block("s2", 4, 8, "Two."),
+        block("s3", 8, 12, "Three."),
+      ],
+    );
+    expect(shortItem).toMatchObject({
+      ok: true,
+      duration_note: "shorter-than-preferred",
+    });
+
+    const longItem = repairCutRange(
+      { blocks: ["l1", "l2", "l3"], start: 0, end: 120 },
+      [
+        block("l1", 0, 40, "One."),
+        block("l2", 40, 80, "Two."),
+        block("l3", 80, 120, "Three."),
+      ],
+    );
+    expect(longItem).toMatchObject({
+      ok: true,
+      duration_note: "longer-than-preferred",
+    });
+
+    const twoBlocks = repairCutRange({ blocks: ["b1", "b2"], start: 0, end: 40 }, blocks);
+    expect(twoBlocks).toMatchObject({ ok: true, duration_note: "within-preferred-window" });
+  });
+
+  it("rejects gaps, missing blocks, scraps, runaway spans, and missing conclusions", () => {
     expect(repairCutRange({ blocks: ["b1", "b3"], start: 0, end: 60 }, blocks)).toMatchObject({
       ok: false,
       reason: "gap",
@@ -127,28 +159,24 @@ describe("repairCutRange", () => {
     });
     expect(
       repairCutRange(
-        { blocks: ["s1", "s2", "s3"], start: 0, end: 12 },
+        { blocks: ["s1", "s2", "s3"], start: 0, end: 6 },
         [
-          block("s1", 0, 4, "One."),
-          block("s2", 4, 8, "Two."),
-          block("s3", 8, 12, "Three."),
+          block("s1", 0, 2, "One."),
+          block("s2", 2, 4, "Two."),
+          block("s3", 4, 6, "Three."),
         ],
       ),
     ).toMatchObject({ ok: false, reason: "too-short" });
     expect(
       repairCutRange(
-        { blocks: ["l1", "l2", "l3"], start: 0, end: 120 },
+        { blocks: ["l1", "l2", "l3"], start: 0, end: 300 },
         [
-          block("l1", 0, 40, "One."),
-          block("l2", 40, 80, "Two."),
-          block("l3", 80, 120, "Three."),
+          block("l1", 0, 100, "One."),
+          block("l2", 100, 200, "Two."),
+          block("l3", 200, 300, "Three."),
         ],
       ),
     ).toMatchObject({ ok: false, reason: "too-long" });
-    expect(repairCutRange({ blocks: ["b1", "b2"], start: 0, end: 40 }, blocks)).toMatchObject({
-      ok: false,
-      reason: "too-few-blocks",
-    });
     expect(
       repairCutRange({ blocks: ["b4"], start: 60, end: 75 }, blocks.slice(0, 4)),
     ).toMatchObject({ ok: false, reason: "no-conclusion" });

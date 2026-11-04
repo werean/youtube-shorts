@@ -18,9 +18,13 @@ import {
 } from "./transcription/artifacts";
 import {
   buildWhisperCommand,
+  fasterWhisperComputeType,
   formatWhisperCommand,
   resolveTranscriptionFormats,
+  resolveWhisperEngine,
+  whisperRuntimeDevice,
 } from "./transcription/command";
+import { transcriptionRunLogPath, writeRunLog } from "./runLog";
 import { runWhisperProcess } from "./transcription/process";
 import {
   ensureTranscriptionCanStart,
@@ -59,12 +63,20 @@ async function transcribeJobUnlocked(
   ensureTranscriptionCanStart(jobId);
 
   const { videoPath, tempDir } = prepareTranscriptionSource(jobId);
+  let engine = resolveWhisperEngine();
+  let device = whisperRuntimeDevice();
+  let model = "large-v3";
+  let language: string | null = null;
+  let fp16: boolean | undefined;
 
   try {
     const toolConfigs = loadActiveToolConfigs();
     const command = buildWhisperCommand(videoPath, tempDir, toolConfigs);
-    const deviceArg = command.indexOf("--device");
-    const device = deviceArg >= 0 ? command[deviceArg + 1] : "cuda";
+    engine = resolveWhisperEngine(toolConfigs);
+    device = whisperRuntimeDevice(toolConfigs);
+    model = String(toolConfigs.whisper.model || "large-v3");
+    language = toolConfigs.whisper.language || null;
+    fp16 = toolConfigs.whisper.fp16;
     const commandText = formatWhisperCommand(command);
     console.log(`[transcription] 💻 Command: ${commandText}`);
     operationRuntimeService.appendTaskLog(
@@ -101,6 +113,15 @@ async function transcribeJobUnlocked(
     console.log(`[transcription] ✓ Transcription saved for job ${jobId}`);
     operationRuntimeService.appendTaskLog(jobId, "transcription", "[transcription] Transcription saved");
     writeTranscriptionArtifacts(jobId, segments, formats);
+    writeTranscriptionRunLog(jobId, {
+      engine,
+      model,
+      device,
+      computeType: engine === "faster-whisper" ? fasterWhisperComputeType(device, fp16) : null,
+      language,
+      segmentCount: segments.length,
+      durationSeconds: segments.length > 0 ? segments[segments.length - 1].end : 0,
+    });
 
     const job = jobLifecycleService.loadJob(jobId);
     job.status = JobStatus.BUILDING_BLOCKS;
@@ -128,16 +149,31 @@ async function transcribeJobUnlocked(
 
     // Verificar se é um arquivo não encontrado
     if (error.code === "ENOENT") {
+      const installHint =
+        engine === "openai-whisper"
+          ? "pip install openai-whisper"
+          : "pip install faster-whisper";
       console.error(
         `[transcription] 🎯 Parece que o Whisper não está instalado ou não foi encontrado no PATH`,
       );
-      console.error(`[transcription] Tente instalar com: pip install openai-whisper`);
+      console.error(`[transcription] Tente instalar com: ${installHint}`);
       operationRuntimeService.appendTaskLog(
         jobId,
         "transcription",
-        "[transcription] Whisper not found. Install with: pip install openai-whisper",
+        `[transcription] Whisper not found. Install with: ${installHint}`,
       );
     }
+
+    writeTranscriptionRunLog(jobId, {
+      engine,
+      model,
+      device,
+      computeType: engine === "faster-whisper" ? fasterWhisperComputeType(device, fp16) : null,
+      language,
+      segmentCount: 0,
+      durationSeconds: 0,
+      error: error?.message || String(error),
+    });
 
     if (operationRuntimeService.isTranscriptionCancelled(jobId)) {
       jobLifecycleService.updateJobStatus(jobId, statusAfterInterruptedStep(jobId));
@@ -148,6 +184,42 @@ async function transcribeJobUnlocked(
     jobLifecycleService.updateJobStatus(jobId, JobStatus.ERROR, error?.message || String(error));
     console.log(`[transcription] ============================================\n`);
     throw error;
+  }
+}
+
+function writeTranscriptionRunLog(
+  jobId: string,
+  input: {
+    engine: string;
+    model: string;
+    device: string;
+    computeType: string | null;
+    language: string | null;
+    segmentCount: number;
+    durationSeconds: number;
+    error?: string;
+  },
+): void {
+  try {
+    writeRunLog(transcriptionRunLogPath(jobId), {
+      kind: "transcription",
+      created_at: new Date().toISOString(),
+      engine: input.engine,
+      model: input.model,
+      device: input.device,
+      compute_type: input.computeType,
+      endpoint: null,
+      language: input.language,
+      segment_count: input.segmentCount,
+      duration_seconds: input.durationSeconds,
+      ...(input.error ? { error: input.error } : {}),
+    });
+  } catch (error) {
+    console.warn(
+      `[transcription] Could not write run log for job ${jobId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 

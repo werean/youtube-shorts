@@ -20,7 +20,9 @@ export function generateWhisperCommand(
   config: Partial<WhisperConfig>,
   audioPath: string = ".\\source.webm",
 ): string {
-  const parts: string[] = ["whisper"];
+  const engine = config.engine === "openai-whisper" ? "openai-whisper" : "faster-whisper";
+  const parts: string[] =
+    engine === "openai-whisper" ? ["whisper"] : ["python", "faster_whisper_runner.py"];
 
   // Arquivo de áudio é obrigatório
   parts.push(`"${audioPath}"`);

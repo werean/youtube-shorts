@@ -4,6 +4,7 @@
 
 import { config } from "../core/config";
 import { optionsForModel } from "../llm/localRuntime";
+import { isCloudModelName } from "../../../shared/localInference";
 import { SemanticBlock } from "../models/semantic_block";
 import { continuesSentence } from "./sentence";
 
@@ -28,7 +29,6 @@ async function fetchEmbeddingBatch(texts: string[], model: string): Promise<numb
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(config.OLLAMA_API_KEY ? { Authorization: `Bearer ${config.OLLAMA_API_KEY}` } : {}),
       },
       body: JSON.stringify({
         model,
@@ -103,10 +103,11 @@ export async function fetchEmbeddings(
     return [];
   }
 
+  const resolvedModel = isCloudModelName(model) ? "nomic-embed-text" : model;
   const vectors: number[][] = [];
   for (let index = 0; index < texts.length; index += EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(index, index + EMBEDDING_BATCH_SIZE);
-    vectors.push(...(await fetchEmbeddingBatch(batch, model)));
+    vectors.push(...(await fetchEmbeddingBatch(batch, resolvedModel)));
   }
   return vectors;
 }

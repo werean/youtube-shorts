@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { ollamaLocalOptions, resolveWhisperDevice } from "../../../../shared/localInference";
+import {
+  ollamaLocalOptions,
+  resolveAnalysisEndpoint,
+  resolveWhisperDevice,
+} from "../../../../shared/localInference";
 import { createBuiltinPresets, normalizeStyleLibrary } from "../../../../shared/stylePresets";
 
 describe("local model device", () => {
@@ -21,6 +25,27 @@ describe("local model device", () => {
     });
     expect(resolveWhisperDevice({ savedDevice: "cuda", gpuAvailable: false })).toBe("cpu");
     expect(resolveWhisperDevice({ savedDevice: "cpu", gpuAvailable: true })).toBe("cpu");
+  });
+
+  test("sends analysis to LM Studio when the saved model is an Ollama cloud model", () => {
+    expect(
+      resolveAnalysisEndpoint({
+        model: "gpt-oss:120b-cloud",
+        baseUrl: "http://localhost:11434",
+      }),
+    ).toEqual({
+      model: "local-model",
+      baseUrl: "http://localhost:1234/v1",
+    });
+    expect(
+      resolveAnalysisEndpoint({
+        model: "qwen2.5-7b-instruct",
+        baseUrl: "http://127.0.0.1:1234/v1",
+      }),
+    ).toEqual({
+      model: "qwen2.5-7b-instruct",
+      baseUrl: "http://127.0.0.1:1234/v1",
+    });
   });
 
   test("does not send a device flag for cloud models", () => {

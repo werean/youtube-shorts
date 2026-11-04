@@ -6,19 +6,20 @@ import { SemanticBlock } from "../models/semantic_block";
 import { TopicSegment } from "../models/topic_segment";
 import { continuesSentence, endsSentence } from "../pipeline/sentence";
 
-export const PROMPT_VERSION = "v3";
+export const PROMPT_VERSION = "v4";
 
-export const SYSTEM_PROMPT_TEMPLATE = `You are selecting highlight cuts for long-form vertical videos.
+export const SYSTEM_PROMPT_TEMPLATE = `You are selecting highlight cuts for long-form vertical videos, including news roundups.
 
 Input consists of semantic blocks with timestamps. Each block is a coherent unit.
-You must propose MULTIPLE cuts that form complete mini-stories (beginning, middle, end) focused on a single topic.
+Return one cut for every finished item: a news story, a complete answer, or a self-contained point.
+Do not stop after a few highlights. There is no quota.
 
-Each cut should be about 15 to 90 seconds long and use at least 3 consecutive blocks.
+Duration is a loose preference of about 15 to 90 seconds, not a target and not a filter.
+Keep a finished item that is shorter or longer than that window.
+Do not stretch, trim, or merge separate items to land inside the window.
+Do not drop an item because it is outside the window.
 
 The first block of each cut MUST be a strong hook.
-
-IMPORTANT: Scan through ALL blocks and identify ALL potential cuts that fit the 15 to 90 second range.
-Depending on total content length and quality, a good output may contain 1–3 cuts or more.
 
 Each cut should be a standalone piece with:
 
@@ -39,12 +40,11 @@ Rules:
 
 * Use only the provided blocks.
 * Use consecutive blocks only; do not skip around.
-* Start at the first block of a topic (never start mid-thought).
-* End at a natural conclusion (never cut off a thought).
+* Start at a sentence start (never start mid-thought).
+* End at a natural conclusion (never cut off a thought). A question mark is not a conclusion.
 * The cut start time must match the first block start.
 * The cut end time must match the last block end.
-* Cuts should be about 15 to 90 seconds long.
-* Use at least 3 consecutive blocks.
+* About 15 to 90 seconds is a loose preference, not a quota.
 * Do NOT edit or rewrite text.
 * Do NOT include any extra commentary.
 * Output JSON only, no markdown.
@@ -90,7 +90,10 @@ export function buildCutSelectionPrompt(
 
 The block list is authoritative. start and end in your JSON are rewritten to those block edges.
 Each block is marked with topic_id (or none), sentence_start, and sentence_end.
-Open on a sentence_start that is also the topic start, and close on a sentence_end.
+Open on a sentence_start and close on a sentence_end. A question mark is not a conclusion.
+About 15 to 90 seconds is a loose preference, not a quota.
+Return every finished item, including a news story outside that window.
+Do not merge separate stories to fill the window, and do not drop one for being outside it.
 
 Semantic blocks:
 ${blocksText}`;

@@ -159,7 +159,7 @@ describe("topic segmentation pipeline behavior", () => {
     expect(fs.existsSync(topicSegmentsPath("job-empty-blocks"))).toBe(false);
   });
 
-  test("heuristic segmentation uses pause and question boundaries, preserves lowercase continuations, merges short topics, and persists output", async () => {
+  test("heuristic segmentation uses pause and question boundaries, preserves lowercase continuations, and keeps a finished topic under 90 seconds", async () => {
     writeSemanticBlocks("job-heuristic", [
       {
         block_id: "b1",
@@ -220,10 +220,18 @@ describe("topic segmentation pipeline behavior", () => {
       {
         topic_id: "t3",
         start: 201.2,
+        end: 420,
+        block_ids: ["b3", "b4"],
+        blockCount: 2,
+        durationSeconds: 218.8,
+      },
+      {
+        topic_id: "t4",
+        start: 430,
         end: 500,
-        block_ids: ["b3", "b4", "b5"],
-        blockCount: 3,
-        durationSeconds: 298.8,
+        block_ids: ["b5"],
+        blockCount: 1,
+        durationSeconds: 70,
       },
     ]);
     expect(readTopicSegments("job-heuristic")).toEqual(topics);

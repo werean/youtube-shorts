@@ -198,18 +198,21 @@ mock.module("../../../src/core/toolConfigs", () => ({
   }),
 }));
 
-mock.module("../../../src/llm/client", () => ({
-  OllamaClient: class {
-    constructor(_baseUrl?: string, public model?: string) {}
+const MockChatClient = class {
+  constructor(_baseUrl?: string, public model?: string) {}
 
-    async chat(messages: ChatMessage[]) {
-      chatCalls.push(messages);
-      if (chatResponses.length === 0) {
-        throw new Error("No mocked chat response queued");
-      }
-      return chatResponses.shift()!;
+  async chat(messages: ChatMessage[]) {
+    chatCalls.push(messages);
+    if (chatResponses.length === 0) {
+      throw new Error("No mocked chat response queued");
     }
-  },
+    return chatResponses.shift()!;
+  }
+};
+
+mock.module("../../../src/llm/client", () => ({
+  OllamaClient: MockChatClient,
+  LocalChatClient: MockChatClient,
 }));
 
 const { analyzeBlocks } = await import("../../../src/pipeline/analysis");

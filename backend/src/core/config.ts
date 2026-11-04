@@ -4,9 +4,11 @@
 
 export const config = {
   WHISPER_MODEL_NAME: "large-v3",
+  LM_STUDIO_BASE_URL: "http://localhost:1234/v1",
+  LM_STUDIO_MODEL: "local-model",
+  LLM_TIMEOUT_SECONDS: 120,
+  /** Local embeddings only. Analysis does not call this server. */
   OLLAMA_BASE_URL: "http://localhost:11434",
-  OLLAMA_MODEL: "gpt-oss:120b-cloud",
-  OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || "",
   OLLAMA_TIMEOUT_SECONDS: 120,
   YTDLP_TIMEOUT_SECONDS: 1800,
   WHISPER_TIMEOUT_SECONDS: 6 * 60 * 60,

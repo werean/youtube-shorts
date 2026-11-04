@@ -4,9 +4,12 @@ import { SYSTEM_PROMPT_TEMPLATE } from "../../../src/llm/prompts";
 import { continuesSentence } from "../../../src/pipeline/sentence";
 
 describe("cut selection prompt", () => {
-  it("asks for cuts of about 15 to 90 seconds", () => {
+  it("treats 15 to 90 seconds as a loose preference, not a quota", () => {
     expect(SYSTEM_PROMPT_TEMPLATE).toContain("about 15 to 90 seconds");
-    expect(SYSTEM_PROMPT_TEMPLATE).toContain("at least 3 consecutive blocks");
+    expect(SYSTEM_PROMPT_TEMPLATE).toContain("not a quota");
+    expect(SYSTEM_PROMPT_TEMPLATE).toContain("outside the window");
+    expect(SYSTEM_PROMPT_TEMPLATE).not.toContain("1–3 cuts");
+    expect(SYSTEM_PROMPT_TEMPLATE).not.toContain("at least 3 consecutive blocks");
     expect(SYSTEM_PROMPT_TEMPLATE).not.toMatch(/300/);
     expect(SYSTEM_PROMPT_TEMPLATE).not.toMatch(/5 minutes/);
 
@@ -17,9 +20,11 @@ describe("cut selection prompt", () => {
     expect(duration).toBeLessThanOrEqual(90);
   });
 
-  it("keeps the shipped default prompt on the same duration", () => {
+  it("keeps the shipped default prompt on the same loose duration", () => {
     const defaults = readFileSync(new URL("../../../../data/default_configs.json", import.meta.url), "utf-8");
     expect(defaults).toContain("about 15 to 90 seconds");
+    expect(defaults).toContain("not a quota");
+    expect(defaults).not.toContain("gpt-oss:120b-cloud");
     expect(defaults).not.toContain("300 seconds");
     expect(defaults).not.toContain("372.4");
   });

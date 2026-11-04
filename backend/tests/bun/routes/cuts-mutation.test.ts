@@ -117,20 +117,23 @@ mock.module("../../../src/core/toolConfigs", () => ({
   }),
 }));
 
+const MockChatClient = class {
+  async chat() {
+    return JSON.stringify([
+      {
+        blocks: ["b1", "b2", "b3"],
+        start: 0,
+        end: 60,
+        score: 1,
+        title: "Generated cut",
+      },
+    ]);
+  }
+};
+
 mock.module("../../../src/llm/client", () => ({
-  OllamaClient: class {
-    async chat() {
-      return JSON.stringify([
-        {
-          blocks: ["b1", "b2", "b3"],
-          start: 0,
-          end: 60,
-          score: 1,
-          title: "Generated cut",
-        },
-      ]);
-    }
-  },
+  OllamaClient: MockChatClient,
+  LocalChatClient: MockChatClient,
 }));
 
 const { analyzeBlocks } = await import("../../../src/pipeline/analysis");
