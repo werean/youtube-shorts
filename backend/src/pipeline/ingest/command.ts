@@ -104,6 +104,8 @@ export function buildDownloadArgs(job: Job, outputPattern: string): string[] {
     "--no-playlist",
     "--js-runtimes",
     denoJsRuntimeSpec(),
+    "--cookies-from-browser",
+    "chrome",
     "--write-info-json",
     "--format",
     format,

@@ -288,7 +288,8 @@ describe("ingest pipeline behavior", () => {
     const runtimeIndex = spawnCalls[0].args.indexOf("--js-runtimes");
     expect(runtimeIndex).toBeGreaterThan(3);
     expect(spawnCalls[0].args[runtimeIndex + 1]).toMatch(/^deno(?::.+)?$/);
-    expect(spawnCalls[0].args.join(" ")).not.toMatch(/cookie/i);
+    expect(spawnCalls[0].args).toContain("--cookies-from-browser");
+    expect(spawnCalls[0].args[spawnCalls[0].args.indexOf("--cookies-from-browser") + 1]).toBe("chrome");
     expect(spawnCalls[0].args).toContain("--write-info-json");
     expect(spawnCalls[0].args).toContain("bv*[height<=1440]+ba/b[height<=1440]");
     expect(spawnCalls[0].args).toContain(path.join(outputDir, "video.%(ext)s"));

@@ -34,7 +34,7 @@ describe("yt-dlp Deno runtime spec", () => {
     expect(denoRuntimeSpecFromPaths([dir])).toBe(`deno:${binary}`);
   });
 
-  it("adds --js-runtimes to the yt-dlp command and does not pass cookies", () => {
+  it("adds Deno and Chrome cookies to the yt-dlp command", () => {
     const job = {
       job_id: "job",
       youtube_url: "https://example.com/watch?v=abc123",
@@ -48,8 +48,9 @@ describe("yt-dlp Deno runtime spec", () => {
     expect(args.slice(0, 4)).toEqual(["python", "-m", "yt_dlp", "--no-playlist"]);
     expect(runtimeIndex).toBeGreaterThan(3);
     expect(args[runtimeIndex + 1]).toMatch(/^deno(?::.+)?$/);
+    expect(args).toContain("--cookies-from-browser");
+    expect(args[args.indexOf("--cookies-from-browser") + 1]).toBe("chrome");
     expect(args).toContain("bv*[height<=1080]+ba/b[height<=1080]");
     expect(args).toContain(job.youtube_url);
-    expect(args.join(" ")).not.toMatch(/cookie/i);
   });
 });
