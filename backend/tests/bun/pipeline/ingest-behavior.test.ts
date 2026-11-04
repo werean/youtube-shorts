@@ -279,13 +279,17 @@ describe("ingest pipeline behavior", () => {
     const expectedVideoPath = path.join(mediaRoot, "Downloaded_ Title_", "video.webm");
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].options).toMatchObject({ shell: false, stdio: ["ignore", "pipe", "pipe"] });
-    expect(spawnCalls[0].args.slice(0, 5)).toEqual([
+    expect(spawnCalls[0].args.slice(0, 4)).toEqual([
       "python",
       "-m",
       "yt_dlp",
       "--no-playlist",
-      "--write-info-json",
     ]);
+    const runtimeIndex = spawnCalls[0].args.indexOf("--js-runtimes");
+    expect(runtimeIndex).toBeGreaterThan(3);
+    expect(spawnCalls[0].args[runtimeIndex + 1]).toMatch(/^deno(?::.+)?$/);
+    expect(spawnCalls[0].args.join(" ")).not.toMatch(/cookie/i);
+    expect(spawnCalls[0].args).toContain("--write-info-json");
     expect(spawnCalls[0].args).toContain("bv*[height<=1440]+ba/b[height<=1440]");
     expect(spawnCalls[0].args).toContain(path.join(outputDir, "video.%(ext)s"));
     expect(spawnCalls[0].args).toContain(job.youtube_url);
