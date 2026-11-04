@@ -8,10 +8,27 @@ import { StylePresetPanel } from "./StylePresetPanel";
 import type { ExtraKind, ShortStylePreset, StyleLibrary } from "../../../../shared/stylePresets";
 
 export type StageSelection = {
+  download: boolean;
   transcribe: boolean;
   blocks: boolean;
   analyze: boolean;
   render: boolean;
+};
+
+const EMPTY_STAGES: StageSelection = {
+  download: false,
+  transcribe: false,
+  blocks: false,
+  analyze: false,
+  render: false,
+};
+
+const ALL_STAGES: StageSelection = {
+  download: true,
+  transcribe: true,
+  blocks: true,
+  analyze: true,
+  render: true,
 };
 
 type UploadMode = "url" | "file";
@@ -84,6 +101,7 @@ interface GlassWorkspaceProps {
 }
 
 const STAGE_ROWS: Array<{ key: keyof StageSelection | "all"; label: string; icon: string }> = [
+  { key: "download", label: "Baixar", icon: "download" },
   { key: "transcribe", label: "Transcrever", icon: "description" },
   { key: "blocks", label: "Blocos", icon: "grid_view" },
   { key: "analyze", label: "Analisar", icon: "bar_chart" },
@@ -116,12 +134,7 @@ function formatAdded(iso?: string | null): string {
 
 export function GlassWorkspace(props: GlassWorkspaceProps) {
   const [runAll, setRunAll] = useState(true);
-  const [stages, setStages] = useState<StageSelection>({
-    transcribe: false,
-    blocks: false,
-    analyze: false,
-    render: false,
-  });
+  const [stages, setStages] = useState<StageSelection>(EMPTY_STAGES);
   const [showAllVideos, setShowAllVideos] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuVideoId, setMenuVideoId] = useState<string | null>(null);
@@ -167,7 +180,7 @@ export function GlassWorkspace(props: GlassWorkspaceProps) {
     if (key === "all") {
       setRunAll((current) => !current);
       if (!runAll) {
-        setStages({ transcribe: false, blocks: false, analyze: false, render: false });
+        setStages(EMPTY_STAGES);
       }
       return;
     }
@@ -177,7 +190,7 @@ export function GlassWorkspace(props: GlassWorkspaceProps) {
 
   function effectiveStages(): StageSelection {
     if (runAll) {
-      return { transcribe: true, blocks: true, analyze: true, render: true };
+      return ALL_STAGES;
     }
     return stages;
   }

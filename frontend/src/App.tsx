@@ -992,6 +992,7 @@ export default function App() {
       alert(validation.message);
       return;
     }
+    // `download` is handled by ingest/upload in handleIniciar; nothing else to run.
     if (!stages.transcribe && !stages.blocks && !stages.analyze && !stages.render) return;
 
     if (stages.transcribe) {
@@ -1063,8 +1064,11 @@ export default function App() {
   }, [activeVideo?.job.job_id, action.busy, isIngesting, uploadTick]);
 
   async function handleIniciar(stages: StageSelection) {
-    const wantsStages = stages.transcribe || stages.blocks || stages.analyze || stages.render;
-    if (wantsStages) pendingStagesRef.current = stages;
+    // Download/upload always happens from the URL/file path below.
+    // Only queue post-download stages so "Baixar" alone stops after ingest.
+    const wantsPostDownload =
+      stages.transcribe || stages.blocks || stages.analyze || stages.render;
+    pendingStagesRef.current = wantsPostDownload ? stages : null;
 
     if (uploadMode === "url" && youtubeUrl.trim()) {
       try {
