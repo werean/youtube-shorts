@@ -15,6 +15,10 @@ import type { AppSettings as SharedAppSettings } from "@youtube-shorts/contracts
 import { isVideoFileName } from "./videoFiles";
 import * as metadata from "../storage/metadata";
 import { defaultStyleLibrary, normalizeStyleLibrary } from "../../../shared/stylePresets";
+import {
+  LM_STUDIO_DEFAULT_MODEL,
+  resolveLocalChatModel,
+} from "../../../shared/localInference";
 
 export interface AppSettings extends SharedAppSettings {}
 
@@ -81,7 +85,7 @@ function defaultSettings(): AppSettings {
       formats: ["json", "vtt", "txt"],
     },
     llm: {
-      model: "llama2",
+      model: LM_STUDIO_DEFAULT_MODEL,
     },
     style_library: defaultStyleLibrary(),
   };
@@ -148,7 +152,7 @@ export function loadSettings(): AppSettings {
           : defaults.whisper.formats,
       },
       llm: {
-        model: parsed.llm?.model || defaults.llm.model,
+        model: resolveLocalChatModel(parsed.llm?.model || defaults.llm.model),
       },
       style_library: normalizeStyleLibrary(parsed.style_library ?? defaults.style_library),
     };
@@ -167,6 +171,26 @@ export function saveSettings(next: AppSettings): AppSettings {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2), "utf-8");
   setCachedSettings(next);
   return cloneSettings(next);
+}
+
+/**
+ * A saved llama2, cloud, or placeholder name is replaced with the local default.
+ * Called on the user's machine at startup, not while tests are deciding.
+ */
+export function rewriteLlmModelIfUnusable(): string {
+  ensureSettingsFile();
+  let rawModel = "";
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")) as {
+      llm?: { model?: string };
+    };
+    rawModel = String(parsed.llm?.model || "");
+  } catch {
+    return loadSettings().llm.model;
+  }
+  const resolved = resolveLocalChatModel(rawModel);
+  if (rawModel.trim() === resolved) return resolved;
+  return updateSettings({ llm: { model: resolved } }).llm.model;
 }
 
 export function updateSettings(partial: Partial<AppSettings>): AppSettings {

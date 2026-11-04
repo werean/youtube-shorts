@@ -24,6 +24,8 @@ import {
   resolveWhisperEngine,
   whisperRuntimeDevice,
 } from "./transcription/command";
+import { fasterWhisperWeightsCached } from "./transcription/whisperWeights";
+import { planFasterWhisperWeights } from "../../../shared/localInference";
 import { transcriptionRunLogPath, writeRunLog } from "./runLog";
 import { runWhisperProcess } from "./transcription/process";
 import {
@@ -77,6 +79,20 @@ async function transcribeJobUnlocked(
     model = String(toolConfigs.whisper.model || "large-v3");
     language = toolConfigs.whisper.language || null;
     fp16 = toolConfigs.whisper.fp16;
+    if (engine === "faster-whisper") {
+      const weightPlan = planFasterWhisperWeights({
+        model,
+        savedDevice: device,
+        gpuAvailable: device === "cuda",
+        weightsCached: fasterWhisperWeightsCached(model),
+      });
+      if (weightPlan.shouldDownload) {
+        const line = `[transcription] faster-whisper model ${weightPlan.model} is not cached; downloading weights on ${weightPlan.device}`;
+        console.log(line);
+        operationRuntimeService.appendTaskLog(jobId, "transcription", line);
+      }
+    }
+
     const commandText = formatWhisperCommand(command);
     console.log(`[transcription] 💻 Command: ${commandText}`);
     operationRuntimeService.appendTaskLog(

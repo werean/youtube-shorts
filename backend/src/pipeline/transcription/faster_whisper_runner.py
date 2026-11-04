@@ -5,8 +5,53 @@ The process is local. It does not read API keys or call a hosted model.
 
 import argparse
 import json
+import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
+
+FASTER_WHISPER_REPOS = {
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large": "Systran/faster-whisper-large-v3",
+    "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+}
+
+
+def repo_id(model_name: str) -> str:
+    if model_name in FASTER_WHISPER_REPOS:
+        return FASTER_WHISPER_REPOS[model_name]
+    if "/" in model_name:
+        return model_name
+    return f"Systran/faster-whisper-{model_name}"
+
+
+def cache_roots() -> List[str]:
+    roots: List[str] = []
+    hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if hub_cache:
+        roots.append(hub_cache)
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        roots.append(os.path.join(hf_home, "hub"))
+    roots.append(os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"))
+    return roots
+
+
+def weights_cached(model_name: str) -> bool:
+    """True when a snapshot of this model is already in the local Hugging Face cache."""
+    if not model_name:
+        return False
+    if os.path.isdir(model_name) or os.path.isfile(model_name):
+        return True
+    folder = "models--" + repo_id(model_name).replace("/", "--")
+    for root in cache_roots():
+        snapshots = os.path.join(root, folder, "snapshots")
+        try:
+            if os.path.isdir(snapshots) and any(os.scandir(snapshots)):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def parse_bool(value: Optional[str]) -> Optional[bool]:
@@ -33,7 +78,20 @@ def main() -> None:
 
     from faster_whisper import WhisperModel
 
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
+    if not weights_cached(args.model):
+        print(
+            f"[faster-whisper] {args.model} is not cached; downloading weights on {args.device}",
+            flush=True,
+        )
+    # local_files_only stays false so the first run fetches large-v3 (or the
+    # configured model) into the Hugging Face cache. device is cuda unless the
+    # caller already fell back to cpu.
+    model = WhisperModel(
+        args.model,
+        device=args.device,
+        compute_type=args.compute_type,
+        local_files_only=False,
+    )
     kwargs = {
         "beam_size": args.beam_size,
         "task": args.task or "transcribe",

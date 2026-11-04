@@ -1,6 +1,7 @@
 {
   "whisper": {
-    "model": "small",
+    "engine": "faster-whisper",
+    "model": "large-v3",
     "device": "cuda",
     "output_format": ["json", "vtt", "txt"],
     "verbose": true,
@@ -50,7 +51,7 @@
     "metadata": null
   },
   "llm": {
-    "model": "local-model",
+    "model": "qwen2.5-7b-instruct",
     "base_url": "http://localhost:1234/v1",
     "embedding_model": "nomic-embed-text",
     "registered_embedding_models": ["nomic-embed-text"],

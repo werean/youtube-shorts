@@ -5,6 +5,7 @@
  */
 
 import { loadActiveToolConfigs } from "../core/toolConfigs";
+import { resolveChatModelForAnalysis } from "../llm/ensureLocalChatModel";
 import { Cut } from "../models/cut";
 import { JobStatus } from "../models/job";
 import { TopicSegment } from "../models/topic_segment";
@@ -68,7 +69,11 @@ async function analyzeBlocksUnlocked(
 
   const toolConfigs = loadActiveToolConfigs();
   const systemPrompt = toolConfigs.llm.system_prompt || "You output JSON only.";
-  const client = buildClient(toolConfigs);
+  const model = await resolveChatModelForAnalysis(toolConfigs.llm.model);
+  const client = buildClient({
+    ...toolConfigs,
+    llm: { ...toolConfigs.llm, model },
+  });
   const strategy = selectStrategy(videoDurationSeconds);
   const topics = strategy.useTopicSegmentation ? loadTopicsIfPresent(jobId) : undefined;
   let rawCuts: RawLLMCut[] = [];

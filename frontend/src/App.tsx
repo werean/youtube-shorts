@@ -3,6 +3,7 @@ import type { Job, VideoRecord } from "./types";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
+import { LM_STUDIO_DEFAULT_MODEL } from "../../shared/localInference";
 import { useUIState } from "./hooks";
 import { useCutsWorkflow } from "./hooks/useCutsWorkflow";
 import { useCutTimestampWorkflow } from "./hooks/useCutTimestampWorkflow";
@@ -136,7 +137,7 @@ export default function App() {
   const [blocks, setBlocks] = useState<Record<string, unknown>[]>([]);
   const [aiResponseRaw, setAiResponseRaw] = useState<string | null>(null);
   const [showHowToUseDialog, setShowHowToUseDialog] = useState(false);
-  const [llmModel, setLlmModel] = useState<string>("");
+  const [llmModel, setLlmModel] = useState<string>(LM_STUDIO_DEFAULT_MODEL);
   const [llmBaseUrl, setLlmBaseUrl] = useState("http://localhost:1234/v1");
   const [embeddingModel, setEmbeddingModel] = useState<string>("nomic-embed-text");
   const [registeredEmbeddingModels, setRegisteredEmbeddingModels] = useState<string[]>([]);
@@ -751,7 +752,7 @@ export default function App() {
       : ["json", "vtt", "txt"];
     setWhisperFormats(formats);
     setFfmpegConfig(active.ffmpeg || null);
-    const configuredModel = String(active.llm.model || "").trim();
+    const configuredModel = String(active.llm.model || "").trim() || LM_STUDIO_DEFAULT_MODEL;
     const configuredEmbeddingModel =
       String(active.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
     const configuredEmbeddingModels = Array.isArray(active.llm.registered_embedding_models)

@@ -6,6 +6,7 @@ import {
   saveLLMPrompt,
   type SavedLLMPrompt,
 } from "../../api";
+import { LM_STUDIO_DEFAULT_MODEL } from "../../../../shared/localInference";
 import { AppButton, AppInput, AppSelect } from "../shared";
 
 interface OllamaModelCatalogItem {
@@ -112,7 +113,7 @@ export function LLMConfigDialog({
   onSave,
   onCancel,
 }: LLMConfigDialogProps) {
-  const [model, setModel] = useState(initialModel);
+  const [model, setModel] = useState((initialModel || "").trim() || LM_STUDIO_DEFAULT_MODEL);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl || "http://localhost:1234/v1");
   const [selectedEmbeddingModel, setSelectedEmbeddingModel] = useState(
     initialEmbeddingModel || DEFAULT_EMBEDDING_MODELS[0],
@@ -544,7 +545,7 @@ export function LLMConfigDialog({
             <AppInput
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="local-model"
+              placeholder={LM_STUDIO_DEFAULT_MODEL}
               fullWidth
               style={{
                 padding: "10px",

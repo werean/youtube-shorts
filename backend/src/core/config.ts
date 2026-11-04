@@ -2,10 +2,12 @@
  * Centralized configuration and environment settings.
  */
 
+import { LM_STUDIO_BASE_URL, LM_STUDIO_DEFAULT_MODEL } from "../../../shared/localInference";
+
 export const config = {
   WHISPER_MODEL_NAME: "large-v3",
-  LM_STUDIO_BASE_URL: "http://localhost:1234/v1",
-  LM_STUDIO_MODEL: "local-model",
+  LM_STUDIO_BASE_URL,
+  LM_STUDIO_MODEL: LM_STUDIO_DEFAULT_MODEL,
   LLM_TIMEOUT_SECONDS: 120,
   /** Local embeddings only. Analysis does not call this server. */
   OLLAMA_BASE_URL: "http://localhost:11434",

@@ -49,7 +49,7 @@ describe("LocalChatClient", () => {
     const client = new LocalChatClient("http://localhost:11434", "gpt-oss:120b-cloud", 5);
     await client.chat([{ role: "user", content: "hello" }]);
 
-    expect(client.model).toBe("local-model");
+    expect(client.model).toBe("qwen2.5-7b-instruct");
     expect(client.baseUrl).toBe("http://localhost:1234/v1");
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:1234/v1/chat/completions");
     expect(String(fetchMock.mock.calls[0][1].body)).not.toContain("gpt-oss");

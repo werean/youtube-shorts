@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  LM_STUDIO_DEFAULT_DOWNLOAD_SPEC,
+  LM_STUDIO_DEFAULT_MODEL,
   ollamaLocalOptions,
+  planFasterWhisperWeights,
+  planLocalChatModelDownload,
   resolveAnalysisEndpoint,
   resolveWhisperDevice,
 } from "../../../../shared/localInference";
@@ -34,7 +38,16 @@ describe("local model device", () => {
         baseUrl: "http://localhost:11434",
       }),
     ).toEqual({
-      model: "local-model",
+      model: "qwen2.5-7b-instruct",
+      baseUrl: "http://localhost:1234/v1",
+    });
+    expect(
+      resolveAnalysisEndpoint({
+        model: "llama2",
+        baseUrl: "http://localhost:11434",
+      }),
+    ).toEqual({
+      model: "qwen2.5-7b-instruct",
       baseUrl: "http://localhost:1234/v1",
     });
     expect(
@@ -46,6 +59,82 @@ describe("local model device", () => {
       model: "qwen2.5-7b-instruct",
       baseUrl: "http://127.0.0.1:1234/v1",
     });
+  });
+
+  test("falls back when the saved model is llama2, empty, or a placeholder", () => {
+    expect(resolveAnalysisEndpoint({ model: "", baseUrl: "" }).model).toBe(LM_STUDIO_DEFAULT_MODEL);
+    expect(resolveAnalysisEndpoint({ model: "local-model", baseUrl: "" }).model).toBe(
+      LM_STUDIO_DEFAULT_MODEL,
+    );
+    expect(resolveAnalysisEndpoint({ model: "llama2:latest", baseUrl: "" }).model).toBe(
+      LM_STUDIO_DEFAULT_MODEL,
+    );
+  });
+
+  test("downloads the default model only when LM Studio does not already have it", () => {
+    const missing = planLocalChatModelDownload({
+      savedModel: "llama2",
+      downloadedModels: [],
+    });
+    expect(missing).toMatchObject({
+      model: LM_STUDIO_DEFAULT_MODEL,
+      replacedSavedModel: true,
+      shouldDownload: true,
+      downloadArgs: ["get", LM_STUDIO_DEFAULT_DOWNLOAD_SPEC, "-y", "--gguf"],
+    });
+
+    const present = planLocalChatModelDownload({
+      savedModel: "llama2",
+      downloadedModels: [
+        {
+          modelKey: LM_STUDIO_DEFAULT_MODEL,
+          path: "lmstudio-community/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        },
+      ],
+    });
+    expect(present.shouldDownload).toBe(false);
+    expect(present.model).toBe(LM_STUDIO_DEFAULT_MODEL);
+    expect(present.downloadArgs).toEqual([]);
+  });
+
+  test("keeps a concrete local model and downloads that model when it is missing", () => {
+    const plan = planLocalChatModelDownload({
+      savedModel: "my-local-writer",
+      downloadedModels: [{ modelKey: "other-model", path: "" }],
+    });
+    expect(plan).toMatchObject({
+      model: "my-local-writer",
+      replacedSavedModel: false,
+      shouldDownload: true,
+      downloadArgs: ["get", "my-local-writer@q4_k_m", "-y", "--gguf"],
+    });
+  });
+
+  test("downloads large-v3 on GPU when the faster-whisper cache is empty", () => {
+    expect(
+      planFasterWhisperWeights({
+        model: "",
+        savedDevice: "cuda",
+        gpuAvailable: true,
+        weightsCached: false,
+      }),
+    ).toEqual({ model: "large-v3", device: "cuda", shouldDownload: true });
+    expect(
+      planFasterWhisperWeights({
+        model: "large-v3",
+        savedDevice: "cuda",
+        gpuAvailable: true,
+        weightsCached: true,
+      }),
+    ).toEqual({ model: "large-v3", device: "cuda", shouldDownload: false });
+    expect(
+      planFasterWhisperWeights({
+        model: "large-v3",
+        savedDevice: "cuda",
+        gpuAvailable: false,
+        weightsCached: false,
+      }).device,
+    ).toBe("cpu");
   });
 
   test("does not send a device flag for cloud models", () => {

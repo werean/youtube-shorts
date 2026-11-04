@@ -5,6 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { uploadDir } from "../core/paths";
+import { ensureLocalChatModel } from "../llm/ensureLocalChatModel";
 import { createServer } from "./createServer";
 import { registerPlugins } from "./registerPlugins";
 import { registerRoutes } from "./registerRoutes";
@@ -46,6 +47,10 @@ export async function startServer() {
       console.log(`[app]   ⚠ Diretório não existe ainda`);
     }
     console.log(`\n`);
+    void ensureLocalChatModel().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[llm] Could not prepare the local chat model: ${message}`);
+    });
   } catch (error) {
     console.error(`[app] ✗ Erro ao iniciar servidor:`, error);
     process.exit(1);

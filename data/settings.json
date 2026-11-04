@@ -18,6 +18,6 @@
     ]
   },
   "llm": {
-    "model": "llama2"
+    "model": "qwen2.5-7b-instruct"
   }
 }

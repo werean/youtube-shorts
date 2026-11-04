@@ -10,6 +10,7 @@ import { SYSTEM_PROMPT_TEMPLATE } from "../llm/prompts";
 import {
   isCloudModelName,
   resolveAnalysisEndpoint,
+  resolveLocalChatModel,
 } from "../../../shared/localInference";
 
 export type WhisperEngine = "faster-whisper" | "openai-whisper";
@@ -356,7 +357,7 @@ function normalizeLlmConfig(llmConfig: Partial<LlmToolConfig>): LlmToolConfig {
   const safeEmbeddingModel = isCloudModelName(embeddingModel) ? "nomic-embed-text" : embeddingModel;
   const prompt = String(llmConfig.system_prompt || SYSTEM_PROMPT_TEMPLATE);
   const registered = normalizeRegisteredModels(llmConfig.registered_models).filter(
-    (item) => !isCloudModelName(item.name),
+    (item) => resolveLocalChatModel(item.name) === item.name.trim(),
   );
   const registeredEmbeddingModels = normalizeRegisteredEmbeddingModels(
     llmConfig.registered_embedding_models,
