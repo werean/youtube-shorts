@@ -1,0 +1,1 @@
+"""Narrative analysis domain logic."""

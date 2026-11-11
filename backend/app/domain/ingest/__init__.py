@@ -1,0 +1,1 @@
+"""Ingest domain logic."""

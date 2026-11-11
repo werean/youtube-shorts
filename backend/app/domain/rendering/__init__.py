@@ -1,0 +1,1 @@
+"""Vertical rendering domain logic."""
