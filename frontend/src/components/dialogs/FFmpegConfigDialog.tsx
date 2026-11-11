@@ -206,9 +206,12 @@ export function FFmpegConfigDialog({
                 style={{
                   transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
                   transition: "transform 0.3s ease",
+                  display: "inline-flex",
                 }}
               >
-                ▼
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </span>
             </AppButton>
           </div>
