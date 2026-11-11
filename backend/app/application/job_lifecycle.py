@@ -570,6 +570,10 @@ class JobLifecycleService:
                 if entry.is_file() and entry.name.startswith("video."):
                     self.set_cached_source_video(job_id, entry)
                     return entry
+            for entry in sorted(vdir.iterdir(), key=lambda p: p.name):
+                if entry.is_file() and entry.suffix.lower() in {".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"}:
+                    self.set_cached_source_video(job_id, entry)
+                    return entry
 
         base_dir = Path(load_settings().media.base_dir)
         if base_dir.exists():

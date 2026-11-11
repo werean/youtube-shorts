@@ -487,6 +487,12 @@ class UnifiedLocalLLMAdapter:
 
         return []
 
+    async def generate_structured(self, *args: Any, **kwargs: Any) -> Any:
+        res = await self.chat_json(*args, **kwargs)
+        if isinstance(res, tuple):
+            return res[0]
+        return res
+
     async def chat_json(
         self,
         system_prompt: str,

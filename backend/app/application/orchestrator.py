@@ -75,6 +75,7 @@ async def run_job_pipeline(
     """
     c = container or get_container()
     job = c.jobs.load_job(job_id)
+    cancel_token = c.runtime.create_cancel_token(job_id, "orchestrator")
 
     _publish_step(
         c,
@@ -85,10 +86,16 @@ async def run_job_pipeline(
         message=f"Iniciando pipeline 1-clique (include_render={include_render})...",
     )
 
+    def _check_cancelled() -> None:
+        if cancel_token.is_set() or c.runtime.is_cancel_requested(job_id):
+            raise OperationCancelledError("Pipeline cancelado cooperativamente")
+
     try:
+        _check_cancelled()
+
         # Step 1: Ingest (if not already downloaded)
         source_video = c.jobs.find_source_video(job_id)
-        is_pending_status = str(job.status).upper() in ("CREATED", "PENDING", "DOWNLOADING")
+        is_pending_status = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(job.status).upper() in ("CREATED", "PENDING", "DOWNLOADING")
         if is_pending_status or not source_video:
             if not job.youtube_url and not source_video:
                 raise ValueError(f"Job {job_id} has no source video or YouTube URL to ingest")
@@ -104,6 +111,8 @@ async def run_job_pipeline(
                 await ingest_video(job_id, container=c)
                 job = c.jobs.load_job(job_id)
 
+        _check_cancelled()
+
         # Step 2: Transcription
         if job.status == JobStatus.DOWNLOADED:
             _publish_step(
@@ -116,6 +125,8 @@ async def run_job_pipeline(
             )
             await transcribe_job(job_id, container=c)
             job = c.jobs.load_job(job_id)
+
+        _check_cancelled()
 
         # Step 3: Semantic Blocks
         if job.status == JobStatus.BUILDING_BLOCKS:
@@ -132,6 +143,8 @@ async def run_job_pipeline(
                 await blocks_res
             job = c.jobs.load_job(job_id)
 
+        _check_cancelled()
+
         # Step 4: Topic Segments (TextTiling)
         if job.status == JobStatus.BUILDING_TOPICS:
             _publish_step(
@@ -145,6 +158,8 @@ async def run_job_pipeline(
             await build_topic_segments(job_id, container=c)
             job = c.jobs.load_job(job_id)
 
+        _check_cancelled()
+
         # Step 5: LLM Narrative Analysis & Cut Mining
         if job.status == JobStatus.ANALYZING:
             _publish_step(
@@ -157,6 +172,8 @@ async def run_job_pipeline(
             )
             await analyze_job(job_id, container=c)
             job = c.jobs.load_job(job_id)
+
+        _check_cancelled()
 
         # Step 6: Rendering (Optional)
         if include_render and job.status == JobStatus.WAITING_APPROVAL:
@@ -205,6 +222,8 @@ async def run_job_pipeline(
         )
         c.runtime.publish_state_change(job_id, JobStatus.ERROR, str(exc))
         raise
+    finally:
+        c.runtime.clear_cancel_token(job_id, "orchestrator")
 
 
 class BatchStatus(BaseModel):
@@ -355,7 +374,7 @@ class BatchRunner:
 
                 # Ingestion if needed
                 source_video = c.jobs.find_source_video(job_id)
-                is_pending = str(job.status).upper() in ("CREATED", "PENDING", "DOWNLOADING")
+                is_pending = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(job.status).upper() in ("CREATED", "PENDING", "DOWNLOADING")
                 if is_pending or not source_video:
                     if job.youtube_url:
                         status.current_step = "ingest"

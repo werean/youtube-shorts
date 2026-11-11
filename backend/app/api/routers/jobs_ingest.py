@@ -62,16 +62,25 @@ async def stream_job_events(
     c = get_container()
     job = c.jobs.load_job(job_id)
 
+    accept_header = request.headers.get("accept", "").lower()
+    is_browser_eventsource = "text/event-stream" in accept_header
+    query_follow_param = request.query_params.get("follow")
+    if query_follow_param is not None:
+        should_follow = query_follow_param.lower() in ("true", "1", "yes")
+    else:
+        should_follow = is_browser_eventsource or follow
+
     async def _sse_generator() -> AsyncIterator[str]:
         async with c.runtime.event_bus.subscribe(job_id, replay_history=True) as queue:
-            # If no events have been published yet, emit the current job state immediately
-            if queue.empty():
+            # If no state event is in history, emit the current job state first
+            has_state_event = any(e.event == "state" for e in c.runtime.event_bus.get_history(job_id))
+            if not has_state_event:
                 initial = JobEvent(
                     job_id=job_id,
                     event="state",
                     data={
                         "job_id": job_id,
-                        "status": str(job.status),
+                        "status": c.runtime._normalize_status(job.status),
                         "message": "",
                     },
                 )
@@ -83,26 +92,31 @@ async def stream_job_events(
                     return
                 yield evt.format_sse()
 
-            # Continue streaming live events while an active task is running or follow=True
+            # If not in continuous follow mode, exit after initial / history replay
+            if not should_follow:
+                return
+
+            # Continue streaming live events while client is connected
+            idle_ping_counter = 0
             while True:
-                if await request.is_disconnected():
-                    break
-
-                has_active_task = any(
-                    c.runtime.get_cancel_token(job_id, t) is not None
-                    for t in ("ingest", "transcription", "render")
-                )
-                if not has_active_task and not follow:
-                    break
-
                 try:
-                    evt = await asyncio.wait_for(queue.get(), timeout=0.15)
+                    evt = await asyncio.wait_for(queue.get(), timeout=1.0)
                     if evt is None:
                         break
                     yield evt.format_sse()
                 except asyncio.TimeoutError:
-                    if not has_active_task and not follow:
-                        break
+                    idle_ping_counter += 1
+                    if idle_ping_counter >= 15:
+                        idle_ping_counter = 0
+                        yield ": keep-alive\n\n"
+
+                    # Only exit if the job reached terminal state and queue is drained
+                    try:
+                        latest_job = c.jobs.load_job(job_id)
+                        if latest_job.status in (JobStatus.DONE, JobStatus.ERROR) and queue.empty():
+                            break
+                    except Exception:
+                        pass
                     continue
 
     return StreamingResponse(

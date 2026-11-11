@@ -46,7 +46,7 @@ from app.infrastructure.llm.unified_adapter import (
     LocalLLMUnavailableError,
     UnifiedLocalLLMAdapter,
 )
-from app.models.domain import Cut, JobStatus, SemanticBlock, TopicSegment, WordTiming
+from app.models.domain import Cut, JobStatus, NarrativeArc, SemanticBlock, TopicSegment, WordTiming
 
 MAX_WINDOW_CHARS: int = 12000
 DEFAULT_WINDOW_OVERLAP_RATIO: float = 0.25
@@ -194,11 +194,21 @@ def parse_candidate_cuts_from_llm_payload(
         except (TypeError, ValueError):
             score = 75.0
 
-        beginning_hook = str(item.get("beginning_hook") or "").strip()
-        middle_development = str(item.get("middle_development") or "").strip()
-        end_conclusion = str(item.get("end_conclusion") or "").strip()
+        beginning_hook = str(
+            item.get("beginning_hook") or item.get("hook") or ""
+        ).strip()
+        middle_development = str(
+            item.get("middle_development") or item.get("development") or ""
+        ).strip()
+        climax = str(item.get("climax") or "").strip()
+        end_conclusion = str(
+            item.get("end_conclusion") or item.get("resolution") or ""
+        ).strip()
         hook_reason = str(item.get("hook_reason") or beginning_hook or "").strip()
         content_reason = str(item.get("content_reason") or middle_development or "").strip()
+        reasoning = str(
+            item.get("reasoning") or item.get("hook_reason") or beginning_hook or ""
+        ).strip()
         title = str(
             item.get("title")
             or hook_reason
@@ -215,9 +225,11 @@ def parse_candidate_cuts_from_llm_payload(
                 score=score,
                 beginning_hook=beginning_hook,
                 middle_development=middle_development,
+                climax=climax,
                 end_conclusion=end_conclusion,
                 hook_reason=hook_reason,
                 content_reason=content_reason,
+                reasoning=reasoning,
                 block_ids=ids,
                 start=s_time,
                 end=e_time,
@@ -330,21 +342,35 @@ def finalize_cuts_phase_4c(
         )
         duration = round(max(0.01, snapped_end - snapped_start), 2)
 
+        narrative_arc = NarrativeArc(
+            hook=cand.beginning_hook or "",
+            development=cand.middle_development or "",
+            climax=getattr(cand, "climax", "") or "",
+            resolution=cand.end_conclusion or "",
+        )
+
         final_cuts.append(
             Cut(
                 cut_id=f"c{idx}",
+                id=f"c{idx}",
                 block_ids=ids,
                 start=round(snapped_start, 4),
                 end=round(snapped_end, 4),
+                duration=duration,
+                duration_seconds=duration,
                 title=cand.title or f"Cut {idx}",
                 status="pending",
+                approved=False,
+                rejected=False,
                 score=cand.score,
+                summary=cand.content_reason or cand.middle_development or None,
+                reasoning=getattr(cand, "reasoning", "") or cand.hook_reason or cand.beginning_hook or None,
+                narrative_arc=narrative_arc,
                 beginning_hook=cand.beginning_hook or None,
                 middle_development=cand.middle_development or None,
                 end_conclusion=cand.end_conclusion or None,
                 hook_reason=cand.hook_reason or cand.beginning_hook or None,
                 content_reason=cand.content_reason or cand.middle_development or None,
-                duration_seconds=duration,
             )
         )
 
@@ -599,8 +625,14 @@ def update_cut_status(
 
     target_cut: Cut | None = None
     for cut in cuts:
-        if cut.cut_id == cut_id:
+        if cut.cut_id == cut_id or cut.id == cut_id:
             cut.status = status
+            if status == "approved":
+                cut.approved = True
+                cut.rejected = False
+            elif status == "rejected":
+                cut.rejected = True
+                cut.approved = False
             target_cut = cut
             break
 

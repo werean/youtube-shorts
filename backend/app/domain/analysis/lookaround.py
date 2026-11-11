@@ -102,9 +102,11 @@ class CandidateCut:
     score: float = 80.0
     beginning_hook: str = ""
     middle_development: str = ""
+    climax: str = ""
     end_conclusion: str = ""
     hook_reason: str = ""
     content_reason: str = ""
+    reasoning: str = ""
     block_ids: list[str] = field(default_factory=list)
     start: float = 0.0
     end: float = 0.0
@@ -171,9 +173,11 @@ def deduplicate_candidates_by_iou(
             score=float(cand.score),
             beginning_hook=cand.beginning_hook,
             middle_development=cand.middle_development,
+            climax=getattr(cand, "climax", ""),
             end_conclusion=cand.end_conclusion,
             hook_reason=cand.hook_reason,
             content_reason=cand.content_reason,
+            reasoning=getattr(cand, "reasoning", ""),
             block_ids=ids,
             start=s_time,
             end=e_time,
@@ -301,9 +305,11 @@ def apply_deterministic_lookaround_single(
         score=candidate.score,
         beginning_hook=candidate.beginning_hook,
         middle_development=candidate.middle_development,
+        climax=getattr(candidate, "climax", ""),
         end_conclusion=candidate.end_conclusion,
         hook_reason=candidate.hook_reason,
         content_reason=candidate.content_reason,
+        reasoning=getattr(candidate, "reasoning", ""),
         block_ids=ids,
         start=s_time,
         end=e_time,

@@ -40,16 +40,27 @@ def _collect_video_files(root_dir: Path, archived: bool) -> list[dict[str, Any]]
             continue
         if not entry.is_dir():
             continue
+        video_file: Path | None = None
+        # Priority 1: inner file named 'video.*'
         for inner in sorted(entry.iterdir(), key=lambda p: p.name):
             if inner.is_file() and inner.name.startswith("video.") and _is_video_file(inner.name):
-                results.append(
-                    {
-                        "file_name": inner.name,
-                        "file_path": inner,
-                        "video_name": entry.name,
-                    }
-                )
+                video_file = inner
                 break
+        # Priority 2: any valid video file
+        if video_file is None:
+            for inner in sorted(entry.iterdir(), key=lambda p: p.name):
+                if inner.is_file() and _is_video_file(inner.name):
+                    video_file = inner
+                    break
+
+        if video_file is not None:
+            results.append(
+                {
+                    "file_name": video_file.name,
+                    "file_path": video_file,
+                    "video_name": entry.name,
+                }
+            )
     return results
 
 

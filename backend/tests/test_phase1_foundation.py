@@ -490,10 +490,16 @@ async def test_llm_models_and_dependencies_routes(async_client: httpx.AsyncClien
 
 
 def test_no_heavy_libraries_imported_at_module_top_level() -> None:
+    import subprocess
     import sys
 
-    for heavy_mod in ("faster_whisper", "ctranslate2", "torch", "cv2", "mediapipe", "yt_dlp"):
-        assert heavy_mod not in sys.modules, f"{heavy_mod} must not be imported at top level"
+    code = (
+        "import app.main, sys; "
+        "heavy = [m for m in ('faster_whisper', 'ctranslate2', 'torch', 'cv2', 'mediapipe', 'yt_dlp') if m in sys.modules]; "
+        "assert not heavy, f'Heavy libraries imported: {heavy}'"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.asyncio

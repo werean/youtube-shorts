@@ -284,6 +284,10 @@ class OperationRuntimeService:
             {"job_id": job_id, "status": clean_status, "message": message},
         )
 
+    def publish_event(self, job_id: str, event: str, data: dict[str, Any]) -> JobEvent:
+        """Generic event publish helper forwarding to the job's SSE event bus."""
+        return self.event_bus.publish(job_id, event, data)
+
     # --- Cooperative Cancel Tokens & Process Trees ---
 
     def create_cancel_token(self, job_id: str, task: str = "default") -> CancelToken:

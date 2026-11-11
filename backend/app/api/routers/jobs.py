@@ -24,6 +24,7 @@ from app.application.orchestrator import (
     run_job_pipeline,
 )
 from app.application.runtime_service import OperationCancelledError, get_container
+from app.models.domain import JobStatus
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -115,6 +116,46 @@ async def run_single_job_pipeline(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{job_id}/cancel", response_model=None)
+async def cancel_job_pipeline(job_id: str) -> dict[str, Any]:
+    """Cooperative cancellation for any active task on job_id (1-click, ingest, transcribe, render)."""
+    c = get_container()
+    try:
+        job = c.jobs.load_job(job_id)
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # 1. Trigger runtime cancel for all tasks registered to job_id and kill subprocess trees
+    c.runtime.request_cancel(job_id)
+
+    # 2. Cleanup any partial render/download files
+    c.runtime.cleanup_partial_files(job_id)
+
+    # 3. Reset job status to DOWNLOADED (if downloaded video exists) or CREATED (if never ingested)
+    source_video = c.jobs.find_source_video(job_id)
+    new_status = JobStatus.DOWNLOADED if (source_video and source_video.exists()) else JobStatus.CREATED
+    c.jobs.update_job_status(job_id, new_status)
+
+    # 4. Append cancellation log & publish SSE events
+    c.runtime.append_task_log(job_id, "orchestrator", "[orchestrator] Operação cancelada pelo usuário")
+    c.runtime.publish_progress(
+        job_id,
+        status=new_status.value,
+        task="orchestrator",
+        percent=0.0,
+        eta_seconds=0,
+        message="Operação cancelada pelo usuário",
+    )
+    c.runtime.publish_state_change(job_id, new_status.value, "Operação cancelada pelo usuário")
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": "cancelled",
+        "new_status": new_status.value,
+    }
 
 
 # All modular job routers in exact priority order
