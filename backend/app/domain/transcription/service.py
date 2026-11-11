@@ -782,6 +782,13 @@ class TranscriptionDomainService:
         except Exception:
             pass
         c.runtime.append_task_log(job_id, "transcription", "[transcription] Cancelled")
+        c.runtime.publish_progress(
+            job_id,
+            status=JobStatus.DOWNLOADED.value,
+            task="transcription",
+            percent=0.0,
+            message="Transcrição cancelada",
+        )
         c.runtime.publish_state_change(
             job_id, JobStatus.DOWNLOADED.value, "[transcription] Cancelled"
         )

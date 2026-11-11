@@ -99,6 +99,13 @@ def cancel_rendering_job(job_id: str, container: ServiceContainer | None = None)
     except Exception:
         pass
     c.runtime.append_task_log(job_id, "render", "[rendering] Cancelled")
+    c.runtime.publish_progress(
+        job_id,
+        status=JobStatus.DOWNLOADED.value,
+        task="render",
+        percent=0.0,
+        message="Renderização cancelada",
+    )
     c.runtime.publish_state_change(job_id, JobStatus.DOWNLOADED, "Renderização cancelada pelo usuário")
     return True
 

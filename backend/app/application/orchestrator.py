@@ -46,9 +46,12 @@ def _publish_step(
 ) -> None:
     """Helper to append orchestrator log and publish SSE progress event."""
     c.runtime.append_task_log(job_id, "orchestrator", f"[orchestrator] {message}")
+    status_str = status.value if hasattr(status, "value") else str(status)
+    if status_str.startswith("JobStatus."):
+        status_str = status_str.split(".", 1)[1]
     c.runtime.publish_progress(
         job_id,
-        status=str(status),
+        status=status_str,
         task=task,
         percent=percent,
         message=message,
@@ -180,12 +183,26 @@ async def run_job_pipeline(
 
     except OperationCancelledError:
         c.runtime.append_task_log(job_id, "orchestrator", "[orchestrator] Pipeline cancelado cooperativamente")
+        c.runtime.publish_progress(
+            job_id,
+            status=JobStatus.DOWNLOADED.value,
+            task="orchestrator",
+            percent=0.0,
+            message="Pipeline cancelado cooperativamente",
+        )
         c.runtime.publish_state_change(job_id, JobStatus.DOWNLOADED, "Pipeline cancelado cooperativamente")
         return c.jobs.load_job(job_id)
 
     except Exception as exc:
         c.runtime.append_task_log(job_id, "orchestrator", f"[orchestrator] ✗ Pipeline error: {exc}")
         c.jobs.update_job_status(job_id, JobStatus.ERROR)
+        c.runtime.publish_progress(
+            job_id,
+            status=JobStatus.ERROR.value,
+            task="orchestrator",
+            percent=0.0,
+            message=f"Erro no pipeline: {exc}",
+        )
         c.runtime.publish_state_change(job_id, JobStatus.ERROR, str(exc))
         raise
 

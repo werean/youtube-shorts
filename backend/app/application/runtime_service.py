@@ -247,21 +247,28 @@ class OperationRuntimeService:
     def publish_event(self, job_id: str, event: str, data: dict[str, Any]) -> JobEvent:
         return self.event_bus.publish(job_id, event, data)
 
+    def _normalize_status(self, status: Any) -> str:
+        s = status.value if hasattr(status, "value") else str(status)
+        if s.startswith("JobStatus."):
+            s = s.split(".", 1)[1]
+        return s
+
     def publish_progress(
         self,
         job_id: str,
         *,
-        status: str,
+        status: Any,
         task: str,
         percent: float,
         eta_seconds: int | float | None = None,
         message: str = "",
     ) -> JobEvent:
+        clean_status = self._normalize_status(status)
         if message:
             self.append_task_log(job_id, task, message)
         payload: dict[str, Any] = {
             "job_id": job_id,
-            "status": status,
+            "status": clean_status,
             "task": task,
             "percent": round(float(percent), 2),
             "eta_seconds": eta_seconds,
@@ -269,11 +276,12 @@ class OperationRuntimeService:
         }
         return self.event_bus.publish(job_id, "progress", payload)
 
-    def publish_state_change(self, job_id: str, status: str, message: str = "") -> JobEvent:
+    def publish_state_change(self, job_id: str, status: Any, message: str = "") -> JobEvent:
+        clean_status = self._normalize_status(status)
         return self.event_bus.publish(
             job_id,
             "state",
-            {"job_id": job_id, "status": status, "message": message},
+            {"job_id": job_id, "status": clean_status, "message": message},
         )
 
     # --- Cooperative Cancel Tokens & Process Trees ---
