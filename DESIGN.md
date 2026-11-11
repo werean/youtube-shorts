@@ -202,6 +202,14 @@ Renomeia o vídeo e move sua pasta física no disco, invalidando caches de camin
 }
 ```
 
+#### `GET /jobs/:job_id/events` (Server-Sent Events — `text/event-stream`)
+Stream de telemetria em tempo real para o Frontend acompanhar progresso (`%`, `eta`, mudança de `status`, logs ao vivo e conclusão de cortes) sem necessidade de polling cego.
+- **Formato de Eventos SSE (`200 OK`, `Content-Type: text/event-stream`):**
+```text
+event: progress
+data: {"job_id":"7ca821c3e9594946b2f3131309baaac2","status":"TRANSCRIBING","task":"transcription","percent":65.0,"eta_seconds":18,"message":"[transcription] Progresso: 65% (1850.0s / 2845.4s)"}
+```
+
 #### `GET /jobs/:job_id/logs/:task`
 Retorna as linhas de log em tempo real da tarefa (`task` $\in$ `["ingest", "transcription", "render"]`).
 - **Response `200 OK`:**
@@ -478,7 +486,7 @@ Consulta o progresso do lote (`BatchPipelineProgress`), cancela a execução (pr
 #### `GET /config`
 Resumo rápido da configuração ativa (`whisper` e `llm`).
 
-#### `GET /config/ollama-models`
+#### `GET /config/llm-models` (e alias `/config/ollama-models`)
 Lista unificada de modelos locais disponíveis tanto no **LM Studio (`http://127.0.0.1:1234/v1/models`)** quanto no **Ollama (`http://127.0.0.1:11434/api/tags` e `/api/ps`)**, além dos modelos registrados nas configurações.
 - **Response `200 OK`:**
 ```json
@@ -507,7 +515,7 @@ Lista unificada de modelos locais disponíveis tanto no **LM Studio (`http://127
 }
 ```
 
-#### `POST /config/ollama-models/register` e `DELETE /config/ollama-models/:modelName`
+#### `POST /config/llm-models/register` e `DELETE /config/llm-models/:modelName` (e aliases `/config/ollama-models/*`)
 Registra e testa um modelo local (no LM Studio ou Ollama) ou remove-o da lista. Em caso de erro de validação ou falha de teste (`400 Bad Request`), retorna `{ "detail": "..." }`.
 
 #### `GET /config/tool-configs`, `POST /config/tool-configs`, `POST /config/tool-configs/reset`, `POST /config/tool-configs/reset/:section`, `POST /config/tool-configs/import`
