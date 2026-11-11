@@ -1,3 +1,5 @@
+import { GlassButton } from "../ui/glass";
+
 interface SimpleDialogsProps {
   // Rename Video Dialog
   renameVideoId: string | null;
@@ -41,30 +43,41 @@ export function SimpleDialogs({
         <div className="dialog-overlay" onClick={onRenameClose}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <div className="dialog-header">
-              <h3>Renomear vídeo</h3>
+              <h3 className="text-sm font-semibold text-white">Renomear Vídeo</h3>
               <div className="dialog-actions">
-                <button className="icon-btn close-btn" onClick={onRenameClose}>
-                  X
+                <button
+                  type="button"
+                  className="icon-btn close-btn"
+                  onClick={onRenameClose}
+                  aria-label="Fechar"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
                 </button>
               </div>
             </div>
-            <div className="dialog-content">
-              <label className="field">
-                Novo nome
+            <div className="dialog-content space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-300">
+                  Novo Nome
+                </label>
                 <input
                   type="text"
                   value={renameVideoNewName}
                   onChange={(e) => onRenameChange(e.target.value)}
                   placeholder="Nome do vídeo"
+                  className="w-full h-9 px-3 text-xs bg-white/[0.04] border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all font-sans"
                 />
-              </label>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button className="secondary" onClick={onRenameSave}>
-                  Salvar
-                </button>
-                <button className="primary" onClick={onRenameClose}>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+                <GlassButton variant="ghost" size="sm" onClick={onRenameClose}>
                   Cancelar
-                </button>
+                </GlassButton>
+                <GlassButton variant="primary" size="sm" onClick={onRenameSave}>
+                  Salvar
+                </GlassButton>
               </div>
             </div>
           </div>
@@ -76,33 +89,41 @@ export function SimpleDialogs({
         <div className="dialog-overlay" onClick={onMoveUploadClose}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
             <div className="dialog-header">
-              <h3>Mover video para a pasta configurada?</h3>
+              <h3 className="text-sm font-semibold text-white">Mover Vídeo para a Pasta Configurada?</h3>
               <div className="dialog-actions">
-                <button className="icon-btn close-btn" onClick={onMoveUploadClose}>
-                  X
+                <button
+                  type="button"
+                  className="icon-btn close-btn"
+                  onClick={onMoveUploadClose}
+                  aria-label="Fechar"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
                 </button>
               </div>
             </div>
-            <div className="dialog-content">
-              <p>
-                Deseja mover o video selecionado para a pasta configurada para evitar uma copia
-                extra em disco?
+            <div className="dialog-content space-y-4">
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                Deseja mover o vídeo selecionado para a pasta configurada da aplicação para evitar uma cópia extra em disco?
               </p>
-              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-400">
                 <input
                   type="checkbox"
                   checked={dontAskMoveUpload}
                   onChange={(e) => onDontAskChange(e.target.checked)}
+                  className="rounded border-white/20 bg-white/10 text-white focus:ring-0"
                 />
-                <span>Nao perguntar novamente</span>
+                <span>Não perguntar novamente</span>
               </label>
-              <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-                <button className="secondary" onClick={() => onMoveUploadDecision(true)}>
-                  Mover e enviar
-                </button>
-                <button className="primary" onClick={() => onMoveUploadDecision(false)}>
-                  Manter copia
-                </button>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+                <GlassButton variant="ghost" size="sm" onClick={() => onMoveUploadDecision(false)}>
+                  Manter Cópia
+                </GlassButton>
+                <GlassButton variant="primary" size="sm" onClick={() => onMoveUploadDecision(true)}>
+                  Mover e Enviar
+                </GlassButton>
               </div>
             </div>
           </div>
@@ -119,26 +140,22 @@ export function SimpleDialogs({
           <div
             className="dialog"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "400px" }}
+            style={{ maxWidth: "420px" }}
           >
             <div className="dialog-header">
-              <h3>Pipeline Concluído</h3>
+              <h3 className="text-sm font-semibold text-white">Processamento em Lote Concluído</h3>
             </div>
-            <div className="dialog-content" style={{ padding: "20px" }}>
-              <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
-              <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
-                <button
-                  className="secondary"
+            <div className="dialog-content space-y-4 p-5">
+              <p className="text-xs text-zinc-200 leading-relaxed whitespace-pre-line">
+                {batchCompletionMessage}
+              </p>
+              <div className="flex justify-end pt-2 border-t border-white/[0.08]">
+                <GlassButton
+                  variant="primary"
                   onClick={onBatchCompletionClose}
-                  style={{
-                    padding: "10px 30px",
-                    borderRadius: "8px",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                  }}
                 >
                   OK
-                </button>
+                </GlassButton>
               </div>
             </div>
           </div>
@@ -147,4 +164,3 @@ export function SimpleDialogs({
     </>
   );
 }
-

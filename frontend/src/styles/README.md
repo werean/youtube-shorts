@@ -4,11 +4,11 @@ Esta pasta contém todos os estilos CSS da aplicação organizados de forma modu
 
 ## Arquivos
 
-### 📋 `index.css`
+### index.css
 
 Arquivo principal que importa todos os módulos CSS. Este é o único arquivo que deve ser importado no `main.tsx`.
 
-### 🎨 `variables.css`
+### variables.css
 
 Define as variáveis CSS customizadas (custom properties) e o tema da aplicação:
 
@@ -16,7 +16,7 @@ Define as variáveis CSS customizadas (custom properties) e o tema da aplicaçã
 - Sombras
 - Fonte padrão
 
-### 🔄 `reset.css`
+### reset.css
 
 Estilos base e reset:
 
@@ -24,7 +24,7 @@ Estilos base e reset:
 - Estilos do body
 - Tipografia base (h1, h2, h3)
 
-### ✨ `animations.css`
+### animations.css
 
 Animações e keyframes:
 
@@ -32,7 +32,7 @@ Animações e keyframes:
 - `fadeIn` - fade in com translate
 - `pulse` - pulsação de opacidade
 
-### 📐 `layout.css`
+### layout.css
 
 Estrutura e layout da página:
 
@@ -42,7 +42,7 @@ Estrutura e layout da página:
 - `.pipeline`, `.pipeline-grid` - grids específicos
 - `.shorts-grid` - grid de vídeos
 
-### 🧩 `components.css`
+### components.css
 
 Componentes reutilizáveis:
 
@@ -55,14 +55,14 @@ Componentes reutilizáveis:
 - Toast (`.toast`)
 - Utilities (`.flex`, `.hidden`, `.text-center`, etc.)
 
-### 📝 `forms.css`
+### forms.css
 
 Elementos de formulário:
 
 - Inputs
 - Fields
 
-### 💬 `dialogs.css`
+### dialogs.css
 
 Diálogos e modais:
 
@@ -73,7 +73,7 @@ Diálogos e modais:
 - `.dialog-footer` - rodapé
 - `.info-box` - caixas de informação
 
-### 📱 `media.css`
+### media.css
 
 Media queries para responsividade:
 
@@ -83,9 +83,9 @@ Media queries para responsividade:
 
 Para importar os estilos, adicione no seu arquivo principal (main.tsx):
 
-\`\`\`tsx
+```tsx
 import "./styles/index.css";
-\`\`\`
+```
 
 ## Convenções
 

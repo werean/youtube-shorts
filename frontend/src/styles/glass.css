@@ -1,0 +1,112 @@
+/* ==========================================================================
+   Liquid Glass Primitives (macOS Sequoia / visionOS Design System)
+   Pure CSS utilities for translucent glass surfaces, specular highlights,
+   ambient lighting, and high-performance backdrop blurs.
+   ZERO EMOJIS - Only precision SVG and typographical geometry.
+   ========================================================================== */
+
+:root {
+  --glass-surface-base: rgba(18, 18, 22, 0.65);
+  --glass-surface-elevated: rgba(26, 26, 32, 0.75);
+  --glass-surface-sunken: rgba(10, 10, 14, 0.55);
+  --glass-surface-active: rgba(36, 36, 46, 0.82);
+
+  --glass-border-subtle: rgba(255, 255, 255, 0.08);
+  --glass-border-highlight: rgba(255, 255, 255, 0.16);
+  --glass-border-specular: rgba(255, 255, 255, 0.28);
+
+  --glass-specular-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  --glass-specular-full: inset 0 1px 0 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+
+  --glass-shadow-sm: 0 4px 16px -2px rgba(0, 0, 0, 0.35);
+  --glass-shadow-md: 0 12px 32px -4px rgba(0, 0, 0, 0.45);
+  --glass-shadow-lg: 0 24px 64px -12px rgba(0, 0, 0, 0.6);
+
+  --glass-glow-emerald: 0 0 24px -4px rgba(16, 185, 129, 0.25);
+  --glass-glow-white: 0 0 24px -4px rgba(255, 255, 255, 0.2);
+}
+
+/* Base Glass Effect with Deep Frosted Blur */
+.glass-panel {
+  background: var(--glass-surface-base);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-specular-top), var(--glass-shadow-md);
+}
+
+.glass-panel-elevated {
+  background: var(--glass-surface-elevated);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-specular-full), var(--glass-shadow-lg);
+}
+
+.glass-panel-sunken {
+  background: var(--glass-surface-sunken);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Specular Reflection Highlight (Top Edge Light Catch) */
+.glass-specular {
+  box-shadow: var(--glass-specular-top);
+}
+
+.glass-specular-double {
+  box-shadow: var(--glass-specular-full);
+}
+
+/* Ambient Diffuse Background Glows */
+.ambient-glow-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(140px);
+  pointer-events: none;
+  opacity: 0.12;
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+
+/* Liquid Glass Interactive State Transitions */
+.glass-interactive {
+  transition:
+    background-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-interactive:active {
+  transform: scale(0.985);
+}
+
+/* Keyframes for subtle status pulse without layout shifts */
+@keyframes glass-pulse-emerald {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.08);
+    box-shadow: 0 0 10px 3px rgba(16, 185, 129, 0.25);
+  }
+}
+
+.animate-glass-pulse-emerald {
+  animation: glass-pulse-emerald 2.4s ease-in-out infinite;
+}
+
+@keyframes glass-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}

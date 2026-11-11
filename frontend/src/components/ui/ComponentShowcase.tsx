@@ -67,7 +67,11 @@ export function ComponentShowcase() {
       </Card>
 
       <EmptyState
-        icon="◌"
+        icon={
+          <svg className="w-5 h-5 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" strokeDasharray="4 4" />
+          </svg>
+        }
         title="No data available"
         description="This state is keyboard-friendly and can include a primary action."
         action={<Button size="sm">Reload</Button>}

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { selectFolder } from "../../api";
 import type { ActionState } from "../../hooks/useAppAction";
-import { AppButton, AppCheckboxField, AppDialog, AppInput, AppSelect } from "../shared";
+import { AppDialog } from "../shared";
+import { GlassButton, GlassCard, GlassBadge } from "../ui/glass";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;
@@ -51,101 +52,180 @@ export function ConfigureAppDialog({
 
   return (
     <AppDialog
-      title="Configurar Aplicação"
+      title="Configurações da Aplicação"
       onClose={onCancel}
-      showHeaderClose={false}
+      showHeaderClose={true}
+      wide
       scrollable
       footer={
-        <>
-          <AppButton variant="primary" onClick={onCancel}>
+        <div className="flex items-center justify-end gap-3 w-full">
+          <GlassButton variant="glass" onClick={onCancel}>
             Cancelar
-          </AppButton>
-          <AppButton
-            variant="secondary"
+          </GlassButton>
+          <GlassButton
+            variant="primary"
             disabled={action.busy || !baseDir.trim()}
+            loading={action.busy}
             onClick={handleSave}
+            leadingIcon={
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
+            }
           >
             Salvar Configurações
-          </AppButton>
-        </>
+          </GlassButton>
+        </div>
       }
     >
-      <p className="muted" style={{ marginBottom: "20px" }}>
-        Escolha onde os arquivos (vídeos, shorts e transcrições) serão armazenados no seu
-        computador.
-      </p>
+      <div className="space-y-5">
+        {/* Card: Diretorio de Armazenamento */}
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white">Diretório de Armazenamento</h4>
+                <p className="text-[11px] text-zinc-400">
+                  Onde os arquivos de vídeo, cortes renderizados e transcrições serão salvos.
+                </p>
+              </div>
+            </div>
 
-      <AppButton
-        onClick={handlePickFolder}
-        variant="primary"
-        fullWidth
-        style={{ marginBottom: "20px" }}
-      >
-        Selecionar Pasta
-      </AppButton>
+            <GlassButton
+              variant="glass"
+              size="sm"
+              onClick={handlePickFolder}
+              leadingIcon={
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              }
+            >
+              Selecionar Pasta
+            </GlassButton>
+          </div>
 
-      <label className="field">
-        Ou digite o caminho manualmente
-        <AppInput
-          type="text"
-          value={baseDir}
-          onChange={(e) => setBaseDir(e.target.value)}
-          placeholder="Ex: C:\\Users\\seu_usuario\\Documents\\YouTubeShorts"
-          fullWidth
-          style={{ fontFamily: "monospace", fontSize: "0.9rem" }}
-        />
-      </label>
-      <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px", marginBottom: "20px" }}>
-        Caminho atual: {appSettings?.media.base_dir}
-      </p>
+          <div className="space-y-1.5 pt-1">
+            <label className="text-[11px] font-medium text-zinc-400">
+              Caminho no Computador
+            </label>
+            <input
+              type="text"
+              value={baseDir}
+              onChange={(e) => setBaseDir(e.target.value)}
+              placeholder="Ex: /home/usuario/Videos/YouTubeShorts"
+              className="w-full h-9 px-3 text-xs font-mono bg-black/40 border border-white/10 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+            />
+            <p className="text-[10px] text-zinc-500 font-mono">
+              Caminho ativo: {appSettings?.media.base_dir || baseDir}
+            </p>
+          </div>
 
-      <label className="field">
-        Resolução de download
-        <AppSelect
-          value={resolution}
-          onChange={(e) => setResolution(e.target.value as "1080p" | "1440p" | "4k")}
-          fullWidth
-        >
-          <option value="1080p">1080p (padrao)</option>
-          <option value="1440p">1440p</option>
-          <option value="4k">4k</option>
-        </AppSelect>
-      </label>
-      <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px", marginBottom: "20px" }}>
-        Resolução atual: {appSettings?.media.download_resolution || "1080p"}
-      </p>
+          {/* Estrutura de Pastas Preview */}
+          <div className="p-3 rounded-xl bg-black/30 border border-white/[0.06] space-y-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Estrutura Criada Automaticamente
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span>/videos/</span>
+              </div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span>/shorts/</span>
+              </div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                <span>/transcrições/</span>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
 
-      <AppCheckboxField
-        label="Habilitar mensagem ao apagar corte"
-        checked={askDeleteCutConfirm}
-        onChange={setAskDeleteCutConfirm}
-        labelFontSize="0.88rem"
-      />
-      <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px", marginBottom: "20px" }}>
-        Estado atual:{" "}
-        {appSettings?.preferences?.ask_delete_cut_confirm === false ? "Desabilitado" : "Habilitado"}
-      </p>
+        {/* Card: Resolução de Download */}
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-white">Resolução de Download</h4>
+              <p className="text-[11px] text-zinc-400">
+                Resolução padrão usada pelo pipeline yt-dlp ao baixar conteúdos do YouTube.
+              </p>
+            </div>
+          </div>
 
-      <div className="info-box light">
-        <p className="info-box-title" style={{ margin: 0 }}>
-          <strong>Estrutura que será criada:</strong>
-        </p>
-        <p
-          className="muted"
-          style={{
-            margin: "8px 0 0",
-            fontFamily: "monospace",
-            fontSize: "0.8rem",
-            lineHeight: "1.6",
-          }}
-        >
-          {baseDir || "pasta_base"}/<br />
-          ├── videos/
-          <br />
-          ├── shorts/
-          <br />
-          └── transcrições/
-        </p>
+          <div className="grid grid-cols-3 gap-2.5 pt-1">
+            {[
+              { id: "1080p", label: "1080p Full HD", badge: "Padrão" },
+              { id: "1440p", label: "1440p 2K", badge: "Alta Fidelidade" },
+              { id: "4k", label: "4K Ultra HD", badge: "Máxima" },
+            ].map((item) => {
+              const isSelected = resolution === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setResolution(item.id as "1080p" | "1440p" | "4k")}
+                  className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all duration-200 ${
+                    isSelected
+                      ? "bg-white/[0.1] border-white/30 shadow-[0_2px_12px_rgba(255,255,255,0.1),inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                      : "bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-xs font-semibold text-white">{item.label}</span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        isSelected ? "bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" : "bg-zinc-700"
+                      }`}
+                    />
+                  </div>
+                  <span className="text-[10px] text-zinc-400 mt-1 font-mono">{item.badge}</span>
+                </button>
+              );
+            })}
+          </div>
+        </GlassCard>
+
+        {/* Card: Preferências do Usuário */}
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-semibold text-white">Confirmação ao Excluir Cortes</h4>
+              <p className="text-[11px] text-zinc-400">
+                Exibir diálogo de confirmação antes de apagar um corte gerado ou editado.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAskDeleteCutConfirm((prev) => !prev)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none ${
+                askDeleteCutConfirm ? "bg-white justify-end" : "bg-zinc-800 justify-start"
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full shadow-md transition-all duration-200 ${
+                  askDeleteCutConfirm ? "bg-zinc-950" : "bg-zinc-400"
+                }`}
+              />
+            </button>
+          </div>
+        </GlassCard>
       </div>
     </AppDialog>
   );

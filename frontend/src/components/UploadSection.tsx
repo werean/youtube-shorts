@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { VideoItem } from "../hooks";
 import { createJob, getJob, ingestJob, uploadVideoFile } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
-import { AppButton } from "./shared";
+import { GlassButton, GlassCard } from "./ui/glass";
 
 interface UploadSectionProps {
   action: ActionState;
@@ -10,8 +10,8 @@ interface UploadSectionProps {
   onLoadVideos: () => Promise<void>;
   appSettings: any;
   onShowMoveUploadDialog: () => void;
-  isExpanded: boolean;
-  onToggle: () => void;
+  isExpanded?: boolean;
+  onToggle?: () => void;
 }
 
 export function UploadSection({
@@ -20,20 +20,22 @@ export function UploadSection({
   onLoadVideos,
   appSettings,
   onShowMoveUploadDialog,
-  isExpanded,
-  onToggle,
 }: UploadSectionProps) {
   const [uploadMode, setUploadMode] = useState<"url" | "file">("url");
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function runAction<T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) {
     try {
+      setIsSubmitting(true);
       const result = await fn();
       onSuccess?.(result);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error during upload action:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -50,6 +52,7 @@ export function UploadSection({
   }
 
   async function startUploadSelectedFiles() {
+    setIsSubmitting(true);
     for (const file of selectedFiles) {
       try {
         const result = await uploadVideoFile(file);
@@ -70,6 +73,7 @@ export function UploadSection({
       }
     }
 
+    setIsSubmitting(false);
     setSelectedFiles([]);
     const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
     if (fileInput) fileInput.value = "";
@@ -77,326 +81,265 @@ export function UploadSection({
   }
 
   return (
-    <section className="grid" style={{ marginBottom: "24px" }}>
-      <div className="panel">
-        <div className="panel-header">
-          <h2 style={{ margin: 0, flex: 1 }}>1. Faça upload de um vídeo</h2>
-          <button
-            onClick={onToggle}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "0",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--muted)",
-            }}
-            title={isExpanded ? "Recolher" : "Expandir"}
-          >
-            <i
-              className="material-icons"
-              style={{
-                transform: isExpanded ? "rotate(0deg)" : "rotate(180deg)",
-                transition: "transform 0.3s ease",
-              }}
-            >
-              keyboard_arrow_down
-            </i>
-          </button>
-        </div>
+    <div className="space-y-4">
+      {/* Segmented Mode Selector */}
+      <div className="flex p-1 bg-white/[0.04] border border-white/[0.08] rounded-xl backdrop-blur-md">
+        <button
+          type="button"
+          onClick={() => {
+            setUploadMode("url");
+            setSelectedFiles([]);
+          }}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
+            uploadMode === "url"
+              ? "bg-white/[0.12] text-white shadow-sm border border-white/10"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          </svg>
+          URL do YouTube
+        </button>
 
-        {isExpanded && (
-          <>
-            <div className="view-tabs" style={{ marginBottom: "12px" }}>
-              <button
-                className={`tab ${uploadMode === "url" ? "active" : ""}`}
-                onClick={() => {
-                  setUploadMode("url");
-                  setSelectedFiles([]);
-                }}
-              >
-                <span className="button-with-icon">
-                  <span className="material-icons" aria-hidden="true">
-                    link
-                  </span>
-                  <span>URL do YouTube</span>
-                </span>
-              </button>
-              <button
-                className={`tab ${uploadMode === "file" ? "active" : ""}`}
-                onClick={() => {
-                  setUploadMode("file");
-                  setYoutubeUrl("");
-                }}
-              >
-                <span className="button-with-icon">
-                  <span className="material-icons" aria-hidden="true">
-                    folder
-                  </span>
-                  <span>Arquivo local</span>
-                </span>
-              </button>
-            </div>
-
-            {uploadMode === "url" ? (
-              <>
-                <label className="field">
-                  Link do YouTube
-                  <input
-                    className="youtube-url-input"
-                    value={youtubeUrl}
-                    onChange={(event) => setYoutubeUrl(event.target.value)}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                  />
-                </label>
-                <AppButton
-                  variant="secondary"
-                  disabled={action.busy || youtubeUrl.length === 0}
-                  fullWidth
-                  style={{ padding: "14px 16px", marginTop: "8px" }}
-                  onClick={() => {
-                    runAction(
-                      async () => {
-                        const job = await createJob(youtubeUrl);
-                        setYoutubeUrl("");
-
-                        const ingestResult = await ingestJob(job.job_id);
-                        const updatedJob = await getJob(job.job_id);
-
-                        return { updatedJob, ingestResult };
-                      },
-                      ({ updatedJob, ingestResult }) => {
-                        const title = String(
-                          updatedJob?.video_name ?? updatedJob?.source_file_name ?? "",
-                        ).trim();
-                        const videoPath = String(ingestResult?.video_path ?? "").trim();
-
-                        if (!title || !videoPath) {
-                          console.warn(
-                            "[UploadSection] Vídeo baixado mas metadata incompleta; recarregando lista.",
-                            { title, videoPath, jobId: updatedJob?.job_id },
-                          );
-                          onLoadVideos();
-                          return;
-                        }
-
-                        const newVideo: VideoItem = {
-                          job: {
-                            ...updatedJob,
-                            video_name: title,
-                          },
-                          transcriptionLogs: [],
-                          videoPath,
-                        };
-
-                        onVideoAdded(newVideo);
-                        onLoadVideos();
-                      },
-                    );
-                  }}
-                >
-                  <span className="button-with-icon">
-                    <span className="material-icons" aria-hidden="true">
-                      upload
-                    </span>
-                    <span>Fazer upload</span>
-                  </span>
-                </AppButton>
-              </>
-            ) : (
-              <>
-                <div
-                  className={`upload-dropzone ${selectedFiles.length > 0 ? "active" : ""} ${isDraggingFile ? "dragging" : ""}`}
-                  onClick={() => {
-                    const fileInput = document.getElementById(
-                      "video-file-input",
-                    ) as HTMLInputElement;
-                    fileInput?.click();
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDraggingFile(true);
-                  }}
-                  onDragLeave={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDraggingFile(false);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsDraggingFile(false);
-
-                    const files = e.dataTransfer.files;
-                    if (files && files.length > 0) {
-                      const videoFiles = Array.from(files).filter((file) =>
-                        file.type.startsWith("video/"),
-                      );
-                      if (videoFiles.length > 0) {
-                        setSelectedFiles((current) => [...current, ...videoFiles]);
-                      } else {
-                        alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
-                      }
-                    }
-                  }}
-                >
-                  {selectedFiles.length > 0 ? (
-                    <div>
-                      <div style={{ marginBottom: "12px" }}>
-                        <span
-                          className="material-icons"
-                          aria-hidden="true"
-                          style={{ fontSize: "2.5rem", color: "var(--ink)" }}
-                        >
-                          video_file
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 600, marginBottom: "16px", color: "var(--ink)" }}>
-                        {selectedFiles.length} arquivo(s) selecionado(s)
-                      </div>
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "8px",
-                          marginBottom: "16px",
-                          maxHeight: "200px",
-                          overflowY: "auto",
-                        }}
-                      >
-                        {selectedFiles.map((file, index) => (
-                          <div key={index} className="upload-file-item">
-                            <div className="upload-file-info">
-                              <div className="upload-file-name">{file.name}</div>
-                              <div className="upload-file-size">
-                                {(file.size / 1024 / 1024).toFixed(2)} MB
-                              </div>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedFiles((current) =>
-                                  current.filter((_, i) => i !== index),
-                                );
-                              }}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "var(--danger)",
-                                cursor: "pointer",
-                                fontSize: "1rem",
-                                padding: "4px 8px",
-                                borderRadius: "4px",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = "rgba(239, 68, 68, 0.14)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = "transparent";
-                              }}
-                            >
-                              <span className="material-icons" aria-hidden="true">
-                                close
-                              </span>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedFiles([]);
-                          const fileInput = document.getElementById(
-                            "video-file-input",
-                          ) as HTMLInputElement;
-                          if (fileInput) fileInput.value = "";
-                        }}
-                        style={{
-                          background: "rgba(239, 68, 68, 0.14)",
-                          border: "1px solid rgba(239, 68, 68, 0.35)",
-                          color: "var(--danger)",
-                          padding: "6px 12px",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          fontSize: "0.85rem",
-                          fontWeight: 600,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = "rgba(239, 68, 68, 0.2)";
-                          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.5)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = "rgba(239, 68, 68, 0.14)";
-                          e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.35)";
-                        }}
-                      >
-                        Remover todos
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ marginBottom: "12px" }}>
-                        <span
-                          className="material-icons"
-                          aria-hidden="true"
-                          style={{ fontSize: "2.5rem", color: "var(--ink)" }}
-                        >
-                          upload_file
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 600, marginBottom: "4px", color: "var(--ink)" }}>
-                        Nenhum arquivo selecionado
-                      </div>
-                      <div style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "4px" }}>
-                        Clique ou arraste vídeos aqui
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <input
-                  id="video-file-input"
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={(event) => {
-                    const files = event.target.files;
-                    if (files) {
-                      const videoFiles = Array.from(files).filter((file) =>
-                        file.type.startsWith("video/"),
-                      );
-                      if (videoFiles.length > 0) {
-                        setSelectedFiles((current) => [...current, ...videoFiles]);
-                      } else {
-                        alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
-                      }
-                    }
-                  }}
-                />
-
-                <AppButton
-                  variant="secondary"
-                  disabled={action.busy || selectedFiles.length === 0}
-                  fullWidth
-                  style={{ padding: "14px 16px", marginTop: "8px" }}
-                  onClick={handleFileUpload}
-                >
-                  <span className="button-with-icon">
-                    <span className="material-icons" aria-hidden="true">
-                      upload
-                    </span>
-                    <span>Fazer upload</span>
-                  </span>
-                </AppButton>
-              </>
-            )}
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            setUploadMode("file");
+            setYoutubeUrl("");
+          }}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
+            uploadMode === "file"
+              ? "bg-white/[0.12] text-white shadow-sm border border-white/10"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          Arquivo Local
+        </button>
       </div>
-    </section>
+
+      {uploadMode === "url" ? (
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-zinc-300">
+              Link do Vídeo
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all font-mono"
+              />
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              O pipeline fará download automático com resolução e áudio otimizados para transcrição.
+            </p>
+          </div>
+
+          <GlassButton
+            variant="primary"
+            fullWidth
+            loading={action.busy || isSubmitting}
+            disabled={action.busy || isSubmitting || youtubeUrl.trim().length === 0}
+            onClick={() => {
+              runAction(
+                async () => {
+                  const job = await createJob(youtubeUrl);
+                  setYoutubeUrl("");
+
+                  const ingestResult = await ingestJob(job.job_id);
+                  const updatedJob = await getJob(job.job_id);
+
+                  return { updatedJob, ingestResult };
+                },
+                ({ updatedJob, ingestResult }) => {
+                  const title = String(
+                    updatedJob?.video_name ?? updatedJob?.source_file_name ?? "",
+                  ).trim();
+                  const videoPath = String(ingestResult?.video_path ?? "").trim();
+
+                  if (!title || !videoPath) {
+                    console.warn(
+                      "[UploadSection] Vídeo baixado mas metadata incompleta; recarregando lista.",
+                      { title, videoPath, jobId: updatedJob?.job_id },
+                    );
+                    onLoadVideos();
+                    return;
+                  }
+
+                  const newVideo: VideoItem = {
+                    job: {
+                      ...updatedJob,
+                      video_name: title,
+                    },
+                    transcriptionLogs: [],
+                    videoPath,
+                  };
+
+                  onVideoAdded(newVideo);
+                  onLoadVideos();
+                },
+              );
+            }}
+            leadingIcon={
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            }
+          >
+            Baixar e Importar Vídeo
+          </GlassButton>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div
+            onClick={() => {
+              const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
+              fileInput?.click();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingFile(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingFile(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingFile(false);
+
+              const files = e.dataTransfer.files;
+              if (files && files.length > 0) {
+                const videoFiles = Array.from(files).filter((file) =>
+                  file.type.startsWith("video/"),
+                );
+                if (videoFiles.length > 0) {
+                  setSelectedFiles((current) => [...current, ...videoFiles]);
+                } else {
+                  alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
+                }
+              }
+            }}
+            className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer select-none ${
+              isDraggingFile
+                ? "border-white/50 bg-white/[0.08]"
+                : selectedFiles.length > 0
+                ? "border-white/30 bg-white/[0.03]"
+                : "border-white/15 bg-white/[0.015] hover:border-white/30 hover:bg-white/[0.03]"
+            }`}
+          >
+            <div className="flex flex-col items-center justify-center space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-white">
+                  {selectedFiles.length > 0
+                    ? `${selectedFiles.length} arquivo(s) pronto(s) para upload`
+                    : "Clique para selecionar ou arraste vídeos aqui"}
+                </p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Formatos suportados: MP4, MOV, MKV, WebM
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <input
+            id="video-file-input"
+            type="file"
+            accept="video/*"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = event.target.files;
+              if (files) {
+                const videoFiles = Array.from(files).filter((file) =>
+                  file.type.startsWith("video/"),
+                );
+                if (videoFiles.length > 0) {
+                  setSelectedFiles((current) => [...current, ...videoFiles]);
+                } else {
+                  alert("Por favor, selecione arquivo(s) de vídeo válido(s)");
+                }
+              }
+            }}
+          />
+
+          {/* Selected Files List */}
+          {selectedFiles.length > 0 && (
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {selectedFiles.map((file, index) => (
+                <GlassCard
+                  key={index}
+                  className="flex items-center justify-between p-2.5 bg-white/[0.03] border-white/10"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <svg className="w-4 h-4 text-zinc-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polygon points="23 7 16 12 23 17 23 7" />
+                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                    </svg>
+                    <div className="truncate">
+                      <p className="text-xs font-medium text-white truncate">{file.name}</p>
+                      <p className="text-[10px] font-mono text-zinc-400">
+                        {(file.size / (1024 * 1024)).toFixed(2)} MB
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedFiles((current) => current.filter((_, i) => i !== index));
+                    }}
+                    className="p-1 rounded-md text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Remover da lista"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </GlassCard>
+              ))}
+            </div>
+          )}
+
+          <GlassButton
+            variant="primary"
+            fullWidth
+            loading={action.busy || isSubmitting}
+            disabled={action.busy || isSubmitting || selectedFiles.length === 0}
+            onClick={handleFileUpload}
+            leadingIcon={
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            }
+          >
+            Importar {selectedFiles.length > 0 ? `${selectedFiles.length} Arquivo(s)` : "Arquivos"}
+          </GlassButton>
+        </div>
+      )}
+    </div>
   );
 }
-

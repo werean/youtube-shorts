@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=Fraunces:wght@500;700&display=swap");
+@import "./styles/glass.css";
 
 @keyframes spin {
   from {
@@ -430,44 +431,76 @@ button:disabled {
 }
 
 /* Dialog */
+/* Dialog / Modais / Submenus em Liquid Glass com animações suaves estilo Apple */
 .dialog-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   padding: 20px;
+  animation: glass-overlay-fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes glass-overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .dialog {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  max-width: 600px;
+  background: rgba(18, 18, 24, 0.92);
+  backdrop-filter: blur(32px) saturate(200%);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  max-width: 620px;
   width: 100%;
-  max-height: 80vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   z-index: 1001;
   position: relative;
-  box-shadow: var(--shadow);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.18), 0 24px 64px 0 rgba(0, 0, 0, 0.65);
+  color: #f5f5f7;
+  animation: glass-dialog-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes glass-dialog-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.dialog.wide {
+  max-width: 900px;
 }
 
 .dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .dialog-header h3 {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: -0.01em;
 }
 
 .dialog-actions {
@@ -476,35 +509,57 @@ button:disabled {
 }
 
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--bg-contrast);
-  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 13px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: var(--border);
-}
-
-.icon-btn.download-btn {
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 
 .icon-btn.close-btn {
-  color: var(--muted);
+  color: #9494a0;
 }
 
 .dialog-content {
   padding: 24px;
   overflow-y: auto;
   flex: 1;
+  color: #d4d4d8;
+}
+
+.dialog-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dialog input, .dialog select, .dialog textarea {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-radius: 10px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dialog input:focus, .dialog select:focus, .dialog textarea:focus {
+  border-color: rgba(255, 255, 255, 0.3);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 
 .transcription-text {

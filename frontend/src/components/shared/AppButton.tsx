@@ -1,19 +1,18 @@
-import type { ButtonHTMLAttributes, CSSProperties } from "react";
-import { cn } from "../../lib/utils";
+import type { ButtonHTMLAttributes } from "react";
+import { GlassButton, type GlassButtonVariant } from "../ui/glass/GlassButton";
 
-type AppButtonVariant = "default" | "primary" | "secondary" | "accent" | "ghost";
+type AppButtonVariant = "default" | "primary" | "secondary" | "accent" | "ghost" | "danger";
 
 interface AppButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: AppButtonVariant;
   fullWidth?: boolean;
 }
 
-const variantClass: Record<AppButtonVariant, string> = {
-  default: "app-btn app-btn--default",
-  primary: "primary app-btn app-btn--primary",
-  secondary: "secondary app-btn app-btn--secondary",
-  accent: "accent app-btn app-btn--accent",
-  ghost: "ghost app-btn app-btn--ghost",
+const mapVariant = (v?: AppButtonVariant): GlassButtonVariant => {
+  if (v === "primary" || v === "accent") return "primary";
+  if (v === "danger") return "danger";
+  if (v === "ghost") return "ghost";
+  return "glass";
 };
 
 export function AppButton({
@@ -25,19 +24,17 @@ export function AppButton({
   type = "button",
   ...rest
 }: AppButtonProps) {
-  const mergedStyle: CSSProperties = {
-    ...(fullWidth ? { width: "100%" } : {}),
-    ...(style || {}),
-  };
-
   return (
-    <button
+    <GlassButton
       type={type}
-      className={cn(variantClass[variant], className)}
-      style={mergedStyle}
+      variant={mapVariant(variant)}
+      fullWidth={fullWidth}
+      className={className}
+      style={style}
       {...rest}
     >
       {children}
-    </button>
+    </GlassButton>
   );
 }
+

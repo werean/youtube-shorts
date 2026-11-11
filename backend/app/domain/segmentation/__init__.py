@@ -1,1 +1,53 @@
-"""Segmentation domain logic."""
+"""Stage 3: Discourse-aware semantic blocks & contextual TextTiling topic segmentation."""
+
+from app.domain.segmentation.semantic_blocks import (
+    BLOCKING_OPENING_CONNECTIVES_PT_EN,
+    TOPIC_OPENER_MARKERS_PT_EN,
+    align_block_bounds_with_words,
+    build_semantic_blocks,
+    ends_sentence,
+    group_segments_into_semantic_blocks,
+    is_topic_opener_text,
+    starts_with_blocking_connective,
+)
+from app.domain.segmentation.topic_segmentation import (
+    DEFAULT_DEPTH_SIGMA_FACTOR,
+    MIN_TOPIC_DURATION_SECONDS,
+    SHORT_VIDEO_THRESHOLD_SECONDS,
+    WINDOW_K,
+    build_sliding_windows,
+    build_topic_segments,
+    build_topics_from_boundaries,
+    compute_depth_scores,
+    compute_lexical_tfidf_embeddings,
+    compute_window_similarities,
+    cosine_similarity,
+    detect_heuristic_and_chapter_boundaries,
+    segment_blocks_into_topics,
+    select_boundaries_by_depth,
+)
+
+__all__ = [
+    "BLOCKING_OPENING_CONNECTIVES_PT_EN",
+    "DEFAULT_DEPTH_SIGMA_FACTOR",
+    "MIN_TOPIC_DURATION_SECONDS",
+    "SHORT_VIDEO_THRESHOLD_SECONDS",
+    "TOPIC_OPENER_MARKERS_PT_EN",
+    "WINDOW_K",
+    "align_block_bounds_with_words",
+    "build_semantic_blocks",
+    "build_sliding_windows",
+    "build_topic_segments",
+    "build_topics_from_boundaries",
+    "compute_depth_scores",
+    "compute_lexical_tfidf_embeddings",
+    "compute_window_similarities",
+    "cosine_similarity",
+    "detect_heuristic_and_chapter_boundaries",
+    "ends_sentence",
+    "group_segments_into_semantic_blocks",
+    "is_topic_opener_text",
+    "segment_blocks_into_topics",
+    "select_boundaries_by_depth",
+    "starts_with_blocking_connective",
+]
