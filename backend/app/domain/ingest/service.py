@@ -556,14 +556,29 @@ class IngestDomainService:
 _default_ingest_service: IngestDomainService | None = None
 
 
-def get_ingest_service() -> IngestDomainService:
+def get_ingest_service(
+    container: ServiceContainer | None = None,
+    ytdlp_adapter: YtDlpNativeAdapter | None = None,
+    pcm_extractor: PcmExtractor | None = None,
+) -> IngestDomainService:
     global _default_ingest_service
+    if container or ytdlp_adapter or pcm_extractor:
+        return IngestDomainService(
+            container=container,
+            ytdlp_adapter=ytdlp_adapter,
+            pcm_extractor=pcm_extractor,
+        )
     if _default_ingest_service is None:
         _default_ingest_service = IngestDomainService()
     return _default_ingest_service
 
 
-async def ingest_video(job_or_id: Job | str) -> dict[str, Any]:
+async def ingest_video(
+    job_or_id: Job | str,
+    *,
+    container: ServiceContainer | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Convenience entrypoint for Wave 3 orchestrator (`await ingest_video(job_id)`)."""
     job_id = job_or_id.job_id if isinstance(job_or_id, Job) else str(job_or_id)
-    return await get_ingest_service().ingest_job(job_id)
+    return await get_ingest_service(container=container).ingest_job(job_id, **kwargs)

@@ -813,13 +813,23 @@ class TranscriptionDomainService:
 _default_transcription_service: TranscriptionDomainService | None = None
 
 
-def get_transcription_service() -> TranscriptionDomainService:
+def get_transcription_service(
+    container: ServiceContainer | None = None,
+    whisper_adapter: FasterWhisperAdapter | None = None,
+) -> TranscriptionDomainService:
     global _default_transcription_service
+    if container or whisper_adapter:
+        return TranscriptionDomainService(container=container, whisper_adapter=whisper_adapter)
     if _default_transcription_service is None:
         _default_transcription_service = TranscriptionDomainService()
     return _default_transcription_service
 
 
-async def transcribe_job(job_id: str) -> TranscribeJobResponse:
+async def transcribe_job(
+    job_id: str,
+    *,
+    container: ServiceContainer | None = None,
+    **kwargs: Any,
+) -> TranscribeJobResponse:
     """Convenience entrypoint for Wave 3 orchestrator (`await transcribe_job(job_id)`)."""
-    return await get_transcription_service().transcribe_job(job_id)
+    return await get_transcription_service(container=container).transcribe_job(job_id, **kwargs)

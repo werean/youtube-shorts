@@ -15,6 +15,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from typing import Any
 
@@ -123,7 +124,9 @@ async def run_job_pipeline(
                 percent=50.0,
                 message="Step 3/5: Construindo blocos semânticos de discurso...",
             )
-            await build_semantic_blocks(job_id, container=c)
+            blocks_res = build_semantic_blocks(job_id, container=c)
+            if inspect.isawaitable(blocks_res):
+                await blocks_res
             job = c.jobs.load_job(job_id)
 
         # Step 4: Topic Segments (TextTiling)
@@ -357,7 +360,9 @@ class BatchRunner:
                         break
                     status.current_step = "semantic_blocks"
                     if job.status == JobStatus.BUILDING_BLOCKS:
-                        await build_semantic_blocks(job_id, container=c)
+                        b_res = build_semantic_blocks(job_id, container=c)
+                        if inspect.isawaitable(b_res):
+                            await b_res
                         job = c.jobs.load_job(job_id)
 
                     if not status.is_running:

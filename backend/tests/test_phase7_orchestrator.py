@@ -445,3 +445,20 @@ async def test_batch_pipeline_cancel_propagates_to_active_job(
         s_data = s_resp.json()
         assert not s_data["is_running"]
         assert s_data["current_step"] in ("cancelled", "completed")
+
+
+def test_domain_entrypoints_accept_container_kwargs(container: ServiceContainer) -> None:
+    """Verify that domain entrypoint functions accept container keyword argument."""
+    from app.domain.ingest.service import ingest_video
+    from app.domain.transcription.service import transcribe_job
+    from app.domain.segmentation.semantic_blocks import build_semantic_blocks
+    from app.domain.segmentation.topic_segmentation import build_topic_segments
+    from app.domain.analysis.narrative_miner import analyze_job
+
+    import inspect
+
+    for fn in (ingest_video, transcribe_job, build_semantic_blocks, build_topic_segments, analyze_job):
+        sig = inspect.signature(fn)
+        assert "container" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        ), f"{fn.__name__} must accept container parameter or **kwargs"
