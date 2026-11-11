@@ -3,19 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "backend",
     "frontend"
   ],
   "scripts": {
-    "install:all": "bun install && cd backend && bun install && cd ../frontend && bun install",
+    "install:all": "bun install && cd frontend && bun install",
     "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
     "dev:backend": "bun run scripts/dev-backend.ts",
     "dev:frontend": "cd frontend && bun run dev",
-    "build": "bun run build:backend && bun run build:frontend",
-    "build:backend": "cd backend && bun run build",
+    "build": "bun run build:frontend",
+    "build:backend": "echo Backend is 100% Python FastAPI (no build required)",
     "build:frontend": "cd frontend && bun run build",
-    "test:bun:contracts": "bun test tests/bun/contracts",
-    "start": "cd backend && bun run dist/main.js"
+    "start": "bun run scripts/dev-backend.ts"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

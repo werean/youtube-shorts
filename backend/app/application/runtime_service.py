@@ -212,6 +212,9 @@ class OperationRuntimeService:
             store[task] = collections.deque(maxlen=self.max_log_lines)
         store[task].append(line)
 
+    def append_log(self, job_id: str, line: str, task: str = "orchestrator") -> None:
+        self.append_task_log(job_id, task, line)
+
     def append_task_logs(self, job_id: str, task: str, lines: list[str]) -> None:
         if not lines:
             return
@@ -279,6 +282,12 @@ class OperationRuntimeService:
 
     def get_cancel_token(self, job_id: str, task: str = "default") -> CancelToken | None:
         return self._cancel_tokens.get((job_id, task))
+
+    def is_cancel_requested(self, job_id: str, task: str | None = None) -> bool:
+        if task is not None:
+            token = self._cancel_tokens.get((job_id, task))
+            return token.is_set() if token is not None else False
+        return any(token.is_set() for (jid, _), token in self._cancel_tokens.items() if jid == job_id)
 
     def clear_cancel_token(self, job_id: str, task: str = "default") -> None:
         self._cancel_tokens.pop((job_id, task), None)

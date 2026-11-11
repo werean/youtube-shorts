@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
-import importlib
-from typing import Any
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routers import config as config_router
 from app.api.routers import health as health_router
+from app.api.routers import jobs as jobs_router
+from app.api.routers import jobs_analysis as jobs_analysis_router
+from app.api.routers import jobs_ingest as jobs_ingest_router
+from app.api.routers import jobs_render as jobs_render_router
+from app.api.routers import jobs_transcription as jobs_transcription_router
 from app.api.routers import media as media_router
 from app.api.routers import videos as videos_router
 from app.application.job_lifecycle import JobNotFoundError
-
-OPTIONAL_JOB_ROUTER_MODULES: tuple[str, ...] = (
-    "app.api.routers.jobs",
-    "app.api.routers.jobs_ingest",
-    "app.api.routers.jobs_transcription",
-    "app.api.routers.jobs_analysis",
-    "app.api.routers.jobs_render",
-)
 
 
 def create_app() -> FastAPI:
@@ -62,23 +56,18 @@ def create_app() -> FastAPI:
             headers=exc.headers,
         )
 
+    # Core routers
     app.include_router(health_router.router)
     app.include_router(config_router.router)
     app.include_router(videos_router.router)
     app.include_router(media_router.router)
 
-    # Wave 2 & Wave 3 modular job routers (order matters: jobs.py with /jobs/batch/* comes first)
-    for mod_name in OPTIONAL_JOB_ROUTER_MODULES:
-        try:
-            mod: Any = importlib.import_module(mod_name)
-            router_obj = getattr(mod, "router", None)
-            if router_obj is not None:
-                app.include_router(router_obj)
-        except ModuleNotFoundError as exc:
-            # Only skip when the router module itself is not yet created
-            if exc.name == mod_name:
-                continue
-            raise
+    # Modular Job routers (order is critical: batch routes in jobs_router mounted FIRST)
+    app.include_router(jobs_router.router)
+    app.include_router(jobs_ingest_router.router)
+    app.include_router(jobs_transcription_router.router)
+    app.include_router(jobs_analysis_router.router)
+    app.include_router(jobs_render_router.router)
 
     return app
 

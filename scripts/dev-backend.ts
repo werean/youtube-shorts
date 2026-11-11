@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -102,7 +103,31 @@ if (process.platform === "win32" && isPortListening(port)) {
   process.exit(1);
 }
 
-const child = Bun.spawn(["bun", "run", "--watch", "src/main.ts"], {
+// Cross-OS virtual environment Python resolver
+const isWindows = process.platform === "win32";
+const venvPython = isWindows
+  ? resolve(backendDir, ".venv", "Scripts", "python.exe")
+  : resolve(backendDir, ".venv", "bin", "python");
+
+const pythonExecutable = existsSync(venvPython)
+  ? venvPython
+  : (isWindows ? "python" : "python3");
+
+const args = [
+  pythonExecutable,
+  "-m",
+  "uvicorn",
+  "app.main:app",
+  "--host",
+  "0.0.0.0",
+  "--port",
+  port.toString(),
+  "--reload",
+];
+
+console.log(`[dev] Iniciando FastAPI backend: ${pythonExecutable} -m uvicorn app.main:app --host 0.0.0.0 --port ${port} --reload`);
+
+const child = Bun.spawn(args, {
   cwd: backendDir,
   stdin: "inherit",
   stdout: "inherit",
