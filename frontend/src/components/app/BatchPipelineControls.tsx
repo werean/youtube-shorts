@@ -1,6 +1,7 @@
 import type { BatchPipelineOptions } from "@youtube-shorts/contracts";
 import { BatchPipelineDialog } from "../dialogs/BatchPipelineDialog";
 import type { VideoItem } from "../../utils/videoHelpers";
+import { GlassButton } from "../ui/glass";
 
 interface BatchPipelineControlsProps {
   showBatchPipelineDialog: boolean;
@@ -65,9 +66,9 @@ export function BatchPipelineControls({
             <div className="dialog-content" style={{ padding: "20px" }}>
               <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
               <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
-                <button className="secondary" onClick={onCloseCompletionNotification}>
+                <GlassButton variant="primary" onClick={onCloseCompletionNotification}>
                   OK
-                </button>
+                </GlassButton>
               </div>
             </div>
           </div>

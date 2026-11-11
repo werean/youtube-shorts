@@ -61,8 +61,7 @@ import { AiResponseDialog } from "./components/dialogs/AiResponseDialog";
 import { RegenerateAnalyzeDialog } from "./components/dialogs/RegenerateAnalyzeDialog";
 import { AppDialog } from "./components/shared";
 import { formatTimestamp, parseTimestampInput } from "./utils/formatters";
-import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
-import { GlassWindow, GlassToast } from "./components/ui/glass";
+import { GlassWindow, GlassToast, GlassCard, GlassButton } from "./components/ui/glass";
 import {
   StudioTopbar,
   type StudioTab,
@@ -1152,33 +1151,88 @@ export default function App() {
           {studioTab === "render-queue" && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               <div className="max-w-4xl mx-auto space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
                   <div>
-                    <h2 className="text-base font-semibold text-white">Fila de Processamento & Batch</h2>
-                    <p className="text-xs text-text-3">Acompanhe tarefas em segundo plano e renderização em lote.</p>
+                    <h2 className="text-base font-semibold text-white tracking-tight">Fila de Processamento & Batch</h2>
+                    <p className="text-xs text-text-3 mt-0.5">Acompanhe tarefas em segundo plano, transcrição e renderização em lote.</p>
                   </div>
-                  <button
+                  <GlassButton
+                    variant="primary"
                     onClick={openBatchPipelineDialog}
-                    className="h-8 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition"
+                    leadingIcon={
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                    }
                   >
                     Iniciar Processamento em Lote
-                  </button>
+                  </GlassButton>
                 </div>
 
-                {isBatchProcessing && (
-                  <div className="p-4 rounded-xl border border-white/10 bg-white/[0.03] space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-white">Processamento em Lote Ativo</span>
-                      <span className="font-mono text-emerald-400">Em andamento</span>
+                {isBatchProcessing ? (
+                  <GlassCard className="p-5 border-white/15 bg-[#0e0e14]/90 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                        <span className="text-sm font-semibold text-white">Processamento em Lote Ativo</span>
+                      </div>
+                      <span className="font-mono text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                        Em andamento
+                      </span>
                     </div>
+
                     {batchProcessingLogs.length > 0 && (
-                      <div className="h-32 overflow-y-auto font-mono text-[11px] text-text-3 bg-black/40 p-2 rounded-lg">
+                      <div className="h-44 overflow-y-auto font-mono text-xs text-zinc-300 bg-black/60 p-3 rounded-xl border border-white/10 space-y-1">
                         {batchProcessingLogs.map((log, i) => (
-                          <div key={i}>{log}</div>
+                          <div key={i} className="leading-relaxed">{log}</div>
                         ))}
                       </div>
                     )}
-                  </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.06]">
+                      <GlassButton
+                        variant="danger"
+                        size="sm"
+                        onClick={cancelBatchPipelineDialog}
+                        leadingIcon={
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        }
+                      >
+                        Cancelar Lote
+                      </GlassButton>
+                    </div>
+                  </GlassCard>
+                ) : (
+                  <GlassCard className="p-8 border-white/10 bg-white/[0.02] text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-white/[0.05] border border-white/10 mx-auto flex items-center justify-center text-zinc-400">
+                      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-white">Nenhum processamento em lote em execução</p>
+                      <p className="text-xs text-zinc-400 mt-1 max-w-md mx-auto">
+                        Inicie um lote para transcrever múltiplos vídeos, extrair blocos semânticos e gerar cortes sugeridos automaticamente.
+                      </p>
+                    </div>
+                    <div className="pt-2">
+                      <GlassButton
+                        variant="glass"
+                        size="sm"
+                        onClick={openBatchPipelineDialog}
+                        leadingIcon={
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                        }
+                      >
+                        Configurar Novo Lote
+                      </GlassButton>
+                    </div>
+                  </GlassCard>
                 )}
               </div>
             </div>

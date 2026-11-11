@@ -36,7 +36,15 @@ export function AppSelect({
   };
 
   return (
-    <select className={cn("select-field", className)} style={mergedStyle} {...rest}>
+    <select
+      className={cn(
+        "h-9 px-3 text-xs bg-zinc-900/90 border border-white/10 rounded-xl text-zinc-100 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all duration-200 cursor-pointer",
+        fullWidth ? "w-full" : "",
+        className,
+      )}
+      style={mergedStyle}
+      {...rest}
+    >
       {children}
     </select>
   );
