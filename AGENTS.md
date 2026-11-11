@@ -1,596 +1,154 @@
-# AGENTS.md
+# AGENTS.md — Memória Operacional e Guia de Arquitetura para Agentes
 
-Operational guide for future AI agents and incremental refactoring work in `C:\Users\lucas\code\youtube-shorts`.
+Guia operacional e memória persistente para agentes de IA trabalhando no repositório `youtube-shorts`.
 
-This document is based on static repository inspection from earlier phases. Use it as a baseline, not as absolute truth. Verify current code before editing.
+---
 
-## Agent Working Rules
+## 1. Documentos Oficiais de Especificação (Leitura Obrigatória)
 
-- Read relevant files first.
-- Prefer minimal changes.
-- Preserve current behavior unless explicitly asked otherwise.
-- Use this document as a baseline, not absolute truth.
-- Verify assumptions in code before editing.
-- Keep refactors incremental and low risk.
+Antes de implementar ou alterar qualquer funcionalidade no backend, leia integralmente os documentos de especificação na raiz do projeto:
 
-## Recommended Reading Order
+1. **[`DESIGN.md`](./DESIGN.md)** — Especificação completa da API REST, contratos HTTP/JSON, streaming HTTP Range (`206 Partial Content`), envelope de erros e compatibilidade com [`shared/contracts.ts`](./shared/contracts.ts) e [`frontend/src/api/`](./frontend/src/api).
+2. **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — Desenho técnico do motor de IA local em **Python (`FastAPI`)**, pipeline algorítmico em 5 estágios, escalonador de recursos por hardware (`IOQueue`, `GPUMutex` + `ActiveVRAMBudgetManager`, `RenderWorkerPool`), máquina de estados do Cinegrafista Virtual 9:16, `pyproject.toml`, templates canônicos de prompts/schemas JSON e persistência atômica em arquivos `.json`.
+3. **[`shared/contracts.ts`](./shared/contracts.ts)** — Contratos compartilhados entre Frontend e Backend.
 
-For a fast understanding of the project, read in this order:
+---
 
-1. `package.json`
-   - Root workspace scripts and Bun workspace layout.
-2. `backend/README.md`
-   - Backend overview and folder documentation map.
-3. `backend/src/main.ts`
-   - Backend entrypoint.
-4. `backend/src/app/startServer.ts`
-   - Server startup, port behavior, route/plugin registration.
-5. `backend/src/app/registerRoutes.ts`
-   - Top-level backend route map.
-6. `backend/src/routes/README.md`
-   - Route layer responsibilities and public contract boundaries.
-7. `backend/src/routes/jobs/index.ts`
-   - Job route aggregation.
-8. `backend/src/features/README.md`
-   - Feature-layer responsibilities after the recent routes/features split.
-9. `backend/src/services/jobLifecycleService.ts`
-   - Job metadata lifecycle boundary for loading, saving, updates, and status transitions.
-10. `backend/src/services/artifactService.ts`
-    - Backend-facing artifact/path boundary over storage helpers.
-11. `backend/src/services/operationRuntimeService.ts`
-    - Process-local runtime boundary for logs, active processes, cancellation, and batch progress.
-12. `backend/src/features/jobs/directAnalysis.ts`
-   - Direct analysis route behavior and current analysis prerequisites.
-13. `backend/src/features/jobs/batch/runner.ts`
-   - Batch pipeline sequence and analysis prerequisite behavior.
-14. `backend/src/pipeline/analysis_prerequisites.ts`
-   - Shared strategy-aware analysis preparation for direct, batch, and orchestrator paths.
-15. `backend/src/pipeline/orchestrator.ts`
-   - Full backend pipeline sequence.
-16. `backend/src/storage/files.ts`
-   - Low-level artifact paths and source video lookup implementation.
-17. `backend/src/storage/metadata.ts`
-   - JSON-backed job persistence.
-18. `backend/src/core/settings.ts`
-   - Media base directory and local settings behavior.
-19. `backend/src/core/toolConfigs.ts`
-    - Whisper, FFmpeg, LLM, and embedding config behavior.
-20. `frontend/src/api/client.ts`
-    - Frontend backend base URL and request wrapper.
-21. `frontend/src/components/UploadSection.tsx`
-    - YouTube URL and local upload entry flow.
-22. `frontend/src/App.tsx`
-    - Main UI coordinator and workflow state.
+## 2. Coordenação Multi-Sessão (Frontend vs. Backend)
 
-For specific workflows:
+- **Sessão de Frontend:** Trabalha exclusivamente em `frontend/` na branch `feature/frontend-liquid-glass` (implementando a interface Linear Studio / Liquid Glass).
+- **Sessão de Backend (Esta Sessão):** Trabalha exclusivamente na branch `feature/backend` focada no backend (`backend/`, `scripts/` de inicialização do backend e docs de arquitetura).
+- **Regra de Isolamento:**
+  - **NÃO** edite arquivos dentro de `frontend/` a partir da sessão de Backend.
+  - Mantenha 100% de compatibilidade com todas as rotas existentes e tipos de [`shared/contracts.ts`](./shared/contracts.ts). Campos novos nos payloads de resposta devem ser **aditivos e opcionais** até que o Frontend os integre.
 
-- Ingest: `backend/src/pipeline/ingest.ts`
-- Transcription: `backend/src/pipeline/transcription.ts`
-- Semantic blocks: `backend/src/pipeline/semantic_blocks.ts`
-- Topic segmentation: `backend/src/pipeline/topic_segmentation.ts`
-- Analysis prerequisites: `backend/src/pipeline/analysis_prerequisites.ts`
-- LLM analysis: `backend/src/pipeline/analysis.ts`
-- Rendering: `backend/src/pipeline/rendering.ts`, `backend/src/video/vertical.ts`
-- Dependency configuration: `backend/src/routes/config/registerDependenciesRoutes.ts`, `backend/src/features/dependencies/`
-- Job feature operations: `backend/src/features/jobs/`
-- Service boundaries: `backend/src/services/`
+---
 
-## Backend Documentation Map
+## 3. Perfil de Hardware de Referência e Premissas de Produto
 
-Use these folder-level docs for backend navigation. They are intentionally kept at parent-folder level; avoid adding low-value docs to small nested folders.
+- **Hardware Alvo Principal:**
+  - **GPU:** NVIDIA GeForce **RTX 5070 (12 GB GDDR7 VRAM, Arquitetura Blackwell, Tensor Cores 5ª Geração, NVENC 9ª Geração)**.
+  - **RAM:** **32 GB DDR4 3200MHz**.
+- **Premissas Inegociáveis do Produto:**
+  1. **100% IA Local e Custo Zero:** Nenhum fluxo deve depender de APIs pagas na nuvem.
+  2. **Suporte Nativo Dual a Provedores Locais:** Suporte integrado a **LM Studio (`http://127.0.0.1:1234/v1`)** e **Ollama (`http://127.0.0.1:11434`)** com autodetecção zero-config do modelo local carregado.
+  3. **Modelos Locais Padrão Calibrados para RTX 5070:**
+     - **LLM Principal:** `qwen2.5:14b` (`Qwen2.5-14B-Instruct-GGUF Q4_K_M`, ~9.5 GB VRAM), com `qwen2.5:7b` e `gemma3:12b` pré-registrados.
+     - **Embeddings:** `nomic-embed-text` (`nomic-embed-text-v1.5`, ~270 MB, executado com offload CPU `num_gpu=0` ou unload imediato para evitar *model thrashing* na VRAM com o modelo 14B).
+     - **Transcrição:** `faster-whisper` com `large-v3-turbo` em `compute_type="int8_float16"` (~1.8 GB VRAM) + `Silero VAD` + `word_timestamps=True` (com fallback transparente para `device="cpu", compute_type="int8"` caso a VRAM livre seja $< 2.2\text{ GB}$).
+  4. **Cortes com Começo, Meio e Fim Reais (~90s de Média Flexível):**
+     - A duração do corte **não é rígida**: tem média de referência de ~90 segundos, mas é ditada exclusivamente pelo início e conclusão naturais do sub-assunto (podendo variar de ~15s–50s para assuntos rápidos/vídeos curtos até ~120s–160s para histórias completas).
+     - Todo corte passa pelo pré-filtro Top-$K$ e **Boundary Lookaround (`[-3, +3]` blocos vizinhos)** para garantir que o início não dependa de contexto anterior e o fim conclua o raciocínio, seguido de **Snap Acústico em Vale de Energia RMS + Zero-Crossing**.
+  5. **Experiência 1-Clique para Leigos e Curadoria para Avançados:**
+     - Um usuário leigo deve conseguir apenas colar um link do YouTube ou enviar um arquivo local e receber os vídeos verticais `.mp4` prontos sem configurar nada manualmente.
 
-- `backend/README.md` - backend overview, entrypoints, folder guide, and core invariants.
-- `backend/src/app/README.md` - server composition, plugin registration, route mounting, and startup behavior.
-- `backend/src/core/README.md` - shared runtime defaults, paths, settings, tool configs, and task logs.
-- `backend/src/features/README.md` - route-adjacent business logic for jobs, videos, media, config, and dependencies.
-- `backend/src/features/config/README.md` - user-facing config workflows, folders, prompts, tool config payloads, and Ollama model operations.
-- `backend/src/llm/README.md` - Ollama chat client behavior and prompt templates.
-- `backend/src/models/README.md` - backend domain types and persisted status/model contracts.
-- `backend/src/pipeline/README.md` - ingest, transcription, semantic blocks, topics, analysis, rendering, and orchestration.
-- `backend/src/routes/README.md` - Fastify route responsibilities, public route groups, and response contract boundaries.
-- `backend/src/storage/README.md` - filesystem-backed metadata, artifacts, source video lookup, and render output listing.
-- `backend/src/video/README.md` - FFmpeg command construction and execution boundaries.
-- `backend/tests/README.md` - backend test layout, commands, and testing invariants.
+---
 
-## Critical Invariants
+## 4. Invariantes Críticos do Sistema
 
-Do not break these during refactors unless the task explicitly asks for a behavior change:
+Nunca quebre estes invariantes durante a implementação:
 
-- Route URLs:
-  - `/health`
-  - `/jobs`
-  - `/jobs/upload`
-  - `/jobs/:job_id`
-  - `/jobs/:job_id/ingest`
-  - `/jobs/:job_id/transcribe`
-  - `/jobs/:job_id/transcribe/cancel`
-  - `/jobs/:job_id/transcription`
-  - `/jobs/:job_id/transcription/:format`
-  - `/jobs/:job_id/blocks`
-  - `/jobs/:job_id/analyze`
-  - `/jobs/:job_id/cuts`
-  - `/jobs/:job_id/render`
-  - `/jobs/:job_id/render/cancel`
-  - `/jobs/:job_id/renders`
-  - `/jobs/:job_id/renders/:file`
-  - `/jobs/:job_id/renders/:file/open-folder`
-  - `/jobs/:job_id/run`
-  - `/jobs/batch/run`
-  - `/jobs/batch/:batch_id/status`
-  - `/jobs/batch/:batch_id/cancel`
-  - `/jobs/batch/:batch_id/continue`
-  - `/videos`
-  - `/videos/archived`
-  - `/videos/:job_id/archive`
-  - `/videos/:job_id`
-  - `/videos/:job_id/open-folder`
-  - `/media/videos/:job_id`
-  - `/media/shorts/:job_id/:file`
-  - `/config/...`
-- Response shapes:
-  - Frontend API wrappers depend on current JSON shapes from job, transcription, cuts, render, logs, batch, and config routes.
-- Job status compatibility:
-  - Backend statuses are defined in `backend/src/models/job.ts`.
-  - Frontend statuses are defined separately in `frontend/src/types.ts`.
-  - Keep frontend/backend status values compatible.
-- Artifact filenames:
+### 4.1 Rotas Obrigatórias e Contratos Exatos (Porta `8000`)
+- `/health` (`GET`)
+- `/jobs` (`POST`)
+- `/jobs/upload` (`POST`)
+- `/jobs/:job_id` (`GET`)
+- `/jobs/:job_id/rename` (`POST` e `PUT` — **deve retornar o objeto `Job` diretamente no top-level**)
+- `/jobs/:job_id/ingest` (`POST` — **`video_path` deve ser `/media/videos/:job_id` e `full_path` o caminho físico no disco**)
+- `/jobs/:job_id/logs/:task` (`GET` — `task` $\in$ `ingest | transcription | render`)
+- `/jobs/:job_id/transcribe` (`POST` — **deve retornar `transcription`, `segments` e `available_formats: { segments, text, vtt }`**)
+- `/jobs/:job_id/transcribe/cancel` (`POST`)
+- `/jobs/:job_id/transcription` (`GET`, `DELETE`)
+- `/jobs/:job_id/transcription/:format` (`DELETE` — deve aceitar `segments | text | vtt` e os aliases `json | txt | vtt`, resetando `job.status = "DOWNLOADED"` ao remover `segments`/tudo)
+- `/jobs/:job_id/blocks` (`POST`)
+- `/jobs/:job_id/analyze` (`POST`)
+- `/jobs/:job_id/cuts` (`GET`, `PUT`)
+- `/jobs/:job_id/cuts/:cut_id/approve` (`POST`)
+- `/jobs/:job_id/cuts/:cut_id/reject` (`POST`)
+- `/jobs/:job_id/render` (`POST`)
+- `/jobs/:job_id/render/cancel` (`POST` — mata árvore FFmpeg e limpa arquivos `.mp4`/`.ass` parciais)
+- `/jobs/:job_id/renders` (`GET`)
+- `/jobs/:job_id/renders/:file` (`DELETE` — retorna `{ "ok": true, "file": "..." }`)
+- `/jobs/:job_id/renders/:file/open-folder` (`POST`)
+- `/jobs/:job_id/run` (`POST`)
+- `/jobs/batch/run` (`POST`)
+- `/jobs/batch/:batch_id/status` (`GET`)
+- `/jobs/batch/:batch_id/cancel` (`POST` — propaga cancelamento imediato para a tarefa ativa do `current_job_id`)
+- `/jobs/batch/:batch_id/continue` (`POST`)
+- `/videos` (`GET`)
+- `/videos/archived` (`GET`)
+- `/videos/:job_id/archive` (`POST`)
+- `/videos/:job_id` (`DELETE`)
+- `/videos/:job_id/open-folder` (`POST`)
+- `/media/videos/:job_id` (`GET` com suporte a HTTP `Range` / `206 Partial Content`)
+- `/media/shorts/:job_id/:file` (`GET` com suporte a HTTP `Range` / `206 Partial Content`)
+- `/config` (`GET`)
+- `/config/ollama-models` (`GET`)
+- `/config/ollama-models/register` (`POST` — erros `400` usam `{ "detail": "..." }`)
+- `/config/ollama-models/:modelName` (`DELETE` — erros `400` usam `{ "detail": "..." }`)
+- `/config/settings` (`GET`, `POST`)
+- `/config/tool-configs` (`GET`, `POST` — retorna `{ "source", "defaults", "active" }`)
+- `/config/tool-configs/reset` (`POST`)
+- `/config/tool-configs/reset/:section` (`POST`)
+- `/config/tool-configs/import` (`POST`)
+- `/config/llm-prompt` (`GET`)
+- `/config/llm-prompt/default` (`GET`)
+- `/config/llm-saved-prompts` (`GET`, `POST`)
+- `/config/common-folders` (`GET`)
+- `/config/select-folder` (`POST`)
+- `/config/dependencies` (`GET`)
+- `/config/dependencies/:name/instructions` (`GET` — `404` retorna `{ "error": "Dependency not found" }`)
+- `/config/dependencies/:name/install` (`POST`)
+- `/config/dependencies/:name/uninstall` (`POST`)
+- `/config/dependencies/:name/install/start` (`POST`)
+- `/config/dependencies/:name/uninstall/start` (`POST`)
+- `/config/dependencies/install-sessions/:sessionId` (`GET`)
+- `/config/dependencies/install-sessions/:sessionId/cancel` (`POST`)
+- `/config/dependencies/:name/open-terminal` (`POST`)
+
+### 4.2 Artefatos Persistidos em Disco (Sem Banco de Dados)
+- Artefatos de estado e análise do Job residem em `data/jobs/<job_id>/` com os nomes canônicos:
   - `job.json`
   - `source.info.json`
+  - `semantic.blocks.json`
+  - `topic.segments.json` (sempre gerado, mesmo para vídeos `< 150s` com tópico único `t1`)
+  - `cuts.suggested.json`
+- Artefatos de transcrição residem em `{media.base_dir}/{video_name}/transcrições/` (com fallback de leitura em `data/jobs/<job_id>/`):
   - `transcription.segments.json`
+  - `transcription.words.json` (alinhamento palavra-por-palavra)
   - `transcription.txt`
   - `transcription.vtt`
-  - `semantic.blocks.json`
-  - `topic.segments.json`
-  - `cuts.suggested.json`
-- Source video path behavior:
-  - `Job.source_video_path` is an absolute path.
-  - It is consumed by media streaming, transcription, rendering, archive/delete/open-folder flows, and source-video cache logic.
-- File-backed persistence:
-  - Jobs, settings, tool configs, transcription artifacts, blocks, topics, cuts, and rendered output listings are filesystem-backed.
-- External command behavior:
-  - Do not change child-process commands, environment variables, artifact paths, or polling intervals as part of structural extraction.
+- Configurações globais residem em `data/`:
+  - `settings.json` (com normalização cross-OS automática de `base_dir` entre Windows e Linux)
+  - `default_configs.json`
+  - `custom_settings.json`
+  - `saved_llm_prompts.json` (nome canônico preservado)
+- Toda escrita de arquivo `.json` deve ser **atômica** (`write .tmp` + `fsync` + `os.replace`).
+
+### 4.3 Concorrência Isolada por Recurso de Hardware e Orçamento de VRAM
+- **`GPUMutex` + `ActiveVRAMBudgetManager` (Concorrência = `1`):**
+  - Nunca rodar `faster-whisper` e LLM ao mesmo tempo.
+  - Antes de alocar `faster-whisper` em CUDA, checar VRAM livre ($\ge 2.2\text{ GB}$); se insuficiente, solicitar unload de modelos ociosos no Ollama (`keep_alive: 0`) ou cair para `device="cpu", compute_type="int8"`.
+  - Sempre descarregar o modelo Whisper da VRAM (`del model; gc.collect(); torch.cuda.empty_cache()`) no bloco `finally:` ao concluir ou cancelar a transcrição.
+- **`IOQueue` (Concorrência = `2`):** Downloads `yt-dlp` e extração de áudio PCM 16kHz rodam de forma assíncrona em paralelo à GPU.
+- **`RenderWorkerPool` (Concorrência = `2`):** Até 2 cortes simultâneos combinando Auto-Reframe na CPU (`OpenCV`/`MediaPipe`) com encode no ASIC dedicado **NVENC** (`h264_nvenc`) via `-filter_complex_script`.
+
+---
+
+## 5. Runbook e Checklist Persistente de Execução (`backend/src` $\rightarrow$ `backend/app`)
+
+> **REGRA PARA O AGENTE IMPLEMENTADOR:**
+> Ao concluir cada fase abaixo e validar seus testes automatizados, **edite este arquivo (`AGENTS.md`) marcando `[x]` na fase concluída**. Caso a sessão sofra compactação de contexto ou seja retomada em outra conversa, leia a tabela abaixo para retomar imediatamente da próxima fase pendente `[ ]`.
+
+### 5.1 Checklist de Status das Fases
+
+| Status | Fase | Escopo Principal e Arquivos Alvo | Critério de Pronto (Definition of Done & Comandos de Verificação) |
+| :--- | :--- | :--- | :--- |
+| `[ ]` | **Fase 1** | **Fundação FastAPI, Storage Atômico, Configs, Biblioteca e Media Range 206**<br>- Criar `backend/pyproject.toml` (conforme Seção 5 de `ARCHITECTURE.md`) e ambiente virtual `.venv`.<br>- Criar `backend/app/core/` (`config.py`, `paths.py`, `settings.py` com normalização cross-OS, `tool_configs.py`).<br>- Atualizar `data/default_configs.json` (conforme Seção 6.4 de `ARCHITECTURE.md`).<br>- Criar `backend/app/models/`, `backend/app/infrastructure/storage/atomic_store.py`, `backend/app/application/runtime_service.py`, `job_lifecycle.py` e `scheduler.py` (`IOQueue`, `GPUMutex`, `ActiveVRAMBudgetManager`, `RenderWorkerPool`).<br>- Implementar `api/routers/health.py`, `config.py`, `videos.py` e `media.py` (com HTTP Range `206 Partial Content`).<br>- Preservar `backend/src/models/job.ts` para manter `bun run test:bun:contracts` verde. | 1. `pytest backend/tests/test_phase1_foundation.py` passando 100% (testando escrita atômica, `/health`, `/config/*`, `/videos/*` e `/media/*` `206 Partial Content`).<br>2. `bun run test:bun:contracts` passando 100%. |
+| `[ ]` | **Fase 2** | **Ingestão Nativa (`yt_dlp` + `ffprobe`), Upload Local e Rotas Iniciais de `/jobs`**<br>- Implementar `backend/app/domain/ingest/` e `infrastructure/audio/pcm_extractor.py`.<br>- Garantir preenchimento obrigatório de `job.video_duration_seconds`, extração de `chapters` para `source.info.json` e extração de `audio_16k.wav` em `{video_dir}/transcrições/`.<br>- Implementar `POST /jobs`, `POST /jobs/upload`, `GET /jobs/:id`, `POST` e `PUT /jobs/:id/rename` (retornando `Job` no top-level), `POST /jobs/:id/ingest` (`video_path: "/media/videos/:id"`, `full_path` físico) e `GET /jobs/:id/logs/:task`. | 1. `pytest backend/tests/test_phase2_ingest.py` passando 100% (validando contratos de `/jobs`, `/rename`, `/ingest`, `/upload` e extração de `video_duration_seconds`). |
+| `[ ]` | **Fase 3** | **Motor de Transcrição GPU (`faster-whisper` + `Silero VAD` + Prosódia em Chunks)**<br>- Implementar `backend/app/infrastructure/audio/acoustic_dsp.py` (energia RMS em janelas de `10ms` e detecção acústica de troca de locutor em chunks de 5 min) e `domain/transcription/`.<br>- Integrar `ActiveVRAMBudgetManager` (checando $\ge 2.2\text{ GB}$ VRAM livre, unload de modelos ociosos no Ollama ou fallback `cpu int8`) + unload explícito no `finally:`.<br>- Implementar cancelamento cooperativo `< 500ms`, filtro anti-alucinação e gravação de `transcription.segments.json`, `transcription.words.json`, `.txt` e `.vtt` em `{video_dir}/transcrições/`.<br>- Implementar `POST /jobs/:id/transcribe`, `POST /jobs/:id/transcribe/cancel`, `GET` e `DELETE /jobs/:id/transcription` e `DELETE /jobs/:id/transcription/:format` (aceitando `segments\|text\|vtt` e aliases `json\|txt\|vtt`). | 1. `pytest backend/tests/test_phase3_transcription.py` passando 100% (incluindo teste de `available_formats`, cancelamento cooperativo, deleção por formato com reset para `DOWNLOADED` e filtro anti-alucinação). |
+| `[ ]` | **Fase 4** | **Segmentação Consciente de Discurso e TextTiling Contextual (`domain/segmentation`)**<br>- Implementar `semantic_blocks.py` (conectivos bloqueadores de abertura PT/EN, gatilhos de pergunta/resposta e pausas) gerando `semantic.blocks.json`.<br>- Implementar `topic_segmentation.py` com janelas deslizantes $k=3$, embeddings via LM Studio / Ollama (`nomic-embed-text` com `num_gpu=0` para evitar *model thrashing*), *Depth Score* adaptativo e geração garantida de `topic.segments.json` (incluindo tópico único `t1` para vídeos `< 150s`).<br>- Implementar `POST /jobs/:id/blocks`. | 1. `pytest backend/tests/test_phase4_segmentation.py` passando 100% (testando vídeos curtos `< 150s`, vídeos longos $\ge 150\text{s}$, bloqueio de conectivos dependentes e cálculo de *Depth Score*). |
+| `[ ]` | **Fase 5** | **Motor de Cortes em 3 Fases (`LM Studio` + `Ollama` + Top-K Boundary Lookaround + Snap RMS)**<br>- Implementar `backend/app/infrastructure/llm/unified_adapter.py` (suporte dual LM Studio `:1234/v1` e Ollama `:11434`, autodetecção zero-config e Structured Outputs via JSON Schema da Seção 6.2 de `ARCHITECTURE.md`).<br>- Implementar `domain/analysis/` com Fase 4A (janelas sobrepostas 25% e média flexível ~90s), Fase 4B (pré-filtro Top-18 + *Boundary Lookaround* `[-3, +3]` blocos vizinhos da Seção 6.3) e Fase 4C (expansão determinística de `block_ids`, deduplicação IoU $> 0.35$, teto `max_suggested_cuts` e snap acústico em vale RMS `10ms` + zero-crossing).<br>- Implementar `POST /jobs/:id/analyze`, `GET` e `PUT /jobs/:id/cuts`, `POST /jobs/:id/cuts/:cut_id/approve` e `reject`. | 1. `pytest backend/tests/test_phase5_analysis.py` passando 100% (validando recuo automático em início dependente, extensão de conclusão em Lookaround `[-3, +3]`, deduplicação IoU e snap RMS). |
+| `[ ]` | **Fase 6** | **Cinegrafista Virtual 9:16, Legendas `.ass` e FFmpeg NVENC (`-filter_complex_script`)**<br>- Implementar `backend/app/infrastructure/vision/` e `domain/rendering/` com máquina de estados completa (`0`, `1`, `2`, `3+` rostos, filtro de rostos falsos $< 1.5\%$, Hold-Last-Position $< 2\text{s}$, fallback automático para `blur`/`zoom` em slides/screen-share sem rosto $\ge 2\text{s}$, Deadband 15%, Savitzky-Golay isolado por `shot` HSV e simplificação Ramer-Douglas-Peucker).<br>- Implementar gerador `.ass` palavra-por-palavra (sincronizado com `trim_internal_silence`), `-filter_complex_script`, áudio `-14 LUFS` e `h264_nvenc` (com fallback automático para `libx264`).<br>- Implementar `POST /jobs/:id/render`, `POST /jobs/:id/render/cancel` (matando árvore FFmpeg e limpando `.mp4`/`.ass` parciais), `GET /jobs/:id/renders`, `DELETE /jobs/:id/renders/:file` e `open-folder`. | 1. `pytest backend/tests/test_phase6_rendering.py` passando 100% (validando máquina de estados `0/1/2/3+` rostos, isolamento por corte de cena HSV, geração `.ass`, script `-filter_complex_script` e limpeza em `/render/cancel`). |
+| `[ ]` | **Fase 7** | **Orquestrador 1-Clique, Batch Pipeline, Scripts Cross-OS e Validação E2E**<br>- Implementar `backend/app/application/orchestrator.py` (`POST /jobs/:id/run` suportando início tanto em `PENDING` quanto em `DOWNLOADED`, e rotas `/jobs/batch/run`, `status`, `cancel` em cascata e `continue`).<br>- Atualizar `scripts/dev-backend.ts` e `package.json` para iniciar o FastAPI (`uvicorn app.main:app --host 0.0.0.0 --port 8000`) de forma cross-OS (Windows `.venv\Scripts\python.exe` e Linux `.venv/bin/python`).<br>- Executar suíte completa de testes Python (`pytest`) e contratos TypeScript (`bun run test:bun:contracts`). | 1. `pytest` (toda a suíte `backend/tests/`) passando 100%.<br>2. `bun run test:bun:contracts` passando 100%.<br>3. Servidor FastAPI respondendo na porta `8000` via `scripts/dev-backend.ts`. |
 
-## Verified Facts
-
-### Stack
-
-- Root package is a Bun workspace with `backend` and `frontend`.
-- Backend is TypeScript ESM using Fastify.
-- Backend tests use Vitest and a Bun-native behavior suite.
-- Frontend is React 18 + TypeScript + Vite.
-- Tailwind/PostCSS config exists in the frontend.
-- Installed/generated directories are present locally and ignored by `.gitignore`:
-  - `node_modules`
-  - `backend/node_modules`
-  - `backend/dist`
-  - `frontend/node_modules`
-  - `frontend/dist`
-
-### Entrypoints
-
-- Root scripts are defined in `package.json`.
-- Backend starts from `backend/src/main.ts`.
-- `backend/src/app/startServer.ts` listens on `process.env.PORT` or `8000`.
-- Frontend mounts from `frontend/src/main.tsx`.
-- Frontend API base URL is `http://localhost:8000` in `frontend/src/api/client.ts`.
-- Vite dev server port is `5173`.
-
-### Backend Layout
-
-- Keep this section as a high-level pointer. Use the folder docs listed in **Backend Documentation Map** for responsibilities, interactions, and invariants.
-- Route and response contracts live under `backend/src/routes/`; route behavior should remain compatible with frontend API wrappers.
-- Route handlers now delegate much of the route-adjacent work to `backend/src/features/`; jobs feature modules are flattened for small operations and grouped only for multi-file areas like batch and render.
-- `backend/src/services/` contains the current backend service boundaries:
-  - `jobLifecycleService.ts` wraps job metadata load/save/update/status behavior.
-  - `artifactService.ts` wraps canonical artifact paths, artifact reads/writes, source-video lookup, render listings, and storage-facing path helpers.
-  - `operationRuntimeService.ts` owns process-local runtime state for task logs, active transcription/render processes, cancellation state, batch progress, and dependency install session access.
-- Pipeline behavior lives under `backend/src/pipeline/`; low-level artifact implementation remains under `backend/src/storage/` behind `artifactService`.
-- Runtime defaults, persisted settings, and persisted tool configs live under `backend/src/core/`; preserve persisted JSON shapes unless intentionally migrating them.
-- User-facing config workflows live under `backend/src/features/config/`; persisted settings and tool config stores remain under `backend/src/core/`.
-
-### Frontend Layout
-
-- `frontend/src/App.tsx` is the main UI coordinator.
-- `frontend/src/components/UploadSection.tsx` handles YouTube URL and local file upload UI.
-- `frontend/src/api/` contains feature API wrappers.
-- `frontend/src/hooks/` contains existing hooks for app actions, cuts, logs, polling, rendering, settings, transcription, upload, and video management.
-- `frontend/src/components/ui/` contains UI primitives and older/parallel UI components.
-
-### Scripts And Tests
-
-- Root scripts include `install:all`, `dev`, `build`, and `start`.
-- Backend scripts include `build`, `dev`, `type-check`, `test`, `test:bun`, and `test:watch`.
-- Frontend scripts include `dev`, `build`, and `preview`.
-- `scripts/dev-backend.ts` checks port `8000` on Windows and starts the backend watcher.
-- `scripts/ensure-port-free.ts` frees a Windows listening port, default `8000`.
-- `scripts/create-dummy-video.ps1` writes a minimal MP4 header.
-- Backend tests exist under `backend/tests`.
-- No frontend test configuration was identified in inspected manifests.
-
-## System Flow
-
-### Startup
-
-- `backend/src/main.ts` calls `startServer()`.
-- `startServer()` creates Fastify, registers plugins/routes, then listens on `8000` by default.
-- Frontend mounts `App` and calls the backend through `frontend/src/api/client.ts`.
-
-### YouTube URL Ingest
-
-- `UploadSection` calls `createJob(youtubeUrl)`.
-- `registerCreateJob.ts` delegates job creation to `features/jobs/create.ts`, which creates a UUID-like `job_id` with `status: CREATED`.
-- `UploadSection` calls `ingestJob(job_id)`.
-- `registerIngestJob.ts` loads the job and calls `ingestVideo(job)`.
-- `ingest.ts` runs `python -m yt_dlp`.
-- `ingest.ts` writes video/info files, updates `source_video_path` and `video_name`, and falls back to a dummy MP4 on download failure.
-
-### Local File Upload
-
-- `UploadSection` calls `uploadVideoFile(file)`.
-- `frontend/src/api/videos.ts` posts multipart form data to `/jobs/upload`.
-- `registerUploadJob.ts` delegates local upload persistence to `features/jobs/upload.ts`.
-- `features/jobs/upload.ts` writes the uploaded video under the configured media base directory and creates a `Job` with `status: DOWNLOADED`.
-
-### Manual UI Processing
-
-- Transcribe: `App.tsx` -> `transcribeJob()` -> `POST /jobs/:job_id/transcribe`.
-- Build blocks: `App.tsx` -> `buildBlocks()` -> `POST /jobs/:job_id/blocks`.
-- Analyze: `App.tsx` -> `analyzeJob()` -> `POST /jobs/:job_id/analyze` -> `features/jobs/directAnalysis.ts`.
-- Direct analysis uses `analysis_prerequisites.ts`:
-  - short videos prepare semantic blocks only.
-  - medium/long videos prepare semantic blocks and topic segments before `analyzeBlocks()`.
-- Render: `App.tsx` -> `updateCuts()` -> `renderJob()` -> poll render outputs/job status.
-
-### Full Backend Pipeline
-
-- `POST /jobs/:job_id/run` calls `orchestrator.runPipeline(jobId, { includeRender })`.
-- Ordered steps:
-  - ingest
-  - transcription
-  - semantic blocks
-  - strategy-aware topic segmentation for medium/long videos
-  - analysis
-  - optional rendering
-- `orchestrator.ts` uses job status ordering to skip already-completed steps.
-- `analysis_prerequisites.ts` is the shared source for analysis preparation behavior across orchestrator, direct analysis, and batch analysis.
-
-### Batch Pipeline
-
-- Frontend calls:
-  - `/jobs/batch/run`
-  - `/jobs/batch/:batch_id/status`
-  - `/jobs/batch/:batch_id/cancel`
-  - `/jobs/batch/:batch_id/continue`
-- `registerBatchPipelineRoutes.ts` creates/reads in-memory batch progress through `operationRuntimeService`.
-- `registerBatchPipelineRoutes.ts` delegates processing to `features/jobs/batch/runner.ts`.
-- Batch can run transcription, semantic blocks, analysis, optional approval wait, and rendering.
-- Batch analysis uses the same strategy-aware prerequisites as direct/orchestrator analysis:
-  - short videos prepare semantic blocks only.
-  - medium/long videos prepare semantic blocks and topic segments before `analyzeBlocks()`.
-
-### Media Output
-
-- Source videos are served by `/media/videos/:job_id`.
-- Rendered shorts are served by `/media/shorts/:job_id/:file`.
-- `mediaRoutes.ts` supports HTTP range requests and streams files from disk.
-
-## Data And Artifacts
-
-### Job Metadata
-
-- `backend/src/models/job.ts` defines `Job` and `JobStatus`.
-- `storage/metadata.ts` persists jobs as `data/jobs/<job_id>/job.json`.
-- `services/jobLifecycleService.ts` is the backend-facing boundary for job load/save/update/status operations.
-
-### Source Video
-
-- `Job.source_video_path` stores the absolute source video path.
-- YouTube ingest and local upload both converge on a local source video path.
-
-### Transcription
-
-- `transcription.ts` finds source video through `artifactService.findSourceVideo(jobId)`.
-- It builds a Whisper CLI command from `loadActiveToolConfigs().whisper`.
-- It writes:
-  - `transcription.segments.json`
-  - `transcription.txt` when configured
-  - `transcription.vtt` when configured
-- Active transcription process tracking and cancellation are owned by `operationRuntimeService`.
-
-### Semantic Blocks
-
-- `semantic_blocks.ts` reads `transcription.segments.json` through `artifactService`.
-- It groups segments by duration, punctuation, and pause thresholds.
-- It writes `semantic.blocks.json`.
-
-### Topic Segments
-
-- `topic_segmentation.ts` reads `semantic.blocks.json` through `artifactService`.
-- It uses heuristic boundaries and optional embedding boundaries.
-- It writes `topic.segments.json`.
-
-### Analysis And Cuts
-
-- `analysis.ts` reads semantic blocks.
-- For medium/long strategies, `analysis.ts` reads topic segments.
-- `analysis_prerequisites.ts` prepares semantic blocks for short videos and semantic blocks plus topic segments for medium/long videos across direct, batch, and orchestrator analysis entrypoints.
-- It calls Ollama through `OllamaClient`.
-- It parses LLM JSON, filters incoherent cuts, deduplicates overlaps, and writes cuts through `artifactService.cutsPath(jobId)`.
-- `artifactService.cutsPath(jobId)` resolves to `data/jobs/<job_id>/cuts.suggested.json`.
-- `curation.ts` reads/writes the same cuts file for approve/reject status changes.
-- `App.tsx` can edit, delete, manually add, normalize IDs, and sync the whole cuts array with `PUT /jobs/:job_id/cuts`.
-
-### Rendered Shorts
-
-- `rendering.ts` reads source video and cuts.
-- `video/vertical.ts` builds FFmpeg commands.
-- Rendered MP4 files are written into the video's `shorts` folder.
-- `artifactService.buildCutFilename(start, end)` names rendered files from timestamp ranges.
-- Active rendering process tracking and cancellation are owned by `operationRuntimeService`.
-
-### Settings And Tool Config
-
-- `settings.ts` persists `data/settings.json`.
-- `toolConfigs.ts` persists:
-  - `data/default_configs.json`
-  - `data/custom_settings.json`
-
-### Logs And Progress
-
-- `core/taskLogs.ts` stores ingest/transcription/render logs in memory.
-- `operationRuntimeService.ts` is the backend-facing boundary for task logs, active transcription/render processes, cancellation state, batch progress, and dependency install session access.
-- Logs are capped at 400 lines per task.
-- `registerLogsRoutes.ts` exposes `/jobs/:job_id/logs/:task`.
-- `App.tsx` polls task logs every 1500ms.
-- `App.tsx` polls render outputs every 2000ms.
-- `App.tsx` polls batch status every 2000ms.
-
-## External Integrations
-
-### Ollama
-
-- Defaults live in `backend/src/core/config.ts`.
-- `OLLAMA_BASE_URL`: `http://localhost:11434`.
-- Default model: `gpt-oss:120b-cloud`.
-- `OLLAMA_API_KEY` is read from the environment.
-- `llm/client.ts` calls `/api/chat` and `/api/tags`.
-- `pipeline/embedding.ts` calls `/api/embed`.
-
-### Whisper
-
-- `pipeline/transcription.ts` runs `whisper` through `child_process.spawn`.
-- Default model: `large-v3`.
-
-### yt-dlp
-
-- `pipeline/ingest.ts` runs `python -m yt_dlp`.
-
-### FFmpeg
-
-- `video/ffmpeg.ts` wraps sync and async FFmpeg execution.
-- `video/vertical.ts` builds vertical render commands.
-- Default render config includes `h264_nvenc`, `aac`, and preset `p5`.
-
-### Dependency Management
-
-- `routes/config/registerDependenciesRoutes.ts` exposes dependency endpoints.
-- `features/dependencies/` contains detection, execution, policy, runtime session, terminal, and shared dependency types for:
-  - Python
-  - Whisper
-  - yt-dlp
-  - FFmpeg
-  - CUDA
-  - PyTorch
-  - Ollama
-
-### Windows / OS Integration
-
-- `scripts/dev-backend.ts` and `scripts/ensure-port-free.ts` use `netstat`, `findstr`, and `taskkill`.
-- `utils/openFolder.ts` supports opening folders from video and render output flows.
-
-## Large Files
-
-### Large Source Files
-
-- `frontend/src/App.tsx`: 120945 bytes, 3125 lines.
-- `frontend/src/components/LLMConfigDialog.tsx`: 48427 bytes, 1338 lines.
-- `frontend/src/components/WhisperConfigDialog.tsx`: 36161 bytes, 866 lines.
-- `frontend/src/components/DependenciesDialog.tsx`: 27295 bytes, 761 lines.
-- `backend/src/core/toolConfigs.ts`: 20000 bytes, 606 lines.
-- `frontend/src/components/VideoPlayerSection.tsx`: 17785 bytes, 441 lines.
-- `frontend/src/types/whisper.ts`: 17698 bytes, 664 lines.
-- `frontend/src/components/FFmpegConfigDialog.tsx`: 16594 bytes, 439 lines.
-- `frontend/src/components/UploadSection.tsx`: 15767 bytes, 402 lines.
-- `frontend/src/components/CreatePipelineDialog.tsx`: 11063 bytes, 304 lines.
-
-### Backend Complexity Hotspots
-
-- `backend/src/core/toolConfigs.ts`: 20000 bytes, 538 lines.
-- `backend/src/features/dependencies/execution/install.ts`: 9942 bytes, 259 lines.
-- `backend/src/core/settings.ts`: 8883 bytes, 263 lines.
-- `backend/src/llm/client.ts`: 7046 bytes, 180 lines.
-- `backend/src/features/dependencies/installationGuides.ts`: 6944 bytes, 178 lines.
-- `backend/src/features/dependencies/runtime/dependencySessions.ts`: 6596 bytes, 207 lines.
-- `backend/src/features/dependencies/detection/pythonRuntime.ts`: 5898 bytes, 178 lines.
-- `backend/src/pipeline/analysis/cuts.ts`: 5880 bytes, 143 lines.
-- `backend/src/services/operationRuntimeService.ts`: 5765 bytes, 162 lines.
-- `backend/src/features/config/ollama/catalog.ts`: 5682 bytes, 162 lines.
-- `backend/src/routes/config/registerDependenciesRoutes.ts`: 5537 bytes, 135 lines after dependency logic moved into `features/dependencies/`.
-
-### Large Runtime / Generated Files
-
-- `bun.lock`: 90249 bytes and is tracked even though `.gitignore` also lists it.
-- `data/jobs/7ca821c3e9594946b2f3131309baaac2/semantic.blocks.json`: 31942 bytes.
-- `data/jobs/659068ec935346d4ab4d22d82ebdc1bd/semantic.blocks.json`: 29483 bytes.
-- `data/jobs/c2db447298144ff18df7408bd946b405/semantic.blocks.json`: 21775 bytes.
-- Generated/dependency directories are present:
-  - `node_modules`
-  - `backend/node_modules`
-  - `backend/dist`
-  - `frontend/node_modules`
-  - `frontend/dist`
-
-## Observed Risks
-
-### Absolute Source Paths
-
-- `Job.source_video_path` is shared by many modules.
-- Rename/archive/delete operations move or remove folders.
-- Caches exist in `metadata.ts`, `storage/sourceVideo.ts`, and `features/media/streaming.ts`.
-- Risk: moved or deleted files can conflict with cached paths if invalidation is incomplete.
-
-### Process-Local Runtime State
-
-- `operationRuntimeService.ts` owns task logs access, batch progress, active transcriptions, active renderings, render cancellation state, and dependency install session access.
-- Risk: state is lost on process restart and is not durable.
-
-### Shared Cuts Mutation
-
-- `analysis.ts`, `curation.ts`, `registerCutsRoutes.ts`, and `App.tsx` can all write the cuts artifact.
-- Risk: full-array writes from the UI can overwrite status changes or generated cut data.
-
-### Upload State Duplication
-
-- Upload-related state or logic exists in:
-  - `frontend/src/hooks/useUIState.ts`
-  - `frontend/src/App.tsx`
-  - `frontend/src/components/UploadSection.tsx`
-- Risk: duplicate state makes it unclear which path is authoritative.
-
-### Route Literal Duplication
-
-- Frontend wrappers and backend route registration define matching string paths independently.
-- Risk: route changes can silently break frontend/backend compatibility.
-
-### Root README Drift
-
-- Root `README.md` still documents backend port `3000`, while current backend code and frontend API config use `8000`.
-- Risk: setup/debugging instructions can mislead new contributors.
-
-### Config Boundary
-
-- `backend/src/features/config/` owns route-adjacent user-facing config workflows.
-- `backend/src/features/dependencies/` owns dependency installation guide data and dependency install/uninstall workflows.
-- `backend/src/core/` owns persisted settings/tool config stores and shared runtime primitives.
-
-## Hypotheses
-
-These are plausible interpretations, not verified requirements:
-
-- `backend/src/core/` remains the persisted config store while `backend/src/features/config/` owns user-facing config workflows.
-- `UploadSection` may be the intended current upload owner, while leftover upload state remains in `App.tsx`/`useUIState.ts`.
-
-## Immediate Wins
-
-Small, low-risk improvements to consider first:
-
-- Correct the root `README.md` backend port references from `3000` to `8000`.
-- Add a small shared route path/contract reference only if route literal duplication starts causing real churn.
-- Confirm whether the existing `docs/ARCHITECTURE.md` deletion is intentional before staging or committing.
-- Consider narrowing frontend upload state ownership after confirming which path is active in the UI.
-
-## Refactoring Roadmap
-
-### Recently Completed
-
-- Added frontend `BUILDING_TOPICS` status compatibility.
-- Switched batch pre-approval pending cuts to the canonical `artifactService.cutsPath(jobId)` / `cuts.suggested.json` artifact and added regression coverage.
-- Added/kept focused tests around direct analysis prerequisites, batch analysis prerequisites, topic status transitions, cuts mutation, and artifact path lifecycle.
-- Extracted dependency detection/execution/session/terminal logic from the large config route into `backend/src/features/dependencies/`.
-- Flattened single-file job feature folders into direct files under `backend/src/features/jobs/`.
-- Added parent-folder backend documentation and updated this `AGENTS.md` documentation map.
-- Aligned direct, batch, and orchestrator analysis entrypoints on strategy-aware prerequisites:
-  - short videos prepare semantic blocks only.
-  - medium/long videos prepare semantic blocks and topic segments before analysis.
-- Added shared analysis preparation helpers in `backend/src/pipeline/analysis_prerequisites.ts`.
-- Introduced backend service boundaries:
-  - `backend/src/services/jobLifecycleService.ts`
-  - `backend/src/services/artifactService.ts`
-  - `backend/src/services/operationRuntimeService.ts`
-- Completed the config-boundary cleanup:
-  - user-facing config workflows live under `backend/src/features/config/`.
-  - dependency installation guide data lives under `backend/src/features/dependencies/`.
-  - persisted settings and tool config stores remain under `backend/src/core/`.
-
-### Priority 1 = Low Risk / High Impact
-
-- Correct stale root README references to backend port `3000`.
-- Add route/path contract coverage only where route literals have caused or are likely to cause breakage.
-- Tighten frontend API wrapper types without changing routes.
-
-### Priority 2 = Medium Effort
-
-- Continue reducing backend complexity hotspots where tests already cover behavior:
-  - `backend/src/core/toolConfigs.ts`
-  - `backend/src/core/settings.ts`
-  - `backend/src/features/dependencies/execution/install.ts`
-  - `backend/src/features/dependencies/runtime/dependencySessions.ts`
-- Reduce `App.tsx` by workflow:
-  - Render polling and task-log polling.
-  - Batch polling.
-  - Dependency install session polling.
-- Consolidate upload state ownership after confirming the active rendered path.
-- Add storage/path mutation tests:
-  - Rename.
-  - Archive.
-  - Delete.
-  - Cache invalidation.
-  - Render listing.
-
-### Priority 3 = Structural Changes
-
-- Refine existing service boundaries only where tests show a clear benefit:
-  - `jobLifecycleService`
-  - `artifactService`
-  - `operationRuntimeService`
-- Establish shared frontend/backend contracts after route behavior stabilizes:
-  - `JobStatus`
-  - `Job`
-  - `Cut`
-  - transcription responses
-  - batch progress
-  - config responses
-- Wrap long-running execution behind a runner abstraction only after tests cover current behavior.
-- Keep JSON file persistence initially.
-- Do not introduce a queue/database as an early refactor.
-
-## Safe Change Strategy
-
-- Preserve current behavior first.
-- Work in thin vertical slices.
-- Move code before changing behavior.
-- Prefer wrappers before rewrites.
-- Replace call sites incrementally.
-- Prefer routing new lifecycle, artifact/path, and process-local runtime access through the existing service boundaries.
-- Keep generated/runtime data separate from refactors.
-- Add tests before touching high-risk files:
-  - `backend/src/pipeline/transcription.ts`
-  - `backend/src/pipeline/rendering.ts`
-  - `backend/src/pipeline/analysis_prerequisites.ts`
-  - `backend/src/features/dependencies/`
-  - `backend/src/services/`
-  - `backend/src/routes/config/registerDependenciesRoutes.ts` when changing route contracts
-  - major `frontend/src/App.tsx` extraction
-- Avoid changing these during structural extraction:
-  - child-process commands
-  - environment variables
-  - artifact paths
-  - polling intervals
-  - route URLs
-  - response shapes
-
-Validation commands for future code changes:
-
-- Backend type check: `cd backend && bun run type-check`
-- Backend tests: `cd backend && bun run test`
-- Backend Bun-native behavior tests: `cd backend && bun run test:bun`
-- Frontend build: `cd frontend && bun run build`
-
-## Open Questions
-
-- `README.md` says backend port `3000`; current code uses `8000`.
-- `README.md` references `frontend/README.md`; that file was not observed during file listing.
-- `README.md` mentions an `upload/` folder; `core/paths.ts` references `upload/`, but no root `upload/` directory was observed.
-- It is unclear which upload state path is intended as primary.
-- `docs/ARCHITECTURE.md` is currently deleted in the working tree; confirm whether that deletion is intentional before staging or committing.
-- It is unclear whether caches in `metadata.ts`, `storage/sourceVideo.ts`, and `features/media/streaming.ts` are invalidated in every rename/archive/delete scenario.
