@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 export type StudioTab = "workspace" | "render-queue" | "completed";
@@ -9,6 +9,12 @@ export interface StudioTopbarProps {
   activeVideoTitle?: string | null;
   gpuStatus?: "online" | "busy" | "offline";
   gpuLabel?: string;
+  onConfigureApp?: () => void;
+  onManageDependencies?: () => void;
+  onConfigureLLM?: () => void;
+  onConfigureWhisper?: () => void;
+  onConfigureFFmpeg?: () => void;
+  onShowHowToUse?: () => void;
   onOpenSettings?: () => void;
   actions?: ReactNode;
   className?: string;
@@ -20,20 +26,53 @@ export function StudioTopbar({
   activeVideoTitle,
   gpuStatus = "online",
   gpuLabel = "GPU ONLINE",
+  onConfigureApp,
+  onManageDependencies,
+  onConfigureLLM,
+  onConfigureWhisper,
+  onConfigureFFmpeg,
+  onShowHowToUse,
   onOpenSettings,
   actions,
   className,
 }: StudioTopbarProps) {
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+  // Fechar menu ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
+        setIsSettingsOpen(false);
+      }
+    }
+    if (isSettingsOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isSettingsOpen]);
+
   const tabs: { id: StudioTab; label: string }[] = [
     { id: "workspace", label: "Workspace" },
     { id: "render-queue", label: "Fila de Render" },
     { id: "completed", label: "Concluidos" },
   ];
 
+  const handleSettingsClick = () => {
+    // Se tiver handlers individuais, abre o menu; senao chama o onOpenSettings
+    if (onConfigureApp || onManageDependencies || onConfigureLLM || onConfigureWhisper || onConfigureFFmpeg) {
+      setIsSettingsOpen((prev) => !prev);
+    } else if (onOpenSettings) {
+      onOpenSettings();
+    }
+  };
+
   return (
     <header
       className={cn(
-        "relative z-40 flex h-14 w-full select-none items-center justify-between border-b border-white/[0.08] bg-[#09090b]/80 px-4 backdrop-blur-xl",
+        "relative z-40 flex h-14 w-full select-none items-center justify-between border-b border-white/[0.08] bg-[#09090b]/90 px-4 backdrop-blur-2xl",
         "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
         className,
       )}
@@ -102,7 +141,7 @@ export function StudioTopbar({
         })}
       </nav>
 
-      {/* Direita: Indicador de Hardware + Acoes + Botao de Configuracoes */}
+      {/* Direita: Indicador de Hardware + Acoes + Menu de Configuracoes */}
       <div className="flex items-center gap-2.5">
         {actions}
 
@@ -139,14 +178,19 @@ export function StudioTopbar({
           </div>
         </div>
 
-        {/* Botao de Configuracoes com icone SVG elegante */}
-        {onOpenSettings ? (
+        {/* Botao de Configuracoes com Dropdown Popover */}
+        <div className="relative" ref={settingsMenuRef}>
           <button
             type="button"
-            onClick={onOpenSettings}
-            title="Configuracoes"
-            aria-label="Configuracoes do sistema"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-text-2 transition-all duration-150 hover:border-white/[0.18] hover:bg-white/[0.08] hover:text-white active:scale-95 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+            onClick={handleSettingsClick}
+            title="Configuracoes do Sistema"
+            aria-label="Abrir configuracoes do sistema"
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 active:scale-95 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+              isSettingsOpen
+                ? "border-white/30 bg-white/[0.14] text-white"
+                : "border-white/[0.08] bg-white/[0.04] text-text-2 hover:border-white/[0.18] hover:bg-white/[0.08] hover:text-white",
+            )}
           >
             <svg
               className="h-4 w-4"
@@ -162,7 +206,161 @@ export function StudioTopbar({
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
-        ) : null}
+
+          {/* Menu Popover Liquid Glass */}
+          {isSettingsOpen && (
+            <div className="absolute right-0 top-10 w-72 rounded-2xl border border-white/15 bg-[#0f0f14]/95 p-2 shadow-2xl backdrop-blur-2xl z-50 animate-in fade-in duration-200">
+              <div className="px-3 py-2 border-b border-white/[0.08]">
+                <p className="text-xs font-semibold text-white">Configuracoes do Sistema</p>
+                <p className="text-[10px] text-zinc-400">Ajustes globais do pipeline ClipFlow</p>
+              </div>
+
+              <div className="py-1 space-y-0.5">
+                {/* 1. Configurar Aplicacao */}
+                {onConfigureApp && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onConfigureApp();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Configurar Aplicacao</p>
+                      <p className="text-[10px] text-zinc-400">Pastas de midia e resolucao</p>
+                    </div>
+                  </button>
+                )}
+
+                {/* 2. Gerenciar Dependencias */}
+                {onManageDependencies && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onManageDependencies();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Gerenciar Dependencias</p>
+                      <p className="text-[10px] text-zinc-400">Python, Whisper, FFmpeg, CUDA</p>
+                    </div>
+                  </button>
+                )}
+
+                {/* 3. Configurar LLM */}
+                {onConfigureLLM && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onConfigureLLM();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="4" y="4" width="16" height="16" rx="2" />
+                        <rect x="9" y="9" width="6" height="6" />
+                        <line x1="9" y1="1" x2="9" y2="4" />
+                        <line x1="15" y1="1" x2="15" y2="4" />
+                        <line x1="9" y1="20" x2="9" y2="23" />
+                        <line x1="15" y1="20" x2="15" y2="23" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Configurar LLM (IA)</p>
+                      <p className="text-[10px] text-zinc-400">Modelos Ollama e prompts</p>
+                    </div>
+                  </button>
+                )}
+
+                {/* 4. Configurar Whisper */}
+                {onConfigureWhisper && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onConfigureWhisper();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Configurar Whisper</p>
+                      <p className="text-[10px] text-zinc-400">Modelos e aceleracao GPU</p>
+                    </div>
+                  </button>
+                )}
+
+                {/* 5. Configurar FFmpeg */}
+                {onConfigureFFmpeg && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onConfigureFFmpeg();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Configurar FFmpeg</p>
+                      <p className="text-[10px] text-zinc-400">Codecs e presets de render</p>
+                    </div>
+                  </button>
+                )}
+
+                {/* 6. Como Utilizar */}
+                {onShowHowToUse && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onShowHowToUse();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">Como Utilizar</p>
+                      <p className="text-[10px] text-zinc-400">Guia passo a passo do fluxo</p>
+                    </div>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

@@ -1029,7 +1029,7 @@ export default function App() {
   }, [selectedSuggestedCutId, suggestedCuts]);
 
   return (
-    <div className="min-h-screen w-full bg-[#060608] text-[#f5f5f7] p-2 md:p-3 flex flex-col overflow-hidden relative">
+    <div className="h-screen w-screen bg-[#07080b] text-[#f5f5f7] flex flex-col overflow-hidden relative select-none">
       {/* Ambient Light Mesh Background */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
         <div className="absolute -top-32 -left-32 w-[460px] h-[460px] bg-blue-600/10 rounded-full blur-[140px]" />
@@ -1037,20 +1037,20 @@ export default function App() {
         <div className="absolute -bottom-24 left-1/4 w-[540px] h-[540px] bg-slate-300/5 rounded-full blur-[150px]" />
       </div>
 
-      {/* Janela Unificada Liquid Glass */}
-      <GlassWindow
-        title="ClipFlow Studio"
-        subtitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : "Workspace"}
-        className="flex-1 w-full flex flex-col overflow-hidden z-10 relative"
-        hideTrafficLights={true}
-      >
+      {/* Janela Unificada Liquid Glass Edge-to-Edge */}
+      <GlassWindow className="w-full h-full flex flex-col">
         <StudioTopbar
           activeTab={studioTab}
           onTabChange={setStudioTab}
           activeVideoTitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : null}
           gpuStatus={action.busy ? "busy" : "online"}
           gpuLabel={action.busy ? "PROCESSANDO" : "GPU ONLINE"}
-          onOpenSettings={() => setShowConfigureAppDialog(true)}
+          onConfigureApp={() => setShowConfigureAppDialog(true)}
+          onManageDependencies={() => setShowDependenciesDialog(true)}
+          onConfigureLLM={() => setShowLLMConfigDialog(true)}
+          onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
+          onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
+          onShowHowToUse={() => setShowHowToUseDialog(true)}
         />
 
         <div className="flex-1 flex overflow-hidden">
@@ -1072,59 +1072,39 @@ export default function App() {
                 onImportClick={() => setShowUploadModal(true)}
               />
 
-              {/* Coluna 2: Player e Transcrição Interativa */}
+              {/* Coluna 2: Player e Transcrição Interativa com Painéis Estruturados e Bordas Completas */}
               <main className="flex-1 flex flex-col overflow-hidden bg-black/10">
-                {activeVideo ? (
-                  <>
-                    <div className="h-60 flex-none border-b border-white/[0.08] bg-black/60 relative">
-                      <VideoPlayerView
-                        ref={videoPlayerHandleRef}
-                        src={activeVideo.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
-                        title={activeVideo.job.video_name || activeVideo.job.youtube_url}
-                        cuts={suggestedCuts}
-                        selectedCutId={selectedSuggestedCutId}
-                        onSelectCut={selectSuggestedCut}
-                        onTimeUpdate={setCurrentVideoTime}
-                      />
-                    </div>
+                <div className="h-64 flex-none border-b border-white/[0.08] bg-black/60 relative">
+                  <VideoPlayerView
+                    ref={videoPlayerHandleRef}
+                    src={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
+                    title={activeVideo?.job.video_name || activeVideo?.job.youtube_url}
+                    cuts={suggestedCuts}
+                    selectedCutId={selectedSuggestedCutId}
+                    onSelectCut={selectSuggestedCut}
+                    onTimeUpdate={setCurrentVideoTime}
+                  />
+                </div>
 
-                    <div className="flex-1 overflow-hidden p-3">
-                      <TranscriptInteractiveView
-                        segments={activeVideo.transcriptionSegments || []}
-                        currentTime={currentVideoTime}
-                        activeCut={selectedSuggestedCut}
-                        onSeek={(seconds) => videoPlayerHandleRef.current?.seek(seconds)}
-                        onCreateCutFromSelection={handleCreateCutFromTranscript}
-                        onRequestTranscription={() => {
-                          const validation = canStartOperation(activeVideo.job.job_id);
-                          if (!validation.allowed) {
-                            alert(validation.message);
-                            return;
-                          }
-                          requestTranscriptionStart();
-                        }}
-                        isLoading={action.busy}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-text-3 space-y-3">
-                    <svg
-                      className="w-12 h-12 text-white/20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    >
-                      <rect x="2" y="2" width="20" height="20" rx="4" />
-                      <path d="M10 8l6 4-6 4V8z" fill="currentColor" stroke="none" />
-                    </svg>
-                    <p className="text-sm text-text-2 font-medium">Nenhum vídeo selecionado</p>
-                    <p className="text-xs max-w-sm">
-                      Selecione um vídeo na biblioteca lateral ou clique em "+ Importar Vídeo" para começar.
-                    </p>
-                  </div>
-                )}
+                <div className="flex-1 overflow-hidden p-3 bg-[#0a0b0f]/60">
+                  <TranscriptInteractiveView
+                    segments={activeVideo?.transcriptionSegments || []}
+                    currentTime={currentVideoTime}
+                    activeCut={selectedSuggestedCut}
+                    onSeek={(seconds) => videoPlayerHandleRef.current?.seek(seconds)}
+                    onCreateCutFromSelection={handleCreateCutFromTranscript}
+                    onRequestTranscription={() => {
+                      if (!activeVideo) return;
+                      const validation = canStartOperation(activeVideo.job.job_id);
+                      if (!validation.allowed) {
+                        alert(validation.message);
+                        return;
+                      }
+                      requestTranscriptionStart();
+                    }}
+                    isLoading={action.busy}
+                  />
+                </div>
               </main>
 
               {/* Coluna 3: Inspetor do Short 9:16 */}

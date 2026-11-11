@@ -842,22 +842,14 @@ export function WhisperConfigDialog({
           >
             <AppButton
               onClick={onCancel}
-              variant="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
+              variant="ghost"
             >
               Cancelar
             </AppButton>
             <AppButton
               onClick={handleSave}
               disabled={action.busy}
-              variant="secondary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
+              variant="primary"
             >
               Salvar Configurações
             </AppButton>

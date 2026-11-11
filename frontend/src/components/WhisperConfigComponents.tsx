@@ -1,10 +1,5 @@
-/**
- * Componentes auxiliares para Whisper Config Dialog
- * Fornece componentes reutilizáveis com tooltips e descrições
- */
-
 import React, { useState, useRef } from "react";
-import { AppButton, AppInput, AppSelect } from "./shared";
+import { cn } from "../lib/utils";
 
 interface TooltipProps {
   text: string;
@@ -19,7 +14,6 @@ export function Tooltip({ text, children }: TooltipProps) {
   const handleMouseEnter = () => {
     if (ref.current) {
       const rect = ref.current.getBoundingClientRect();
-      // Posiciona o tooltip à direita do ícone, centralizado verticalmente
       setTooltipPos({
         top: rect.top + rect.height / 2,
         left: rect.right + 12,
@@ -35,35 +29,18 @@ export function Tooltip({ text, children }: TooltipProps) {
   return (
     <div
       ref={ref}
-      style={{
-        position: "relative",
-        display: "inline-block",
-      }}
+      className="relative inline-block"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <div style={{ cursor: "help", display: "inline-block" }}>{children}</div>
+      <div className="cursor-help inline-block">{children}</div>
       {showTooltip && (
         <div
           style={{
-            position: "fixed",
             top: `${tooltipPos.top}px`,
             left: `${tooltipPos.left}px`,
-            transform: "translateY(-50%)",
-            backgroundColor: "var(--bg)",
-            color: "var(--ink)",
-            padding: "12px 16px",
-            borderRadius: "8px",
-            fontSize: "13px",
-            whiteSpace: "normal",
-            maxWidth: "380px",
-            minWidth: "220px",
-            zIndex: 99999,
-            boxShadow: "0 10px 25px rgba(0,0,0,0.4)",
-            pointerEvents: "none",
-            lineHeight: "1.5",
-            border: "1px solid var(--border)",
           }}
+          className="fixed -translate-y-1/2 z-[99999] max-w-sm min-w-[220px] rounded-xl border border-white/15 bg-[#121218]/95 p-3 text-xs text-zinc-200 shadow-2xl backdrop-blur-2xl pointer-events-none leading-relaxed animate-in fade-in duration-150"
         >
           {text}
         </div>
@@ -81,52 +58,25 @@ interface ConfigFieldProps {
 
 export function ConfigField({ label, description, tooltip, children }: ConfigFieldProps) {
   return (
-    <div style={{ marginBottom: "20px" }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: "8px", gap: "8px" }}>
-        <label
-          style={{
-            fontSize: "14px",
-            fontWeight: "500",
-            color: "var(--ink)",
-          }}
-        >
+    <div className="space-y-1.5 mb-4">
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-semibold text-white">
           {label}
         </label>
         {tooltip && (
           <Tooltip text={tooltip}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "18px",
-                height: "18px",
-                borderRadius: "50%",
-                backgroundColor: "var(--border)",
-                color: "var(--muted)",
-                fontSize: "12px",
-                fontWeight: "bold",
-                cursor: "help",
-              }}
-            >
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-zinc-400 hover:text-white text-[10px] font-bold cursor-help transition-colors">
               ?
             </span>
           </Tooltip>
         )}
       </div>
       {description && (
-        <p
-          style={{
-            fontSize: "12px",
-            color: "var(--muted)",
-            margin: "4px 0 8px 0",
-            fontStyle: "italic",
-          }}
-        >
+        <p className="text-[11px] text-zinc-400 leading-normal">
           {description}
         </p>
       )}
-      {children}
+      <div className="pt-0.5">{children}</div>
     </div>
   );
 }
@@ -149,22 +99,14 @@ export function TextInput({
   max,
 }: TextInputProps) {
   return (
-    <AppInput
+    <input
       type={type}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       min={min}
       max={max}
-      fullWidth
-      style={{
-        padding: "10px",
-        borderRadius: "6px",
-        border: "1px solid var(--border)",
-        fontSize: "14px",
-        boxSizing: "border-box",
-        fontFamily: "inherit",
-      }}
+      className="w-full h-9 px-3 text-xs font-mono bg-white/[0.04] border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all duration-200"
     />
   );
 }
@@ -183,16 +125,7 @@ export function TextArea({ value, onChange, placeholder, rows = 3 }: TextAreaPro
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      style={{
-        width: "100%",
-        padding: "10px",
-        borderRadius: "6px",
-        border: "1px solid var(--border)",
-        fontSize: "14px",
-        boxSizing: "border-box",
-        fontFamily: "inherit",
-        resize: "vertical",
-      }}
+      className="w-full p-3 text-xs font-mono bg-white/[0.04] border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all duration-200 resize-y"
     />
   );
 }
@@ -205,27 +138,18 @@ interface SelectInputProps {
 
 export function SelectInput({ value, onChange, options }: SelectInputProps) {
   return (
-    <AppSelect
+    <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
-      fullWidth
-      style={{
-        padding: "10px",
-        borderRadius: "6px",
-        border: "1px solid var(--border)",
-        fontSize: "14px",
-        boxSizing: "border-box",
-        fontFamily: "inherit",
-        backgroundColor: "var(--panel)",
-      }}
+      className="w-full h-9 px-3 text-xs bg-zinc-900 border border-white/10 rounded-xl text-white focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all duration-200 cursor-pointer"
     >
       <option value="">-- Selecione --</option>
       {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
+        <option key={opt.value} value={opt.value} className="bg-zinc-900 text-white">
           {opt.label}
         </option>
       ))}
-    </AppSelect>
+    </select>
   );
 }
 
@@ -236,33 +160,21 @@ interface ToggleProps {
 
 export function Toggle({ checked, onChange }: ToggleProps) {
   return (
-    <AppButton
+    <button
+      type="button"
       onClick={() => onChange(!checked)}
-      style={{
-        display: "inline-block",
-        width: "48px",
-        height: "24px",
-        borderRadius: "12px",
-        border: "none",
-        backgroundColor: checked ? "var(--success)" : "var(--border)",
-        cursor: "pointer",
-        position: "relative",
-        transition: "background-color 0.2s",
-      }}
+      className={cn(
+        "w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none",
+        checked ? "bg-white justify-end" : "bg-zinc-800 justify-start",
+      )}
     >
       <div
-        style={{
-          position: "absolute",
-          top: "2px",
-          left: checked ? "24px" : "2px",
-          width: "20px",
-          height: "20px",
-          borderRadius: "50%",
-          backgroundColor: "var(--panel)",
-          transition: "left 0.2s",
-        }}
+        className={cn(
+          "w-4 h-4 rounded-full shadow-md transition-all duration-200",
+          checked ? "bg-zinc-950" : "bg-zinc-400",
+        )}
       />
-    </AppButton>
+    </button>
   );
 }
 
@@ -274,30 +186,37 @@ interface MultiSelectProps {
 
 export function MultiSelect({ values, onChange, options }: MultiSelectProps) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {options.map((option) => {
         const isSelected = values.includes(option.id);
         return (
-          <AppButton
+          <button
             key={option.id}
+            type="button"
             onClick={() => {
               onChange(isSelected ? values.filter((v) => v !== option.id) : [...values, option.id]);
             }}
             title={option.description}
-            style={{
-              padding: "12px",
-              borderRadius: "8px",
-              border: isSelected ? "2px solid var(--success)" : "1px solid var(--border)",
-              background: isSelected ? "var(--bg-3)" : "var(--panel)",
-              cursor: "pointer",
-              fontWeight: isSelected ? "600" : "400",
-              color: isSelected ? "var(--success)" : "var(--muted)",
-              fontSize: "14px",
-              transition: "all 0.2s",
-            }}
+            className={cn(
+              "flex flex-col items-start p-2.5 rounded-xl border text-left transition-all duration-200",
+              isSelected
+                ? "bg-white/[0.1] border-white/30 shadow-[0_2px_10px_rgba(255,255,255,0.08),inset_0_1px_0_0_rgba(255,255,255,0.2)] text-white"
+                : "bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04] text-zinc-300",
+            )}
           >
-            {option.label}
-          </AppButton>
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs font-semibold">{option.label}</span>
+              <span
+                className={cn(
+                  "w-2 h-2 rounded-full",
+                  isSelected ? "bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]" : "bg-zinc-700",
+                )}
+              />
+            </div>
+            {option.description && (
+              <span className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1">{option.description}</span>
+            )}
+          </button>
         );
       })}
     </div>
@@ -314,34 +233,24 @@ export function ConfigSection({ title, children, showTopSeparator = true }: Sect
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <div
-      style={{
-        marginBottom: "24px",
-        borderTop: showTopSeparator ? "1px solid var(--border)" : "none",
-        paddingTop: "16px",
-      }}
-    >
-      <AppButton
+    <div className={cn("mb-5", showTopSeparator && "pt-4 border-t border-white/[0.08]")}>
+      <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          fontSize: "16px",
-          fontWeight: "600",
-          color: "var(--ink)",
-          border: "none",
-          background: "none",
-          cursor: "pointer",
-          padding: "0 0 12px 0",
-          width: "100%",
-          justifyContent: "space-between",
-        }}
+        className="w-full flex items-center justify-between py-1.5 text-left text-xs font-semibold uppercase tracking-wider text-zinc-300 hover:text-white transition-colors"
       >
         <span>{title}</span>
-        <span style={{ fontSize: "14px", color: "var(--muted)" }}>{expanded ? "v" : ">"}</span>
-      </AppButton>
-      {expanded && <div style={{ paddingLeft: "0" }}>{children}</div>}
+        <svg
+          className={cn("w-4 h-4 text-zinc-400 transition-transform duration-200", expanded ? "rotate-180" : "rotate-0")}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {expanded && <div className="pt-2">{children}</div>}
     </div>
   );
 }

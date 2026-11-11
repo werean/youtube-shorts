@@ -132,22 +132,43 @@ export function VideoLibrarySidebar({
       {/* Lista de Videos */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 scrollbar-thin scrollbar-thumb-white/10">
         {filteredVideos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-6 text-center text-text-3">
-            <svg
-              className="h-8 w-8 text-text-3 mb-2 stroke-[1.2]"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polygon points="23 7 16 12 23 17 23 7" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <p className="text-body-sm">
-              {searchQuery ? "Nenhum video encontrado." : "Nenhum video na biblioteca."}
-            </p>
+          <div className="p-2">
+            <div className="flex flex-col items-center justify-center p-5 text-center text-text-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.015] space-y-2.5">
+              <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-zinc-400">
+                <svg
+                  className="h-5 w-5 stroke-[1.5]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs font-medium text-white">
+                  {searchQuery ? "Nenhum resultado" : "Biblioteca Vazia"}
+                </p>
+                <p className="text-[10px] text-zinc-400 leading-tight">
+                  {searchQuery
+                    ? "Tente outro termo de busca."
+                    : "Importe um vídeo do YouTube ou arquivo local para iniciar."}
+                </p>
+              </div>
+              {onImportClick && !searchQuery && (
+                <GlassButton
+                  variant="glass"
+                  size="sm"
+                  onClick={onImportClick}
+                  className="mt-1"
+                >
+                  Importar Vídeo
+                </GlassButton>
+              )}
+            </div>
           </div>
         ) : (
           filteredVideos.map((video) => {
