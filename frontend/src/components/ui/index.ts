@@ -55,3 +55,5 @@ export { VisuallyHidden } from "./VisuallyHidden";
 export type { VisuallyHiddenProps } from "./VisuallyHidden";
 
 export { ComponentShowcase } from "./ComponentShowcase";
+
+export * from "./glass";

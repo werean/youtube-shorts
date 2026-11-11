@@ -62,6 +62,19 @@ import { RegenerateAnalyzeDialog } from "./components/dialogs/RegenerateAnalyzeD
 import { AppDialog } from "./components/shared";
 import { formatTimestamp, parseTimestampInput } from "./utils/formatters";
 import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
+import { GlassWindow, GlassToast } from "./components/ui/glass";
+import {
+  StudioTopbar,
+  type StudioTab,
+  VideoLibrarySidebar,
+  type WorkspaceVideoItem,
+  VideoPlayerView,
+  type VideoPlayerViewHandle,
+  TranscriptInteractiveView,
+  ShortInspectorView,
+} from "./components/workspace";
+import { getTranscription } from "./api/transcription";
+import type { Segment } from "./types";
 
 interface ActionState {
   busy: boolean;
@@ -151,6 +164,11 @@ export default function App() {
   const [expandVideoListSection, setExpandVideoListSection] = useState(true);
   const [expandVideoPlayerSection, setExpandVideoPlayerSection] = useState(true);
   const [expandRenderingSection, setExpandRenderingSection] = useState(true);
+  const [studioTab, setStudioTab] = useState<StudioTab>("workspace");
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [currentVideoTime, setCurrentVideoTime] = useState(0);
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
+  const videoPlayerHandleRef = useRef<VideoPlayerViewHandle>(null);
   const [ingestLogs, setIngestLogs] = useState<string[]>([]);
   const [expandIngestLogs, setExpandIngestLogs] = useState(false);
   const [ingestJobId, setIngestJobId] = useState<string | null>(null);
@@ -251,6 +269,103 @@ export default function App() {
       }
     },
   });
+
+  const workspaceVideos: WorkspaceVideoItem[] = useMemo(() => {
+    return videos.map((v) => {
+      const isCurrentActive = v.job.job_id === activeVideoId;
+      const cutsCount = isCurrentActive ? suggestedCuts.length : 0;
+      return {
+        id: v.job.job_id,
+        title: String(v.job.video_name || v.job.youtube_url || "Vídeo sem título").trim(),
+        durationSeconds: null,
+        cutsCount,
+        status: v.job.status,
+        isProcessing: [
+          "DOWNLOADING",
+          "TRANSCRIBING",
+          "BUILDING_BLOCKS",
+          "BUILDING_TOPICS",
+          "ANALYZING",
+          "RENDERING",
+        ].includes(v.job.status),
+      };
+    });
+  }, [videos, activeVideoId, suggestedCuts]);
+
+  const selectedSuggestedCut = useMemo(() => {
+    if (!suggestedCuts.length) return null;
+    return suggestedCuts.find((c) => c.cut_id === selectedSuggestedCutId) || suggestedCuts[0];
+  }, [suggestedCuts, selectedSuggestedCutId]);
+
+  const handleQuickAdjustStart = (newStart: number) => {
+    if (!activeVideo || !selectedSuggestedCut) return;
+    const updatedCut = { ...selectedSuggestedCut, start: newStart };
+    const updatedSuggested = suggestedCuts.map((c) =>
+      c.cut_id === updatedCut.cut_id ? updatedCut : c,
+    );
+    setSuggestedCuts(updatedSuggested);
+    const updatedCuts = cuts.map((c) => (c.cut_id === updatedCut.cut_id ? updatedCut : c));
+    setCuts(updatedCuts);
+    void updateCuts(activeVideo.job.job_id, updatedSuggested);
+  };
+
+  const handleQuickAdjustEnd = (newEnd: number) => {
+    if (!activeVideo || !selectedSuggestedCut) return;
+    const updatedCut = { ...selectedSuggestedCut, end: newEnd };
+    const updatedSuggested = suggestedCuts.map((c) =>
+      c.cut_id === updatedCut.cut_id ? updatedCut : c,
+    );
+    setSuggestedCuts(updatedSuggested);
+    const updatedCuts = cuts.map((c) => (c.cut_id === updatedCut.cut_id ? updatedCut : c));
+    setCuts(updatedCuts);
+    void updateCuts(activeVideo.job.job_id, updatedSuggested);
+  };
+
+  const handleCreateCutFromTranscript = (start: number, end: number, text?: string) => {
+    if (!activeVideo) return;
+    const newCut: Cut = {
+      cut_id: `manual_${Date.now()}`,
+      start,
+      end,
+      explanation: text || "Corte criado manualmente a partir da transcrição",
+      viral_score: 90,
+    };
+    const nextSuggested = [...suggestedCuts, newCut];
+    setSuggestedCuts(nextSuggested);
+    setSelectedSuggestedCutId(newCut.cut_id);
+    setCuts([...cuts, newCut]);
+    void updateCuts(activeVideo.job.job_id, nextSuggested);
+    setToastNotification(
+      `Novo corte criado (${formatTimestamp(start)} - ${formatTimestamp(end)})`,
+    );
+  };
+
+  useEffect(() => {
+    if (!activeVideoId) return;
+    const video = videos.find((v) => v.job.job_id === activeVideoId);
+    if (!video) return;
+
+    if (
+      video.hasTranscription &&
+      (!video.transcriptionSegments || video.transcriptionSegments.length === 0)
+    ) {
+      getTranscription(activeVideoId)
+        .then((data) => {
+          if (data?.segments && Array.isArray(data.segments)) {
+            const segments: Segment[] = data.segments.map((s: any, idx: number) => ({
+              segment_id: String(s.segment_id || `seg_${idx}`),
+              start: Number(s.start) || 0,
+              end: Number(s.end) || 0,
+              text: String(s.text || "").trim(),
+            }));
+            updateVideo(activeVideoId, { transcriptionSegments: segments });
+          }
+        })
+        .catch((err) => {
+          console.warn("[UI] Falha ao carregar segmentos da transcrição:", err);
+        });
+    }
+  }, [activeVideoId, videos]);
 
   function prepareTranscriptionTaskLog() {
     sharedTaskLogs.prepareTaskLog("transcription");
@@ -915,176 +1030,226 @@ export default function App() {
   }, [selectedSuggestedCutId, suggestedCuts]);
 
   return (
-    <div className="page">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">YouTube Shorts MVP</p>
-          <h1>Pipeline local</h1>
-          <p className="sub">
-            Interface leve para orquestrar ingestão, transcrição, análise e renderização.
-          </p>
+    <div className="min-h-screen w-full bg-[#060608] text-[#f5f5f7] p-2 md:p-3 flex flex-col overflow-hidden relative">
+      {/* Ambient Light Mesh Background */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute -top-32 -left-32 w-[460px] h-[460px] bg-blue-600/10 rounded-full blur-[140px]" />
+        <div className="absolute top-1/3 -right-24 w-[480px] h-[480px] bg-indigo-500/10 rounded-full blur-[160px]" />
+        <div className="absolute -bottom-24 left-1/4 w-[540px] h-[540px] bg-slate-300/5 rounded-full blur-[150px]" />
+      </div>
+
+      {/* Janela Unificada Liquid Glass */}
+      <GlassWindow
+        title="ClipFlow Studio"
+        subtitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : "Workspace"}
+        className="flex-1 w-full flex flex-col overflow-hidden z-10 relative"
+        hideTrafficLights={true}
+      >
+        <StudioTopbar
+          activeTab={studioTab}
+          onTabChange={setStudioTab}
+          activeVideoTitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : null}
+          gpuStatus={action.busy ? "busy" : "online"}
+          gpuLabel={action.busy ? "PROCESSANDO" : "GPU ONLINE"}
+          onOpenSettings={() => setShowConfigureAppDialog(true)}
+        />
+
+        <div className="flex-1 flex overflow-hidden">
+          {studioTab === "workspace" && (
+            <>
+              {/* Coluna 1: Biblioteca de Vídeos */}
+              <VideoLibrarySidebar
+                videos={workspaceVideos}
+                selectedVideoId={activeVideoId}
+                onSelectVideo={(id) => {
+                  const validation = canStartOperation(id);
+                  if (!validation.allowed) {
+                    console.warn(`[UI] ${validation.message}`);
+                    alert(validation.message);
+                    return;
+                  }
+                  setActiveVideoId(id);
+                }}
+                onImportClick={() => setShowUploadModal(true)}
+              />
+
+              {/* Coluna 2: Player e Transcrição Interativa */}
+              <main className="flex-1 flex flex-col overflow-hidden bg-black/10">
+                {activeVideo ? (
+                  <>
+                    <div className="h-60 flex-none border-b border-white/[0.08] bg-black/60 relative">
+                      <VideoPlayerView
+                        ref={videoPlayerHandleRef}
+                        src={activeVideo.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
+                        title={activeVideo.job.video_name || activeVideo.job.youtube_url}
+                        cuts={suggestedCuts}
+                        selectedCutId={selectedSuggestedCutId}
+                        onSelectCut={selectSuggestedCut}
+                        onTimeUpdate={setCurrentVideoTime}
+                      />
+                    </div>
+
+                    <div className="flex-1 overflow-hidden p-3">
+                      <TranscriptInteractiveView
+                        segments={activeVideo.transcriptionSegments || []}
+                        currentTime={currentVideoTime}
+                        activeCut={selectedSuggestedCut}
+                        onSeek={(seconds) => videoPlayerHandleRef.current?.seek(seconds)}
+                        onCreateCutFromSelection={handleCreateCutFromTranscript}
+                        onRequestTranscription={() => {
+                          const validation = canStartOperation(activeVideo.job.job_id);
+                          if (!validation.allowed) {
+                            alert(validation.message);
+                            return;
+                          }
+                          requestTranscriptionStart();
+                        }}
+                        isLoading={action.busy}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-text-3 space-y-3">
+                    <svg
+                      className="w-12 h-12 text-white/20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <rect x="2" y="2" width="20" height="20" rx="4" />
+                      <path d="M10 8l6 4-6 4V8z" fill="currentColor" stroke="none" />
+                    </svg>
+                    <p className="text-sm text-text-2 font-medium">Nenhum vídeo selecionado</p>
+                    <p className="text-xs max-w-sm">
+                      Selecione um vídeo na biblioteca lateral ou clique em "+ Importar Vídeo" para começar.
+                    </p>
+                  </div>
+                )}
+              </main>
+
+              {/* Coluna 3: Inspetor do Short 9:16 */}
+              <ShortInspectorView
+                cut={selectedSuggestedCut}
+                videoSrc={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
+                isRendering={isRendering}
+                onAdjustStart={handleQuickAdjustStart}
+                onAdjustEnd={handleQuickAdjustEnd}
+                onRenderShort={() => {
+                  if (!activeVideo) return;
+                  const validation = canStartOperation(activeVideo.job.job_id);
+                  if (!validation.allowed) {
+                    alert(validation.message);
+                    return;
+                  }
+                  startRenderFlow();
+                }}
+                onDiscardCut={(cutId) => requestDeleteSuggestedCut(cutId)}
+              />
+            </>
+          )}
+
+          {studioTab === "render-queue" && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="max-w-4xl mx-auto space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold text-white">Fila de Processamento & Batch</h2>
+                    <p className="text-xs text-text-3">Acompanhe tarefas em segundo plano e renderização em lote.</p>
+                  </div>
+                  <button
+                    onClick={openBatchPipelineDialog}
+                    className="h-8 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition"
+                  >
+                    Iniciar Processamento em Lote
+                  </button>
+                </div>
+
+                {isBatchProcessing && (
+                  <div className="p-4 rounded-xl border border-white/10 bg-white/[0.03] space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-white">Processamento em Lote Ativo</span>
+                      <span className="font-mono text-emerald-400">Em andamento</span>
+                    </div>
+                    {batchProcessingLogs.length > 0 && (
+                      <div className="h-32 overflow-y-auto font-mono text-[11px] text-text-3 bg-black/40 p-2 rounded-lg">
+                        {batchProcessingLogs.map((log, i) => (
+                          <div key={i}>{log}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {studioTab === "completed" && (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-5xl mx-auto">
+                <RenderingSection
+                  isLoadingRenderOutputs={isLoadingRenderOutputs}
+                  isRendering={isRendering}
+                  renderOutputs={renderOutputs}
+                  renderTitlesByFileName={renderTitlesByFileName}
+                  buildRenderUrl={buildRenderUrl}
+                  onOpenRenderFolder={openRenderOutputFolder}
+                  onDeleteRender={deleteRenderOutputFile}
+                  isExpanded={true}
+                  onToggle={() => {}}
+                />
+              </div>
+            </div>
+          )}
         </div>
-      </header>
+      </GlassWindow>
 
-      {/* Configurações */}
-      <ConfigurationSection
-        onConfigureApp={() => setShowConfigureAppDialog(true)}
-        onManageDependencies={async () => {
-          setShowDependenciesDialog(true);
-          await prepareDependenciesDialog();
-        }}
-        onConfigureLLM={() => {
-          setShowLLMConfigDialog(true);
-          void refreshOllamaModelOptions(false);
-        }}
-        onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
-        onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
-        onShowHowToUse={() => setShowHowToUseDialog(true)}
-      />
+      {/* Modal de Importação de Vídeo em Liquid Glass */}
+      {showUploadModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+          onClick={() => setShowUploadModal(false)}
+        >
+          <div
+            className="w-full max-w-xl rounded-2xl border border-white/15 bg-[#0f0f14]/90 p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <h2 className="text-sm font-semibold text-white">Importar Novo Vídeo</h2>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="text-text-3 hover:text-white text-xs"
+              >
+                Fechar
+              </button>
+            </div>
 
-      {/* 1. Upload Section */}
-      <UploadSection
-        action={action}
-        onVideoAdded={(video) => {
-          upsertVideoIntoList(video);
-        }}
-        onLoadVideos={loadVideos}
-        appSettings={appSettings}
-        onShowMoveUploadDialog={() => {
-          setDontAskMoveUpload(false);
-          setShowMoveUploadDialog(true);
-        }}
-        isExpanded={expandUploadSection}
-        onToggle={() => setExpandUploadSection((current) => !current)}
-      />
+            <UploadSection
+              action={action}
+              onVideoAdded={(video) => {
+                upsertVideoIntoList(video);
+                setActiveVideoId(video.job.job_id);
+                setShowUploadModal(false);
+              }}
+              onLoadVideos={loadVideos}
+              appSettings={appSettings}
+              onShowMoveUploadDialog={() => {
+                setDontAskMoveUpload(false);
+                setShowMoveUploadDialog(true);
+              }}
+              isExpanded={true}
+              onToggle={() => {}}
+            />
+          </div>
+        </div>
+      )}
 
-      {/* 2. Video List */}
-      <VideoListSection
-        videos={videos}
-        archivedVideos={archivedVideos}
-        activeVideoId={activeVideoId}
-        videoView={videoView}
-        action={action}
-        onSelectVideo={(videoId) => {
-          if (videoId === null) {
-            console.log(`[UI] Vídeo desmarcado`);
-            setActiveVideoId(null);
-          } else {
-            const validation = canStartOperation(videoId);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-            const video = videos.find((v) => v.job.job_id === videoId);
-            console.log(`\n[UI] Vídeo selecionado:`);
-            console.log(`[UI]   Job ID: ${videoId}`);
-            console.log(`[UI]   Video Path: ${video?.videoPath}`);
-            console.log(`[UI]   Status: ${video?.job.status}`);
-            console.log(`[UI]   URL completa: ${apiBaseUrl}${video?.videoPath}`);
-            setActiveVideoId(videoId);
-          }
-        }}
-        onSetView={setView}
-        onLoadVideos={loadVideos}
-        onShowRenameDialog={(videoId, currentName) => {
-          setRenameVideoId(videoId);
-          setRenameVideoNewName(currentName);
-        }}
-        onRunAction={runAction}
-        isExpanded={expandVideoListSection}
-        onToggle={() => setExpandVideoListSection((current) => !current)}
-      />
-      {/* 3. Video Player */}
-      {activeVideo && (
-        <SelectedVideoWorkspace
-          activeVideo={activeVideo}
-          videoRef={videoRef}
-          taskLogsContainerRef={taskLogsContainerRef}
-          apiBaseUrl={apiBaseUrl}
-          isExpanded={expandVideoPlayerSection}
-          onToggleExpanded={() => setExpandVideoPlayerSection(!expandVideoPlayerSection)}
-          action={action}
-          isBatchProcessing={isBatchProcessing}
-          batchProcessingLogs={batchProcessingLogs}
-          activeTaskLogType={activeTaskLogType}
-          activeTaskLogs={activeTaskLogs}
-          expandTaskLogs={expandTaskLogs}
-          onShowMoreTaskLogs={showMoreTaskLogs}
-          onCancelTranscription={cancelActiveTranscription}
-          onCancelRendering={cancelActiveRendering}
-          hasAnyTranscription={hasAnyTranscription}
-          hasAnyBlocks={hasAnyBlocks}
-          isAnalyzing={isAnalyzing}
-          isRendering={isRendering}
-          cuts={cuts}
-          suggestedCuts={suggestedCuts}
-          selectedSuggestedCutId={selectedSuggestedCutId}
-          hoveredCutId={hoveredCutId}
-          hoveredCutAction={hoveredCutAction}
-          renderOutputs={renderOutputs}
-          expectedRenderCount={expectedRenderCount}
-          showAiResponseOnAnalyze={showAiResponseOnAnalyze}
-          isLoadingCuts={isLoadingCuts}
-          showContinueBatchPipeline={batchWaitingForApproval && Boolean(activeBatchId)}
-          onTranscribeClick={() => {
-            const validation = canStartOperation(activeVideo.job.job_id);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-
-            return requestTranscriptionStart();
-          }}
-          onShowTranscriptionFormats={openTranscriptionFormatList}
-          onBuildBlocksClick={() =>
-            runAction(
-              () => buildBlocks(activeVideo.job.job_id),
-              (value) => {
-                setBlocks(value);
-                setShowBlocksDialog(true);
-                refreshVideo(activeVideo.job.job_id);
-              },
-            )
-          }
-          onAnalyzeClick={() => {
-            if (suggestedCuts.length > 0) {
-              setShowRegenerateAnalyzeDialog(true);
-              return;
-            }
-
-            runAction(
-              async () => {
-                setIsAnalyzing(true);
-                try {
-                  return await analyzeJob(activeVideo.job.job_id);
-                } finally {
-                  setIsAnalyzing(false);
-                }
-              },
-              (value) => handleAnalyzeResult(value),
-            );
-          }}
-          onRenderClick={() => {
-            const validation = canStartOperation(activeVideo.job.job_id);
-            if (!validation.allowed) {
-              console.warn(`[UI] ${validation.message}`);
-              alert(validation.message);
-              return;
-            }
-
-            return startRenderFlow();
-          }}
-          onAddManualCutClick={openAddManualCutDialog}
-          onBatchPipelineClick={openBatchPipelineDialog}
-          onContinueBatchPipeline={continueActiveBatchPipeline}
-          onShowAiResponseOnAnalyzeChange={(show) => setShowAiResponseOnAnalyze(show)}
-          onSelectSuggestedCut={selectSuggestedCut}
-          onEditSuggestedCut={openEditCutDialog}
-          onDeleteSuggestedCut={requestDeleteSuggestedCut}
-          onCutActionHover={setCutActionHover}
-          onCutActionLeave={clearCutActionHover}
+      {/* Toast Notification estilo Apple */}
+      {toastNotification && (
+        <GlassToast
+          message={toastNotification}
+          onClose={() => setToastNotification(null)}
+          duration={3000}
         />
       )}
       <AppSupportDialogs
