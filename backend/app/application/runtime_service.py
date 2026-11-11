@@ -22,8 +22,8 @@ from app.core.config import config
 from app.infrastructure.storage.atomic_store import AtomicJsonArtifactStore
 from app.models.schemas import BatchPipelineProgress
 
-TaskName = Literal["ingest", "transcription", "render"]
-VALID_TASK_NAMES: set[str] = {"ingest", "transcription", "render"}
+TaskName = Literal["ingest", "transcription", "render", "orchestrator", "all"]
+VALID_TASK_NAMES: set[str] = {"ingest", "transcription", "render", "orchestrator", "all"}
 
 
 class OperationCancelledError(RuntimeError):
@@ -225,6 +225,11 @@ class OperationRuntimeService:
 
     def get_task_logs(self, job_id: str, task: str) -> list[str]:
         store = self._get_job_log_store(job_id)
+        if task == "all":
+            all_lines: list[str] = []
+            for t in ("orchestrator", "ingest", "transcription", "render"):
+                all_lines.extend(store.get(t, ()))
+            return all_lines
         return list(store.get(task, ()))
 
     def clear_task_logs(self, job_id: str, task: str) -> None:
