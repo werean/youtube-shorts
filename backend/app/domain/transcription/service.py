@@ -666,6 +666,20 @@ class TranscriptionDomainService:
             def _on_runtime_fallback(reason: str) -> None:
                 c.runtime.log_warning(job_id, "transcription", reason)
 
+            lmstudio = getattr(c, "lmstudio", None)
+            if lmstudio is not None:
+                try:
+                    await lmstudio.ensure_idle_vram_released(
+                        job_id=job_id,
+                        task_log="transcription",
+                    )
+                except Exception as exc:
+                    c.runtime.log_warning(
+                        job_id,
+                        "transcription",
+                        f"LM Studio idle VRAM release skipped: {exc}",
+                    )
+
             async with c.scheduler.whisper_slot(requested_device=requested_device) as decision:
                 if decision.unloaded_models:
                     c.runtime.append_task_log(

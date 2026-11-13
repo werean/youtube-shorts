@@ -279,78 +279,92 @@ async def run_job_pipeline(
 
         _check_cancelled()
 
-        # Step 4/5: Topic Segments (TextTiling)
+        # Step 4/5 & 5/5: Topic Segments (TextTiling) + LLM Narrative Analysis & Cut Mining
+        # Wrap both in pipeline_session() ONLY when at least one stage will run so
+        # `lms server stop` executes deterministically right after Step 5 exits.
         should_run_topics = job.status == JobStatus.BUILDING_TOPICS or (
             job.status == JobStatus.ANALYZING and not c.jobs.load_topic_segments(job_id)
         )
-        if should_run_topics:
-            current_stage = "topics"
-            t0 = time.perf_counter()
-            c.runtime.log_stage_start(
-                job_id,
-                "topics",
-                inputs={
-                    "status": _status_str(job.status),
-                    "video_duration_seconds": job.video_duration_seconds,
-                },
-                message="Step 4/5: Building contextual topic segments",
-            )
-            _publish_step(
-                c,
-                job_id,
-                task="topics",
-                status=JobStatus.BUILDING_TOPICS,
-                percent=65.0,
-                message="Step 4/5: Identificando limites de tópicos contextuais...",
-            )
-            topics_res = await build_topic_segments(job_id, container=c)
-            job = c.jobs.load_job(job_id)
-            c.runtime.log_stage_end(
-                job_id,
-                "topics",
-                duration_ms=(time.perf_counter() - t0) * 1000,
-                outputs={
-                    "status": _status_str(job.status),
-                    "topics_count": len(topics_res) if isinstance(topics_res, (list, tuple)) else None,
-                },
-                message="Step 4/5: Topic segmentation complete",
-            )
+        should_run_llm_session = should_run_topics or job.status == JobStatus.ANALYZING
+        lmstudio = getattr(c, "lmstudio", None)
 
-        _check_cancelled()
+        async def _run_topics_and_analysis() -> None:
+            nonlocal job, current_stage
 
-        # Step 5/5: LLM Narrative Analysis & Cut Mining
-        if job.status == JobStatus.ANALYZING:
-            current_stage = "analysis"
-            t0 = time.perf_counter()
-            c.runtime.log_stage_start(
-                job_id,
-                "analysis",
-                inputs={
-                    "status": _status_str(job.status),
-                    "video_duration_seconds": job.video_duration_seconds,
-                },
-                message="Step 5/5: Mining narrative cuts with local LLM",
-            )
-            _publish_step(
-                c,
-                job_id,
-                task="analysis",
-                status=JobStatus.ANALYZING,
-                percent=80.0,
-                message="Step 5/5: Minerando cortes narrativos com LLM local...",
-            )
-            analysis_res = await analyze_job(job_id, container=c)
-            job = c.jobs.load_job(job_id)
-            c.runtime.log_stage_end(
-                job_id,
-                "analysis",
-                duration_ms=(time.perf_counter() - t0) * 1000,
-                outputs={
-                    "status": _status_str(job.status),
-                    "cuts_count": _count_result_items(analysis_res, "cuts"),
-                },
-                message="Step 5/5: Narrative analysis complete",
-            )
+            if should_run_topics:
+                current_stage = "topics"
+                t0 = time.perf_counter()
+                c.runtime.log_stage_start(
+                    job_id,
+                    "topics",
+                    inputs={
+                        "status": _status_str(job.status),
+                        "video_duration_seconds": job.video_duration_seconds,
+                    },
+                    message="Step 4/5: Building contextual topic segments",
+                )
+                _publish_step(
+                    c,
+                    job_id,
+                    task="topics",
+                    status=JobStatus.BUILDING_TOPICS,
+                    percent=65.0,
+                    message="Step 4/5: Identificando limites de tópicos contextuais...",
+                )
+                topics_res = await build_topic_segments(job_id, container=c)
+                job = c.jobs.load_job(job_id)
+                c.runtime.log_stage_end(
+                    job_id,
+                    "topics",
+                    duration_ms=(time.perf_counter() - t0) * 1000,
+                    outputs={
+                        "status": _status_str(job.status),
+                        "topics_count": len(topics_res) if isinstance(topics_res, (list, tuple)) else None,
+                    },
+                    message="Step 4/5: Topic segmentation complete",
+                )
+
+            _check_cancelled()
+
+            # Step 5/5: LLM Narrative Analysis & Cut Mining
+            if job.status == JobStatus.ANALYZING:
+                current_stage = "analysis"
+                t0 = time.perf_counter()
+                c.runtime.log_stage_start(
+                    job_id,
+                    "analysis",
+                    inputs={
+                        "status": _status_str(job.status),
+                        "video_duration_seconds": job.video_duration_seconds,
+                    },
+                    message="Step 5/5: Mining narrative cuts with local LLM",
+                )
+                _publish_step(
+                    c,
+                    job_id,
+                    task="analysis",
+                    status=JobStatus.ANALYZING,
+                    percent=80.0,
+                    message="Step 5/5: Minerando cortes narrativos com LLM local...",
+                )
+                analysis_res = await analyze_job(job_id, container=c)
+                job = c.jobs.load_job(job_id)
+                c.runtime.log_stage_end(
+                    job_id,
+                    "analysis",
+                    duration_ms=(time.perf_counter() - t0) * 1000,
+                    outputs={
+                        "status": _status_str(job.status),
+                        "cuts_count": _count_result_items(analysis_res, "cuts"),
+                    },
+                    message="Step 5/5: Narrative analysis complete",
+                )
+
+        if should_run_llm_session and lmstudio is not None:
+            async with lmstudio.pipeline_session(job_id=job_id, task_log="orchestrator"):
+                await _run_topics_and_analysis()
+        elif should_run_llm_session:
+            await _run_topics_and_analysis()
 
         _check_cancelled()
 
@@ -767,56 +781,67 @@ class BatchRunner:
 
                     if not status.is_running:
                         break
-                    status.current_step = "topic_segments"
                     should_run_topics = job.status == JobStatus.BUILDING_TOPICS or (
                         job.status == JobStatus.ANALYZING and not c.jobs.load_topic_segments(job_id)
                     )
-                    if should_run_topics:
-                        active_stage = "topics"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "topics",
-                            inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                            message="Batch Step 4/5: Building topic segments",
-                        )
-                        t_res = await build_topic_segments(job_id, container=c)
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "topics",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "topics_count": len(t_res) if isinstance(t_res, (list, tuple)) else None,
-                            },
-                            message="Batch Step 4/5: Topic segmentation complete",
-                        )
+                    should_run_llm_session = should_run_topics or job.status == JobStatus.ANALYZING
+                    lmstudio = getattr(c, "lmstudio", None)
 
-                    if not status.is_running:
-                        break
-                    status.current_step = "analysis"
-                    if job.status == JobStatus.ANALYZING:
-                        active_stage = "analysis"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "analysis",
-                            inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                            message="Batch Step 5/5: Analyzing narrative cuts",
-                        )
-                        a_res = await analyze_job(job_id, container=c)
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "analysis",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "cuts_count": _count_result_items(a_res, "cuts"),
-                            },
-                            message="Batch Step 5/5: Narrative analysis complete",
-                        )
+                    async def _run_batch_topics_and_analysis() -> None:
+                        nonlocal job, active_stage
+                        status.current_step = "topic_segments"
+                        if should_run_topics:
+                            active_stage = "topics"
+                            t0 = time.perf_counter()
+                            c.runtime.log_stage_start(
+                                job_id,
+                                "topics",
+                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                message="Batch Step 4/5: Building topic segments",
+                            )
+                            t_res = await build_topic_segments(job_id, container=c)
+                            job = c.jobs.load_job(job_id)
+                            c.runtime.log_stage_end(
+                                job_id,
+                                "topics",
+                                duration_ms=(time.perf_counter() - t0) * 1000,
+                                outputs={
+                                    "status": _status_str(job.status),
+                                    "topics_count": len(t_res) if isinstance(t_res, (list, tuple)) else None,
+                                },
+                                message="Batch Step 4/5: Topic segmentation complete",
+                            )
+
+                        if not status.is_running:
+                            return
+                        status.current_step = "analysis"
+                        if job.status == JobStatus.ANALYZING:
+                            active_stage = "analysis"
+                            t0 = time.perf_counter()
+                            c.runtime.log_stage_start(
+                                job_id,
+                                "analysis",
+                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                message="Batch Step 5/5: Analyzing narrative cuts",
+                            )
+                            a_res = await analyze_job(job_id, container=c)
+                            job = c.jobs.load_job(job_id)
+                            c.runtime.log_stage_end(
+                                job_id,
+                                "analysis",
+                                duration_ms=(time.perf_counter() - t0) * 1000,
+                                outputs={
+                                    "status": _status_str(job.status),
+                                    "cuts_count": _count_result_items(a_res, "cuts"),
+                                },
+                                message="Batch Step 5/5: Narrative analysis complete",
+                            )
+
+                    if should_run_llm_session and lmstudio is not None:
+                        async with lmstudio.pipeline_session(job_id=job_id, task_log="batch"):
+                            await _run_batch_topics_and_analysis()
+                    elif should_run_llm_session:
+                        await _run_batch_topics_and_analysis()
 
                     # Pre-approval gate
                     if pre_approve:

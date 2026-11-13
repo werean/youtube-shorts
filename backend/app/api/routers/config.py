@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -256,6 +257,53 @@ async def _run_ollama_cli(args: list[str]) -> dict[str, Any]:
         }
 
 
+def _extract_lms_item_key(item: dict[str, Any]) -> str:
+    for field in ("modelKey", "identifier", "id", "model", "path"):
+        val = str(item.get(field) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _normalize_model_token(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(name or "").strip().lower()).strip("-")
+
+
+def _find_matching_lms_model(installed: list[dict[str, Any]], model_name: str) -> str | None:
+    target = str(model_name or "").strip()
+    if not target or not installed:
+        return None
+    target_low = target.lower()
+    target_norm = _normalize_model_token(target)
+
+    for item in installed:
+        if not isinstance(item, dict):
+            continue
+        key = _extract_lms_item_key(item)
+        if not key:
+            continue
+        if key.lower() == target_low:
+            return key
+        for alias_field in ("identifier", "id", "displayName", "model"):
+            alias_val = str(item.get(alias_field) or "").strip().lower()
+            if alias_val and alias_val == target_low:
+                return key
+
+    if target_norm:
+        for item in installed:
+            if not isinstance(item, dict):
+                continue
+            key = _extract_lms_item_key(item)
+            if not key:
+                continue
+            if _normalize_model_token(key) == target_norm:
+                return key
+            disp_norm = _normalize_model_token(str(item.get("displayName") or ""))
+            if disp_norm and disp_norm == target_norm:
+                return key
+    return None
+
+
 async def _build_unified_llm_models_payload() -> dict[str, Any]:
     configs = load_active_tool_configs()
     llm_cfg = configs["llm"]
@@ -286,7 +334,84 @@ async def _build_unified_llm_models_payload() -> dict[str, Any]:
     lmstudio_available = False
     ollama_available = False
 
-    # 1. Probe LM Studio (:1234/v1/models)
+    # 1. Probe LM Studio via CLI first (discovers on-disk models even when app/server is closed)
+    container = get_container()
+    lmstudio = getattr(container, "lmstudio", None)
+    if lmstudio is not None and lmstudio.cli_enabled():
+        try:
+            cli_installed = await lmstudio.list_installed_models(model_type="llm")
+            cli_loaded = await lmstudio.list_loaded_models()
+
+            loaded_keys_lower: set[str] = set()
+            for entry in cli_loaded:
+                if not isinstance(entry, dict):
+                    continue
+                for field in ("modelKey", "identifier", "id", "model", "path"):
+                    val = str(entry.get(field) or "").strip().lower()
+                    if val:
+                        loaded_keys_lower.add(val)
+
+            if cli_installed or cli_loaded:
+                lmstudio_available = True
+
+            for entry in cli_installed:
+                if not isinstance(entry, dict):
+                    continue
+                mname = _extract_lms_item_key(entry)
+                if not mname:
+                    continue
+                aliases = {
+                    str(entry.get(f) or "").strip().lower()
+                    for f in ("modelKey", "identifier", "id", "model", "path")
+                    if str(entry.get(f) or "").strip()
+                }
+                is_running = bool(aliases & loaded_keys_lower)
+                local_installed.add(mname)
+                if is_running:
+                    local_running.add(mname)
+                item_dict: dict[str, Any] = {
+                    "name": mname,
+                    "model": mname,
+                    "source": "local",
+                    "provider": "lmstudio",
+                    "installed": True,
+                    "running": is_running,
+                    "needsDownload": False,
+                }
+                size_bytes = entry.get("sizeBytes")
+                if isinstance(size_bytes, int):
+                    item_dict["size"] = size_bytes
+                catalog_map[mname] = item_dict
+
+            for entry in cli_loaded:
+                if not isinstance(entry, dict):
+                    continue
+                mname = _extract_lms_item_key(entry)
+                if not mname:
+                    continue
+                local_installed.add(mname)
+                local_running.add(mname)
+                existing = catalog_map.get(mname)
+                if existing:
+                    existing["installed"] = True
+                    existing["running"] = True
+                    existing["provider"] = "lmstudio"
+                    existing["source"] = "local"
+                    existing["needsDownload"] = False
+                else:
+                    catalog_map[mname] = {
+                        "name": mname,
+                        "model": mname,
+                        "source": "local",
+                        "provider": "lmstudio",
+                        "installed": True,
+                        "running": True,
+                        "needsDownload": False,
+                    }
+        except Exception:
+            pass
+
+    # 2. Probe LM Studio HTTP (:1234/v1/models) when running or HTTP-mocked
     try:
         status_code, payload = await _fetch_provider_json("GET", f"{lmstudio_base}/models")
         if status_code == 200 and isinstance(payload, dict):
@@ -301,19 +426,25 @@ async def _build_unified_llm_models_payload() -> dict[str, Any]:
                         continue
                     local_installed.add(mname)
                     local_running.add(mname)
-                    catalog_map[mname] = {
-                        "name": mname,
-                        "model": mname,
-                        "source": "local",
-                        "provider": "lmstudio",
-                        "installed": True,
-                        "running": True,
-                        "needsDownload": False,
-                    }
+                    existing = catalog_map.get(mname)
+                    if existing and existing.get("provider") == "lmstudio":
+                        existing["installed"] = True
+                        existing["running"] = True
+                        existing["needsDownload"] = False
+                    else:
+                        catalog_map[mname] = {
+                            "name": mname,
+                            "model": mname,
+                            "source": "local",
+                            "provider": "lmstudio",
+                            "installed": True,
+                            "running": True,
+                            "needsDownload": False,
+                        }
     except Exception:
         pass
 
-    # 2. Probe Ollama (:11434/api/tags and /api/ps)
+    # 3. Probe Ollama (:11434/api/tags and /api/ps) as secondary local provider
     try:
         status_tags, tags_payload = await _fetch_provider_json("GET", f"{ollama_base}/api/tags")
         if status_tags == 200 and isinstance(tags_payload, dict):
@@ -329,7 +460,9 @@ async def _build_unified_llm_models_payload() -> dict[str, Any]:
                     local_installed.add(mname)
                     reg = registered_by_lower.get(mname.lower())
                     existing = catalog_map.get(mname)
-                    item_dict: dict[str, Any] = {
+                    if existing and existing.get("provider") == "lmstudio" and existing.get("installed"):
+                        continue
+                    item_dict = {
                         "name": mname,
                         "model": mname,
                         "source": reg["source"] if reg else "local",
@@ -426,13 +559,13 @@ async def _verify_model(model: str) -> tuple[bool, str]:
     lmstudio_base = str(llm_cfg.get("lmstudio_base_url") or config.LMSTUDIO_BASE_URL).rstrip("/")
     ollama_base = str(llm_cfg.get("ollama_base_url") or config.OLLAMA_BASE_URL).rstrip("/")
 
-    # Try LM Studio first if model is served there
+    # 1. Try LM Studio HTTP directly if server is already running with the model loaded
     try:
         st, lms_models = await _fetch_provider_json("GET", f"{lmstudio_base}/models")
         if st == 200 and isinstance(lms_models, dict):
             ids = [str(m.get("id") or "") for m in (lms_models.get("data") or []) if isinstance(m, dict)]
             if any(i.lower() == model.lower() for i in ids):
-                st_chat, chat_resp = await _fetch_provider_json(
+                st_chat, _chat_resp = await _fetch_provider_json(
                     "POST",
                     f"{lmstudio_base}/chat/completions",
                     {
@@ -446,7 +579,37 @@ async def _verify_model(model: str) -> tuple[bool, str]:
     except Exception:
         pass
 
-    # Try Ollama /api/chat
+    # 2. If installed in LM Studio CLI while server is down, load on-demand via stage() -> verify -> unload + stop in finally:
+    container = get_container()
+    lmstudio = getattr(container, "lmstudio", None)
+    if lmstudio is not None and lmstudio.cli_enabled():
+        try:
+            cli_installed = await lmstudio.list_installed_models()
+            matched_key = _find_matching_lms_model(cli_installed, model)
+            if matched_key:
+                async with lmstudio.stage(
+                    model_type="llm",
+                    preferred_model=matched_key,
+                    task_log="config",
+                ) as loaded_key:
+                    test_model = loaded_key or matched_key
+                    st_chat, _chat_resp = await _fetch_provider_json(
+                        "POST",
+                        f"{lmstudio_base}/chat/completions",
+                        {
+                            "model": test_model,
+                            "messages": [{"role": "user", "content": "Responda apenas com: ok"}],
+                            "max_tokens": 8,
+                        },
+                        timeout=30.0,
+                    )
+                    if st_chat == 200:
+                        return True, "ok"
+                    return False, f"Teste do modelo '{model}' falhou no LM Studio (HTTP {st_chat})."
+        except Exception as exc:
+            return False, f"Falha ao verificar modelo '{model}' via LM Studio CLI ({exc})."
+
+    # 3. Try Ollama /api/chat
     try:
         st, payload = await _fetch_provider_json(
             "POST",
@@ -499,17 +662,27 @@ async def register_llm_model(body: dict[str, Any] = Body(default_factory=dict)) 
 
     resolved_name = raw_name
     if source_raw == "local":
-        # Check if already available in LM Studio before requiring ollama pull
+        # Check if already available in LM Studio (CLI on disk or HTTP server) before requiring ollama pull
         lms_has_model = False
-        try:
-            configs = load_active_tool_configs()
-            lmstudio_base = str(configs["llm"].get("lmstudio_base_url") or config.LMSTUDIO_BASE_URL).rstrip("/")
-            st, lms_payload = await _fetch_provider_json("GET", f"{lmstudio_base}/models")
-            if st == 200 and isinstance(lms_payload, dict):
-                ids = [str(m.get("id") or "") for m in (lms_payload.get("data") or []) if isinstance(m, dict)]
-                lms_has_model = any(i.lower() == raw_name.lower() for i in ids)
-        except Exception:
-            lms_has_model = False
+        container = get_container()
+        lmstudio = getattr(container, "lmstudio", None)
+        if lmstudio is not None and lmstudio.cli_enabled():
+            try:
+                cli_installed = await lmstudio.list_installed_models()
+                if _find_matching_lms_model(cli_installed, raw_name):
+                    lms_has_model = True
+            except Exception:
+                pass
+        if not lms_has_model:
+            try:
+                configs = load_active_tool_configs()
+                lmstudio_base = str(configs["llm"].get("lmstudio_base_url") or config.LMSTUDIO_BASE_URL).rstrip("/")
+                st, lms_payload = await _fetch_provider_json("GET", f"{lmstudio_base}/models")
+                if st == 200 and isinstance(lms_payload, dict):
+                    ids = [str(m.get("id") or "") for m in (lms_payload.get("data") or []) if isinstance(m, dict)]
+                    lms_has_model = any(i.lower() == raw_name.lower() for i in ids)
+            except Exception:
+                lms_has_model = False
 
         if not lms_has_model:
             pull = await _run_ollama_cli(["pull", raw_name])

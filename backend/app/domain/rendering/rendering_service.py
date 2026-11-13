@@ -216,6 +216,21 @@ class RenderingService:
         cancel_token = c.runtime.create_cancel_token(job_id, "render")
 
         try:
+            # 2b. Safety guard: release any idle LM Studio model/server before NVENC/vision
+            lmstudio = getattr(c, "lmstudio", None)
+            if lmstudio is not None:
+                try:
+                    await lmstudio.ensure_idle_vram_released(
+                        job_id=job_id,
+                        task_log="render",
+                    )
+                except Exception as exc:
+                    c.runtime.log_warning(
+                        job_id,
+                        "render",
+                        f"LM Studio idle VRAM release skipped: {exc}",
+                    )
+
             # 3. Locate source video
             video_path = c.jobs.find_source_video(job_id)
             if not video_path or not video_path.exists():

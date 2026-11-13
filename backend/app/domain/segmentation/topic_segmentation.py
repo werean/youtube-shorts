@@ -24,7 +24,11 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from app.application.runtime_service import ServiceContainer, get_container
+from app.application.runtime_service import (
+    OperationCancelledError,
+    ServiceContainer,
+    get_container,
+)
 from app.domain.segmentation.semantic_blocks import (
     is_topic_opener_text,
     starts_with_blocking_connective,
@@ -419,6 +423,8 @@ async def segment_blocks_into_topics(
     llm_adapter: UnifiedLocalLLMAdapter | None = None,
     block_embeddings_override: Sequence[Sequence[float]] | None = None,
     on_embedding_fallback: Callable[[str], None] | None = None,
+    job_id: str | None = None,
+    container: ServiceContainer | None = None,
 ) -> list[TopicSegment]:
     """Run contextual TextTiling over `blocks` and return `TopicSegment` list."""
     if not blocks:
@@ -460,9 +466,70 @@ async def segment_blocks_into_topics(
         if block_embeddings_override is not None:
             embeddings = [[float(x) for x in vec] for vec in block_embeddings_override]
         else:
-            adapter = llm_adapter or UnifiedLocalLLMAdapter(embedding_model=embedding_model)
+            adapter = llm_adapter or UnifiedLocalLLMAdapter(
+                container=container,
+                embedding_model=embedding_model,
+            )
             texts = [b.text for b in blocks]
-            embeddings = await adapter.embed_texts(texts, model=embedding_model)
+            c_ref = container or getattr(adapter, "container", None) or get_container()
+            lmstudio = getattr(c_ref, "lmstudio", None)
+            cfg = (
+                adapter.get_configured_urls_and_models()
+                if hasattr(adapter, "get_configured_urls_and_models")
+                else {}
+            )
+            provider_pref = str(cfg.get("provider") or "auto").strip().lower()
+            pref_emb_model = (
+                (embedding_model or cfg.get("embedding_model") or "").strip() or None
+            )
+
+            if (
+                lmstudio is not None
+                and provider_pref in ("auto", "lmstudio")
+                and lmstudio.cli_enabled()
+            ):
+                try:
+                    async with lmstudio.stage(
+                        model_type="embedding",
+                        preferred_model=pref_emb_model,
+                        gpu="off",
+                        job_id=job_id,
+                        task_log="topics",
+                    ) as loaded_emb_key:
+                        if loaded_emb_key:
+                            embeddings = await adapter.embed_texts(texts, model=loaded_emb_key)
+                        elif provider_pref == "auto" and hasattr(adapter, "_request_ollama_embeddings"):
+                            embeddings = (
+                                await adapter._request_ollama_embeddings(
+                                    str(cfg.get("ollama_base_url") or ""),
+                                    texts,
+                                    pref_emb_model or "",
+                                )
+                                or []
+                            )
+                except OperationCancelledError:
+                    raise
+                except Exception as exc:
+                    msg = (
+                        f"Falha ao executar embeddings via LM Studio CLI ({exc}); "
+                        "usando fallback TF-IDF léxico para TextTiling"
+                    )
+                    if on_embedding_fallback is not None:
+                        on_embedding_fallback(msg)
+                    embeddings = []
+            else:
+                try:
+                    embeddings = await adapter.embed_texts(texts, model=embedding_model)
+                except OperationCancelledError:
+                    raise
+                except Exception as exc:
+                    msg = (
+                        f"Embeddings indisponíveis ({exc}); "
+                        "usando fallback TF-IDF léxico para TextTiling"
+                    )
+                    if on_embedding_fallback is not None:
+                        on_embedding_fallback(msg)
+                    embeddings = []
 
         if not embeddings or len(embeddings) != len(blocks):
             msg = (
@@ -541,6 +608,8 @@ async def build_topic_segments(
             llm_adapter=llm_adapter or UnifiedLocalLLMAdapter(container=c, embedding_model=embedding_model),
             block_embeddings_override=block_embeddings_override,
             on_embedding_fallback=lambda msg: c.runtime.log_warning(job_id, "topics", msg),
+            job_id=job_id,
+            container=c,
         )
 
         c.jobs.save_topic_segments(job_id, topics)
@@ -551,6 +620,8 @@ async def build_topic_segments(
             message=f"[segmentation] {len(topics)} tópicos identificados",
         )
         return topics
+    except OperationCancelledError:
+        raise
     except Exception as exc:
         c.runtime.log_exception(
             job_id,

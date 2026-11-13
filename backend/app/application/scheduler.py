@@ -99,33 +99,37 @@ async def default_ollama_unloader(base_url: str | None = None) -> list[str]:
 
 
 async def default_lms_unloader() -> bool:
-    """Attempt `lms unload --all` if LM Studio CLI is available on PATH."""
-    lms_bin = shutil.which("lms")
+    """Unload all LM Studio models (`lms unload --all`) and stop server (`lms server stop`) if running."""
+    from app.infrastructure.llm.lmstudio_cli import (
+        extract_json_from_cli_output,
+        resolve_lms_binary,
+        run_lms_subprocess,
+    )
+
+    lms_bin = resolve_lms_binary()
     if not lms_bin:
         return False
+
     try:
-        proc = await asyncio.create_subprocess_exec(
+        st_rc, st_out, st_err = await run_lms_subprocess(
             lms_bin,
-            "unload",
-            "--all",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            ["server", "status", "--json"],
+            timeout=5.0,
         )
-        await asyncio.wait_for(proc.wait(), timeout=5.0)
-        return proc.returncode == 0
-    except NotImplementedError:
-        try:
-            proc_sync = await asyncio.to_thread(
-                subprocess.run,
-                [lms_bin, "unload", "--all"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5.0,
-                check=False,
-            )
-            return proc_sync.returncode == 0
-        except Exception:
-            return False
+        for raw in (st_out, st_err):
+            if raw.strip():
+                try:
+                    parsed = extract_json_from_cli_output(raw)
+                    if isinstance(parsed, dict) and parsed.get("running") is False:
+                        return False
+                    break
+                except Exception:
+                    continue
+
+        rc, _out, _err = await run_lms_subprocess(lms_bin, ["unload", "--all"], timeout=10.0)
+        if rc == 0 or st_rc == 0:
+            await run_lms_subprocess(lms_bin, ["server", "stop"], timeout=10.0)
+        return rc == 0
     except Exception:
         return False
 

@@ -13,7 +13,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Literal
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Literal
 
 from app.application.job_lifecycle import JobLifecycleService, utc_now_iso
 from app.application.scheduler import HardwareResourceScheduler
@@ -22,6 +22,9 @@ from app.core.config import config
 from app.infrastructure.logging.stage_logger import StageLogger, get_stage_logger
 from app.infrastructure.storage.atomic_store import AtomicJsonArtifactStore
 from app.models.schemas import BatchPipelineProgress
+
+if TYPE_CHECKING:
+    from app.infrastructure.llm.lmstudio_cli import LMStudioCLIManager, LmsCommandRunner
 
 TaskName = Literal[
     "ingest",
@@ -763,6 +766,11 @@ class ServiceContainer:
         self.folder_opener: Callable[[Path, list[Path] | None], dict[str, Any]] | None = None
         self.llm_http_fetcher: Callable[[str, str, dict[str, Any] | None], Awaitable[tuple[int, Any]]] | None = None
         self.ollama_command_runner: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None
+        self.lms_command_runner: LmsCommandRunner | None = None
+
+        from app.infrastructure.llm.lmstudio_cli import LMStudioCLIManager
+
+        self.lmstudio: LMStudioCLIManager = LMStudioCLIManager(container=self)
         self.dependency_prober: Callable[[], Awaitable[dict[str, Any]]] | None = None
         self.dependency_installer: Callable[[str, dict[str, Any] | None, CancelToken | None, Callable[[str], None] | None], Awaitable[tuple[int, dict[str, Any]]]] | None = None
         self.dependency_uninstaller: Callable[[str, CancelToken | None, Callable[[str], None] | None], Awaitable[tuple[int, dict[str, Any]]]] | None = None

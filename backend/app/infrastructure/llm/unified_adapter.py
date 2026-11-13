@@ -329,11 +329,15 @@ class UnifiedLocalLLMAdapter:
             pass
         return False, []
 
-    async def detect_provider_and_model(self) -> ProviderResolution:
+    async def detect_provider_and_model(
+        self,
+        *,
+        preferred_model_override: str | None = None,
+    ) -> ProviderResolution:
         """Auto-detect active local LLM provider (LM Studio :1234 or Ollama :11434) and model."""
         cfg = self.get_configured_urls_and_models()
         provider_pref = cfg["provider"]
-        configured_model = cfg["model"]
+        configured_model = preferred_model_override or cfg["model"]
         lms_url = cfg["lmstudio_base_url"]
         ollama_url = cfg["ollama_base_url"]
 
@@ -422,6 +426,110 @@ class UnifiedLocalLLMAdapter:
 
         raise LocalLLMUnavailableError()
 
+    def _match_embedding_model_id(
+        self,
+        lms_models: Sequence[str],
+        preferred: str,
+        stage_key: str | None = None,
+    ) -> str:
+        emb_candidates = [m for m in lms_models if _is_embedding_model_name(m)]
+        pool = emb_candidates or list(lms_models)
+        if not pool:
+            return stage_key or preferred
+
+        for hint in (stage_key, preferred):
+            if not hint:
+                continue
+            hint_low = hint.strip().lower()
+            hint_norm = re.sub(r"[^a-z0-9]+", "-", hint_low).strip("-")
+            for m in pool:
+                if m.lower() == hint_low:
+                    return m
+            if hint_norm:
+                for m in pool:
+                    m_norm = re.sub(r"[^a-z0-9]+", "-", m.lower()).strip("-")
+                    if m_norm == hint_norm or hint_norm in m_norm or m_norm in hint_norm:
+                        return m
+        return emb_candidates[0] if emb_candidates else (stage_key or preferred)
+
+    async def _request_lmstudio_embeddings(
+        self,
+        lms_url: str,
+        clean_texts: Sequence[str],
+        emb_model: str,
+        *,
+        stage_key: str | None = None,
+        lms_models: Sequence[str] | None = None,
+    ) -> list[list[float]] | None:
+        try:
+            models = list(lms_models) if lms_models is not None else []
+            if lms_models is None:
+                lms_ok, probed = await self._probe_lmstudio(lms_url)
+                if lms_ok:
+                    models = probed
+            lms_emb_model = self._match_embedding_model_id(models, emb_model, stage_key=stage_key)
+            status, payload = await self._request_json(
+                "POST",
+                f"{lms_url}/embeddings",
+                {
+                    "model": lms_emb_model,
+                    "input": list(clean_texts),
+                },
+                timeout=30.0,
+            )
+            if status == 200 and isinstance(payload, dict):
+                data = payload.get("data")
+                if isinstance(data, list) and len(data) == len(clean_texts):
+                    return [
+                        [float(x) for x in item.get("embedding", [])]
+                        for item in data
+                        if isinstance(item, dict)
+                    ]
+            else:
+                logger.warning(
+                    "LM Studio embedding request returned HTTP %s for model=%s",
+                    status,
+                    lms_emb_model,
+                )
+        except Exception as exc:
+            logger.warning("LM Studio embedding request failed (%s): %s", emb_model, exc)
+        return None
+
+    async def _request_ollama_embeddings(
+        self,
+        ollama_url: str,
+        clean_texts: Sequence[str],
+        emb_model: str,
+    ) -> list[list[float]] | None:
+        try:
+            status, payload = await self._request_json(
+                "POST",
+                f"{ollama_url}/api/embed",
+                {
+                    "model": emb_model,
+                    "input": list(clean_texts),
+                    "options": {"num_gpu": 0},
+                    "keep_alive": 0,
+                },
+                timeout=30.0,
+            )
+            if status == 200 and isinstance(payload, dict):
+                embeddings = payload.get("embeddings")
+                if isinstance(embeddings, list) and len(embeddings) == len(clean_texts):
+                    return [[float(x) for x in vec] for vec in embeddings]
+                single = payload.get("embedding")
+                if isinstance(single, list) and len(clean_texts) == 1:
+                    return [[float(x) for x in single]]
+            else:
+                logger.warning(
+                    "Ollama embedding request returned HTTP %s for model=%s",
+                    status,
+                    emb_model,
+                )
+        except Exception as exc:
+            logger.warning("Ollama embedding request failed (%s): %s", emb_model, exc)
+        return None
+
     async def embed_texts(
         self,
         texts: Sequence[str],
@@ -429,11 +537,7 @@ class UnifiedLocalLLMAdapter:
         model: str | None = None,
         acquire_gpu_slot: bool = True,
     ) -> list[list[float]]:
-        """Generate embeddings via Ollama (`num_gpu=0` CPU offload) or LM Studio (`/v1/embeddings`).
-
-        Uses `options={"num_gpu": 0}` and `keep_alive: 0` on Ollama to avoid evicting
-        the 14B chat LLM from the RTX 5070 12GB VRAM.
-        """
+        """Generate embeddings via LM Studio on-demand (`--gpu off`) or Ollama (`num_gpu=0` CPU offload)."""
         clean_texts = [str(t or "").strip() for t in texts]
         if not clean_texts:
             return []
@@ -443,82 +547,72 @@ class UnifiedLocalLLMAdapter:
         ollama_url = cfg["ollama_base_url"]
         lms_url = cfg["lmstudio_base_url"]
         provider_pref = cfg["provider"]
+        c = self.container
+        lmstudio_cli = getattr(c, "lmstudio", None)
+        cli_enabled = bool(lmstudio_cli is not None and lmstudio_cli.cli_enabled())
 
         async with self._maybe_gpu_slot(acquire_gpu_slot, holder="embeddings"):
-            # Try Ollama /api/embed first (unless explicitly pinned to lmstudio only)
-            if provider_pref in ("auto", "ollama"):
-                try:
-                    status, payload = await self._request_json(
-                        "POST",
-                        f"{ollama_url}/api/embed",
-                        {
-                            "model": emb_model,
-                            "input": clean_texts,
-                            "options": {"num_gpu": 0},
-                            "keep_alive": 0,
-                        },
-                        timeout=30.0,
+            if provider_pref in ("auto", "lmstudio") and cli_enabled and lmstudio_cli is not None:
+                active_emb = lmstudio_cli.active_stage_model("embedding")
+                if active_emb:
+                    vecs = await self._request_lmstudio_embeddings(
+                        lms_url, clean_texts, emb_model, stage_key=active_emb
                     )
-                    if status == 200 and isinstance(payload, dict):
-                        embeddings = payload.get("embeddings")
-                        if isinstance(embeddings, list) and len(embeddings) == len(clean_texts):
-                            return [[float(x) for x in vec] for vec in embeddings]
-                        single = payload.get("embedding")
-                        if isinstance(single, list) and len(clean_texts) == 1:
-                            return [[float(x) for x in single]]
-                    else:
-                        logger.warning(
-                            "Ollama embedding request returned HTTP %s for model=%s",
-                            status,
-                            emb_model,
-                        )
-                except Exception as exc:
-                    logger.warning("Ollama embedding request failed (%s): %s", emb_model, exc)
-
-            # Try LM Studio /v1/embeddings (match loaded embedding model id if available)
-            if provider_pref in ("auto", "lmstudio", "ollama"):
-                try:
-                    lms_emb_model = emb_model
+                    if vecs is not None:
+                        return vecs
+                else:
                     lms_ok, lms_models = await self._probe_lmstudio(lms_url)
-                    if lms_ok and lms_models:
-                        emb_candidates = [m for m in lms_models if _is_embedding_model_name(m)]
-                        if emb_candidates:
-                            emb_norm = re.sub(r"[^a-z0-9]+", "-", emb_model.lower()).strip("-")
-                            matched = next(
-                                (
-                                    m
-                                    for m in emb_candidates
-                                    if m.lower() == emb_model.lower()
-                                    or (emb_norm and emb_norm in re.sub(r"[^a-z0-9]+", "-", m.lower()).strip("-"))
-                                ),
-                                emb_candidates[0],
-                            )
-                            lms_emb_model = matched
-                    status, payload = await self._request_json(
-                        "POST",
-                        f"{lms_url}/embeddings",
-                        {
-                            "model": lms_emb_model,
-                            "input": clean_texts,
-                        },
-                        timeout=30.0,
-                    )
-                    if status == 200 and isinstance(payload, dict):
-                        data = payload.get("data")
-                        if isinstance(data, list) and len(data) == len(clean_texts):
-                            return [
-                                [float(x) for x in item.get("embedding", [])]
-                                for item in data
-                                if isinstance(item, dict)
-                            ]
-                    else:
-                        logger.warning(
-                            "LM Studio embedding request returned HTTP %s for model=%s",
-                            status,
-                            lms_emb_model,
+                    if lms_ok and any(_is_embedding_model_name(m) for m in lms_models):
+                        vecs = await self._request_lmstudio_embeddings(
+                            lms_url, clean_texts, emb_model, lms_models=lms_models
                         )
-                except Exception as exc:
-                    logger.warning("LM Studio embedding request failed (%s): %s", emb_model, exc)
+                        if vecs is not None:
+                            return vecs
+                    else:
+                        async with lmstudio_cli.stage(
+                            model_type="embedding",
+                            preferred_model=emb_model,
+                            gpu="off",
+                            task_log="topics",
+                        ) as loaded_emb_key:
+                            if loaded_emb_key:
+                                vecs = await self._request_lmstudio_embeddings(
+                                    lms_url,
+                                    clean_texts,
+                                    emb_model,
+                                    stage_key=loaded_emb_key,
+                                )
+                                if vecs is not None:
+                                    return vecs
+
+                if provider_pref == "auto":
+                    vecs = await self._request_ollama_embeddings(ollama_url, clean_texts, emb_model)
+                    if vecs is not None:
+                        return vecs
+                return []
+
+            # HTTP-only path (e.g. Ollama pinned, or HTTP-mocked unit tests without CLI runner)
+            if provider_pref in ("auto", "lmstudio"):
+                lms_ok, lms_models = await self._probe_lmstudio(lms_url)
+                if lms_ok and (
+                    provider_pref == "lmstudio"
+                    or any(_is_embedding_model_name(m) for m in lms_models)
+                ):
+                    vecs = await self._request_lmstudio_embeddings(
+                        lms_url, clean_texts, emb_model, lms_models=lms_models
+                    )
+                    if vecs is not None:
+                        return vecs
+
+            if provider_pref in ("auto", "ollama"):
+                vecs = await self._request_ollama_embeddings(ollama_url, clean_texts, emb_model)
+                if vecs is not None:
+                    return vecs
+
+            if provider_pref == "lmstudio":
+                vecs = await self._request_lmstudio_embeddings(lms_url, clean_texts, emb_model)
+                if vecs is not None:
+                    return vecs
 
         return []
 
@@ -527,6 +621,132 @@ class UnifiedLocalLLMAdapter:
         if isinstance(res, tuple):
             return res[0]
         return res
+
+    async def _resolve_chat_provider(
+        self,
+        *,
+        lms_url: str,
+        stage_key: str | None = None,
+    ) -> ProviderResolution:
+        try:
+            return await self.detect_provider_and_model(preferred_model_override=stage_key)
+        except LocalLLMUnavailableError:
+            if stage_key:
+                resolved = ProviderResolution(
+                    provider="lmstudio",
+                    base_url=lms_url,
+                    model=stage_key,
+                    online=True,
+                )
+                self.last_resolution = resolved
+                return resolved
+            raise
+
+    async def _execute_chat_json(
+        self,
+        resolution: ProviderResolution,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_schema: dict[str, Any],
+        schema_name: str,
+        temperature: float,
+        cancel_token: CancelToken | None,
+    ) -> tuple[dict[str, Any] | list[Any], str]:
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            if resolution.provider == "lmstudio":
+                req_body: dict[str, Any] = {
+                    "model": resolution.model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": schema_name,
+                            "strict": True,
+                            "schema": json_schema,
+                        },
+                    },
+                }
+                status, payload = await self._request_json(
+                    "POST",
+                    f"{resolution.base_url}/chat/completions",
+                    req_body,
+                )
+                if status == 400:
+                    logger.warning(
+                        "LM Studio returned HTTP 400 for json_schema response_format; retrying with json_object."
+                    )
+                    fallback_body = dict(req_body)
+                    fallback_body["response_format"] = {"type": "json_object"}
+                    status, payload = await self._request_json(
+                        "POST",
+                        f"{resolution.base_url}/chat/completions",
+                        fallback_body,
+                    )
+            else:
+                req_body = {
+                    "model": resolution.model,
+                    "messages": messages,
+                    "stream": False,
+                    "format": json_schema,
+                    "options": {
+                        "temperature": temperature,
+                        "num_ctx": 8192,
+                    },
+                }
+                status, payload = await self._request_json(
+                    "POST",
+                    f"{resolution.base_url}/api/chat",
+                    req_body,
+                )
+        except (httpx.TimeoutException, httpx.RequestError, OSError) as exc:
+            raise LocalLLMUnavailableError(
+                f"Local LLM request failed ({resolution.provider} at {resolution.base_url}): {exc}"
+            ) from exc
+
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
+
+        if status >= 500 or status == 0:
+            raise LocalLLMUnavailableError(
+                f"Local LLM provider ({resolution.provider}) returned HTTP {status}."
+            )
+        if status >= 400:
+            detail = (
+                payload.get("detail") or payload.get("error")
+                if isinstance(payload, dict)
+                else str(payload)
+            )
+            raise RuntimeError(f"LLM request failed with HTTP {status}: {detail}")
+
+        raw_content: Any = None
+        if isinstance(payload, dict):
+            choices = payload.get("choices")
+            if isinstance(choices, list) and choices:
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    msg = first_choice.get("message")
+                    if isinstance(msg, dict) and "content" in msg:
+                        raw_content = msg["content"]
+            if raw_content is None:
+                msg = payload.get("message")
+                if isinstance(msg, dict) and "content" in msg:
+                    raw_content = msg["content"]
+            if raw_content is None and ("cuts" in payload or "adjustments" in payload):
+                raw_content = payload
+        elif isinstance(payload, (list, str)):
+            raw_content = payload
+
+        return _extract_json_payload(raw_content)
 
     async def chat_json(
         self,
@@ -539,103 +759,63 @@ class UnifiedLocalLLMAdapter:
         acquire_gpu_slot: bool = True,
         cancel_token: CancelToken | None = None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
-        """Execute a structured JSON chat completion on LM Studio or Ollama."""
+        """Execute a structured JSON chat completion on LM Studio or Ollama (auto-starting LMS if needed)."""
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
 
+        cfg = self.get_configured_urls_and_models()
+        provider_pref = cfg["provider"]
+        configured_model = cfg["model"]
+        lms_url = cfg["lmstudio_base_url"]
+        c = self.container
+        lmstudio_cli = getattr(c, "lmstudio", None)
+        cli_enabled = bool(lmstudio_cli is not None and lmstudio_cli.cli_enabled())
+
         async with self._maybe_gpu_slot(acquire_gpu_slot, holder="analysis"):
+            if provider_pref in ("auto", "lmstudio") and cli_enabled and lmstudio_cli is not None:
+                active_llm = lmstudio_cli.active_stage_model("llm")
+                if active_llm:
+                    resolution = await self._resolve_chat_provider(
+                        lms_url=lms_url, stage_key=active_llm
+                    )
+                    return await self._execute_chat_json(
+                        resolution,
+                        system_prompt,
+                        user_prompt,
+                        json_schema=json_schema,
+                        schema_name=schema_name,
+                        temperature=temperature,
+                        cancel_token=cancel_token,
+                    )
+
+                lms_ok, lms_models = await self._probe_lmstudio(lms_url)
+                has_chat_model = lms_ok and any(not _is_embedding_model_name(m) for m in lms_models)
+                if not has_chat_model:
+                    async with lmstudio_cli.stage(
+                        model_type="llm",
+                        preferred_model=configured_model,
+                        task_log="analysis",
+                    ) as loaded_key:
+                        resolution = await self._resolve_chat_provider(
+                            lms_url=lms_url, stage_key=loaded_key
+                        )
+                        return await self._execute_chat_json(
+                            resolution,
+                            system_prompt,
+                            user_prompt,
+                            json_schema=json_schema,
+                            schema_name=schema_name,
+                            temperature=temperature,
+                            cancel_token=cancel_token,
+                        )
+
             resolution = await self.detect_provider_and_model()
-            if cancel_token is not None:
-                cancel_token.raise_if_cancelled()
-
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-
-            try:
-                if resolution.provider == "lmstudio":
-                    req_body: dict[str, Any] = {
-                        "model": resolution.model,
-                        "messages": messages,
-                        "temperature": temperature,
-                        "response_format": {
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": schema_name,
-                                "strict": True,
-                                "schema": json_schema,
-                            },
-                        },
-                    }
-                    status, payload = await self._request_json(
-                        "POST",
-                        f"{resolution.base_url}/chat/completions",
-                        req_body,
-                    )
-                    if status == 400:
-                        logger.warning(
-                            "LM Studio returned HTTP 400 for json_schema response_format; retrying with json_object."
-                        )
-                        fallback_body = dict(req_body)
-                        fallback_body["response_format"] = {"type": "json_object"}
-                        status, payload = await self._request_json(
-                            "POST",
-                            f"{resolution.base_url}/chat/completions",
-                            fallback_body,
-                        )
-                else:
-                    req_body = {
-                        "model": resolution.model,
-                        "messages": messages,
-                        "stream": False,
-                        "format": json_schema,
-                        "options": {
-                            "temperature": temperature,
-                            "num_ctx": 8192,
-                        },
-                    }
-                    status, payload = await self._request_json(
-                        "POST",
-                        f"{resolution.base_url}/api/chat",
-                        req_body,
-                    )
-            except (httpx.TimeoutException, httpx.RequestError, OSError) as exc:
-                raise LocalLLMUnavailableError(
-                    f"Local LLM request failed ({resolution.provider} at {resolution.base_url}): {exc}"
-                ) from exc
-
-            if cancel_token is not None:
-                cancel_token.raise_if_cancelled()
-
-            if status >= 500 or status == 0:
-                raise LocalLLMUnavailableError(
-                    f"Local LLM provider ({resolution.provider}) returned HTTP {status}."
-                )
-            if status >= 400:
-                detail = (
-                    payload.get("detail") or payload.get("error")
-                    if isinstance(payload, dict)
-                    else str(payload)
-                )
-                raise RuntimeError(f"LLM request failed with HTTP {status}: {detail}")
-
-            raw_content: Any = None
-            if isinstance(payload, dict):
-                choices = payload.get("choices")
-                if isinstance(choices, list) and choices:
-                    first_choice = choices[0]
-                    if isinstance(first_choice, dict):
-                        msg = first_choice.get("message")
-                        if isinstance(msg, dict) and "content" in msg:
-                            raw_content = msg["content"]
-                if raw_content is None:
-                    msg = payload.get("message")
-                    if isinstance(msg, dict) and "content" in msg:
-                        raw_content = msg["content"]
-                if raw_content is None and ("cuts" in payload or "adjustments" in payload):
-                    raw_content = payload
-            elif isinstance(payload, (list, str)):
-                raw_content = payload
-
-            return _extract_json_payload(raw_content)
+            return await self._execute_chat_json(
+                resolution,
+                system_prompt,
+                user_prompt,
+                json_schema=json_schema,
+                schema_name=schema_name,
+                temperature=temperature,
+                cancel_token=cancel_token,
+            )

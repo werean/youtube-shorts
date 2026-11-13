@@ -26,7 +26,11 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from app.application.runtime_service import ServiceContainer, get_container
+from app.application.runtime_service import (
+    OperationCancelledError,
+    ServiceContainer,
+    get_container,
+)
 from app.core.config import CUTS_RESPONSE_JSON_SCHEMA, SYSTEM_PROMPT_TEMPLATE, config
 from app.domain.analysis.lookaround import (
     DEFAULT_IOU_THRESHOLD,
@@ -564,22 +568,38 @@ async def analyze_job(
         audio_wav = c.jobs.audio_16k_path(job_id)
 
         adapter = llm_adapter or UnifiedLocalLLMAdapter(container=c)
-        cuts, raw_response = await mine_narrative_cuts(
-            blocks,
-            topics=topics,
-            chapters=chapters if isinstance(chapters, list) else None,
-            video_title=video_title,
-            video_duration_seconds=job.video_duration_seconds,
-            system_prompt=system_prompt,
-            target_cut_duration_seconds=target_duration,
-            max_suggested_cuts=max_cuts,
-            enable_boundary_lookaround=enable_lookaround,
-            words=words,
-            pcm_samples=pcm_samples,
-            rms_10ms=rms_10ms,
-            audio_wav_path=audio_wav if audio_wav.exists() else None,
-            llm_adapter=adapter,
-        )
+        configured_model = str(llm_cfg.get("model") or config.OLLAMA_MODEL).strip() or None
+        provider_pref = str(llm_cfg.get("provider") or "auto").strip().lower()
+        lmstudio = getattr(c, "lmstudio", None)
+
+        async def _run_mining() -> tuple[list[Cut], str]:
+            return await mine_narrative_cuts(
+                blocks,
+                topics=topics,
+                chapters=chapters if isinstance(chapters, list) else None,
+                video_title=video_title,
+                video_duration_seconds=job.video_duration_seconds,
+                system_prompt=system_prompt,
+                target_cut_duration_seconds=target_duration,
+                max_suggested_cuts=max_cuts,
+                enable_boundary_lookaround=enable_lookaround,
+                words=words,
+                pcm_samples=pcm_samples,
+                rms_10ms=rms_10ms,
+                audio_wav_path=audio_wav if audio_wav.exists() else None,
+                llm_adapter=adapter,
+            )
+
+        if lmstudio is not None and provider_pref in ("auto", "lmstudio") and lmstudio.cli_enabled():
+            async with lmstudio.stage(
+                model_type="llm",
+                preferred_model=configured_model,
+                job_id=job_id,
+                task_log="analysis",
+            ):
+                cuts, raw_response = await _run_mining()
+        else:
+            cuts, raw_response = await _run_mining()
 
         c.jobs.save_cuts(job_id, cuts)
         c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
@@ -597,6 +617,8 @@ async def analyze_job(
             "cuts": cuts,
             "raw_response": raw_response,
         }
+    except OperationCancelledError:
+        raise
     except Exception as exc:
         c.runtime.log_exception(
             job_id,
