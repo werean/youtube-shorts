@@ -917,3 +917,153 @@ async def test_windows_selector_loop_notimplemented_subprocess_fallbacks(
     rc = await executor._default_run_subprocess(["ffmpeg", "-version"], lines.append, token)  # noqa: SLF001
     assert rc == 0
     assert lines == ["frame=10", "frame=20"]
+
+
+def test_rms_snap_holds_post_speech_cushion_without_bleeding_next_word() -> None:
+    """Verify end snap adds a gentle post-speech breath cushion without invading the next word."""
+    import numpy as np
+
+    from app.domain.analysis.rms_snap import snap_cut_boundaries
+    from app.models.domain import WordTiming
+
+    sr = 16000
+    t = np.arange(sr * 12, dtype=np.float32) / float(sr)
+    # Speech energy in [0.5..10.0s], soft decay/breath [10.0..10.55s], next speaker at [10.60..11.5s]
+    env = np.where((t >= 0.5) & (t <= 10.0), 0.5, 0.002).astype(np.float32)
+    env[(t >= 10.60) & (t <= 11.50)] = 0.6
+    pcm = env * np.sin(2.0 * np.pi * 180.0 * t).astype(np.float32)
+
+    words_pause = [
+        WordTiming(word="Isso", start=0.50, end=1.00),
+        WordTiming(word="caso.", start=9.50, end=10.00),
+        WordTiming(word="Antes", start=10.60, end=11.00),
+    ]
+    start_p, end_p = snap_cut_boundaries(0.50, 10.00, words=words_pause, pcm_samples=pcm, sample_rate=sr)
+    assert 10.08 <= end_p <= 10.56  # Natural tail silence held, never clipped before 10.00 or into 10.60
+
+    # Tight pause: next word starts only 120ms later -> cushion must clamp safely before next word
+    words_tight = [
+        WordTiming(word="Isso", start=0.50, end=1.00),
+        WordTiming(word="caso.", start=9.50, end=10.00),
+        WordTiming(word="Antes", start=10.12, end=10.50),
+    ]
+    _, end_tight = snap_cut_boundaries(0.50, 10.00, words=words_tight, pcm_samples=pcm, sample_rate=sr)
+    assert 10.02 <= end_tight <= 10.09
+
+
+def test_semantic_blocks_split_short_signoff_before_strong_pause() -> None:
+    """Short ad signoff ('Te espero lá!') followed by >=1.5s pause must NOT glue onto the next topic."""
+    from app.domain.segmentation.semantic_blocks import group_segments_into_semantic_blocks
+    from app.models.domain import Segment
+
+    segments = [
+        Segment(segment_id="s50", start=190.50, end=193.08, text="O link está na descrição.", speaker="SPEAKER_01"),
+        Segment(segment_id="s51", start=193.28, end=193.98, text="Te espero lá!", speaker="SPEAKER_00"),
+        # 2.06s pause before next game topic
+        Segment(
+            segment_id="s52",
+            start=196.04,
+            end=203.00,
+            text="Sonic Peacopark pega a estrutura cooperativa e joga os personagens no caos.",
+            speaker="SPEAKER_00",
+        ),
+    ]
+    blocks = group_segments_into_semantic_blocks(segments)
+    assert len(blocks) >= 2
+    assert blocks[-1].text.startswith("Sonic Peacopark")
+    assert "Te espero lá!" not in blocks[-1].text
+
+
+@pytest.mark.asyncio
+async def test_lookaround_allows_inward_trim_of_new_topic_trailing_block() -> None:
+    """Phase 4B lookaround accepts inward end trimming when the trailing block opens a new topic."""
+    from app.domain.analysis.lookaround import CandidateCut, run_phase_4b_top_k_lookaround
+    from app.models.domain import SemanticBlock
+
+    blocks = [
+        SemanticBlock(block_id="b36", start=320.0, end=335.0, text="Ashes of the Singularity 2 escala exércitos."),
+        SemanticBlock(block_id="b37", start=335.2, end=350.0, text="Você comanda batalhas enormes no mapa."),
+        SemanticBlock(block_id="b38", start=350.2, end=364.0, text="Para quem curte RTS gigante, vai nessa direção."),
+        SemanticBlock(block_id="b39", start=364.5, end=380.0, text="Detective Manor coloca você numa mansão inglesa."),
+    ]
+    cand = CandidateCut(title="Ashes 2", start_block_id="b36", end_block_id="b39", score=88.0)
+
+    class _FakeLLM:
+        async def chat_json(self, *_args: Any, **_kwargs: Any) -> tuple[dict[str, Any], str]:
+            payload = {
+                "adjustments": [
+                    {
+                        "candidate_index": 0,
+                        "adjusted_start_block_id": "b36",
+                        "adjusted_end_block_id": "b38",
+                        "is_complete_story": True,
+                    }
+                ]
+            }
+            return payload, json.dumps(payload)
+
+    refined = await run_phase_4b_top_k_lookaround(
+        [cand],
+        blocks,
+        use_llm_lookaround=True,
+        llm_adapter=_FakeLLM(),  # type: ignore[arg-type]
+    )
+    assert len(refined) == 1
+    assert refined[0].start_block_id == "b36"
+    assert refined[0].end_block_id == "b38"
+    assert refined[0].block_ids == ["b36", "b37", "b38"]
+
+
+@pytest.mark.asyncio
+async def test_rendering_service_runs_cuts_concurrently_and_preserves_order(
+    tmp_path: Path,
+    container: ServiceContainer,
+) -> None:
+    """Verify RenderingService uses render_pool concurrency and pre-downscales blur filtergraphs."""
+    from app.domain.rendering.rendering_service import RenderingService
+    from app.domain.rendering.virtual_cameraman import build_virtual_cameraman_plan
+    from app.infrastructure.video.filter_script_builder import FilterScriptOptions, build_filter_complex_script_content
+    from app.infrastructure.vision.face_tracker import FrameObservation
+    from app.models.domain import Cut, JobStatus
+
+    plan = build_virtual_cameraman_plan([], vertical_mode="blur")
+    script_txt = build_filter_complex_script_content(plan, 5.0, options=FilterScriptOptions(burn_subtitles=False))
+    assert "scale=270:480" in script_txt
+    assert "boxblur=5:2" in script_txt
+
+    job = container.jobs.create_job("https://example.com/v", status=JobStatus.WAITING_APPROVAL)
+    video_file = tmp_path / "video.mp4"
+    video_file.write_bytes(b"fake_source")
+    container.jobs.update_job(job.job_id, {"source_video_path": str(video_file), "video_name": "ParallelVid"})
+    container.jobs.save_cuts(
+        job.job_id,
+        [
+            Cut(cut_id="c1", start=1.0, end=4.0, status="approved"),
+            Cut(cut_id="c2", start=6.0, end=9.0, status="approved"),
+        ],
+    )
+
+    in_flight = 0
+    max_in_flight = 0
+
+    async def _concurrent_runner(cmd: list[str], on_line: Any, cancel_token: Any) -> int:
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.04)
+            Path(cmd[-1]).write_bytes(b"mp4")
+            return 0
+        finally:
+            in_flight -= 1
+
+    service = RenderingService(container=container, subprocess_runner=_concurrent_runner)
+    urls = await service.render_job(
+        job.job_id,
+        synthetic_observations_provider=lambda s, e: [FrameObservation(0, 0.0, faces=[])],
+    )
+
+    assert max_in_flight == 2
+    assert len(urls) == 2
+    assert "00_01-00_04" in urls[0]
+    assert "00_06-00_09" in urls[1]

@@ -162,10 +162,13 @@ def build_filter_complex_script_content(
         lines.append(f"[top][bottom]vstack=inputs=2[v_base];")
 
     elif layout_mode in ("blur", "zoom"):
-        # Blurred background (1080x1920) + centered foreground
+        # Downscale background by 4x before heavy boxblur to avoid blurring 2M+ pixels/frame on CPU
+        blur_w = max(64, (tw // 4) & ~1)
+        blur_h = max(64, (th // 4) & ~1)
         lines.append(
-            f"[{v_in}]scale={tw}:{th}:force_original_aspect_ratio=increase,"
-            f"crop={tw}:{th},boxblur=20:2,setsar=1[bg];"
+            f"[{v_in}]scale={blur_w}:{blur_h}:force_original_aspect_ratio=increase,"
+            f"crop={blur_w}:{blur_h},boxblur=5:2,"
+            f"scale={tw}:{th}:flags=bilinear,setsar=1[bg];"
         )
         if layout_mode == "zoom":
             # 4:5 centered zoom over blur

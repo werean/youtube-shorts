@@ -22,8 +22,9 @@ DEFAULT_SAMPLE_RATE: int = 16000
 RMS_FRAME_MS: int = 10
 START_LOOKBACK_SEC: float = 0.350
 START_LOOKAHEAD_SEC: float = 0.050
-END_LOOKBACK_SEC: float = 0.050
-END_LOOKAHEAD_SEC: float = 0.450
+END_LOOKBACK_SEC: float = 0.0
+END_LOOKAHEAD_SEC: float = 0.500
+END_POST_SPEECH_CUSHION_SEC: float = 0.250
 
 
 def compute_rms_10ms(
@@ -176,17 +177,44 @@ def snap_cut_boundaries(
     t_end = max(t_start + 0.1, float(end_time))
 
     # 1. Word-level anchor refinement if word timings are available
+    end_lookback = END_LOOKBACK_SEC
+    end_lookahead = END_LOOKAHEAD_SEC
     if words:
         cut_words = [
-            w for w in words if float(w.start) >= t_start - 0.25 and float(w.end) <= t_end + 0.25
+            w
+            for w in words
+            if (0.5 * (float(w.start) + float(w.end)) >= t_start - 0.12)
+            and (0.5 * (float(w.start) + float(w.end)) <= t_end + 0.12)
         ]
         if cut_words:
             first_w = float(cut_words[0].start)
             last_w = float(cut_words[-1].end)
             if abs(first_w - t_start) <= 1.0:
                 t_start = first_w
+
+            # Find the earliest subsequent word after the cut's final word to avoid cutting into next speaker/topic
+            next_word_start: float | None = None
+            last_word_obj = cut_words[-1]
+            for w in words:
+                if w is last_word_obj:
+                    continue
+                ws = float(w.start)
+                if ws >= last_w - 0.02 and float(w.end) > last_w + 0.02:
+                    if next_word_start is None or ws < next_word_start:
+                        next_word_start = ws
+
             if abs(last_w - t_end) <= 1.0 and last_w > t_start:
-                t_end = last_w
+                # Hold a natural post-speech cushion (~250ms) instead of snapping shut on the final syllable,
+                # clamped safely before the next spoken word starts.
+                safe_max_end = last_w + END_LOOKAHEAD_SEC + 0.10
+                if next_word_start is not None:
+                    safe_max_end = min(safe_max_end, max(last_w + 0.04, next_word_start - 0.04))
+                desired_end = min(safe_max_end, last_w + END_POST_SPEECH_CUSHION_SEC)
+                t_end = max(last_w + 0.04, desired_end) if safe_max_end > last_w + 0.04 else safe_max_end
+                # Allow RMS snap only within [last_w + small guard .. safe_max_end] so endings stay relaxed
+                min_snap_end = min(t_end, last_w + 0.08)
+                end_lookback = max(0.0, t_end - min_snap_end)
+                end_lookahead = max(0.0, safe_max_end - t_end)
 
     # 2. If in-memory PCM or RMS arrays are provided, snap directly against them
     if pcm_samples is not None or rms_10ms is not None:
@@ -200,8 +228,8 @@ def snap_cut_boundaries(
         )
         snapped_end = snap_timestamp_to_rms_valley(
             t_end,
-            window_before_sec=END_LOOKBACK_SEC,
-            window_after_sec=END_LOOKAHEAD_SEC,
+            window_before_sec=end_lookback,
+            window_after_sec=end_lookahead,
             pcm_samples=pcm_samples,
             rms_10ms=rms_10ms,
             sample_rate=sample_rate,
@@ -230,15 +258,15 @@ def snap_cut_boundaries(
 
         end_slice = _read_wav_slice_float32(
             audio_wav_path,
-            max(0.0, t_end - END_LOOKBACK_SEC - 0.05),
-            t_end + END_LOOKAHEAD_SEC + 0.05,
+            max(0.0, t_end - end_lookback - 0.05),
+            t_end + end_lookahead + 0.05,
         )
         if end_slice is not None:
             slice_pcm, sr, offset_sec = end_slice
             rel_snapped = snap_timestamp_to_rms_valley(
                 t_end - offset_sec,
-                window_before_sec=END_LOOKBACK_SEC,
-                window_after_sec=END_LOOKAHEAD_SEC,
+                window_before_sec=end_lookback,
+                window_after_sec=end_lookahead,
                 pcm_samples=slice_pcm,
                 sample_rate=sr,
             )

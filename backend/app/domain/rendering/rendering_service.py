@@ -249,123 +249,140 @@ class RenderingService:
                 )
 
             shorts_dir = c.jobs.shorts_dir_path(job_id, create=True)
-            output_urls: list[str] = []
             total_cuts = len(selected_cuts)
+            results_by_idx: dict[int, str] = {}
+            completed_cuts = 0
+            # Bound overall cut workers cleanly here without double-acquiring `c.scheduler.render_slot()`
+            # (which `FFmpegNvencExecutor.execute_render_cut` already acquires around FFmpeg execution).
+            cut_worker_sem = asyncio.Semaphore(max(1, int(getattr(c.scheduler.render_pool, "concurrency", 2))))
 
-            for idx, cut in enumerate(selected_cuts):
-                if cancel_token.is_set():
-                    raise OperationCancelledError(job_id, "render")
+            async def _render_single_cut(idx: int, cut: Any) -> None:
+                nonlocal completed_cuts
+                async with cut_worker_sem:
+                    if cancel_token.is_set():
+                        raise OperationCancelledError(job_id, "render")
 
-                cut_start = float(cut.start)
-                cut_end = float(cut.end)
-                dur = max(0.1, cut_end - cut_start)
-                filename = build_cut_filename(cut_start, cut_end, cut.cut_id)
-                output_path = shorts_dir / filename
-                work_dir = shorts_dir / f".work_{cut.cut_id}"
-                work_dir.mkdir(parents=True, exist_ok=True)
-                ass_path = work_dir / f"{cut.cut_id}.ass"
-                script_path = work_dir / f"filter_script_{cut.cut_id}.txt"
+                    cut_start = float(cut.start)
+                    cut_end = float(cut.end)
+                    dur = max(0.1, cut_end - cut_start)
+                    filename = build_cut_filename(cut_start, cut_end, cut.cut_id)
+                    output_path = shorts_dir / filename
+                    work_dir = shorts_dir / f".work_{cut.cut_id}"
+                    work_dir.mkdir(parents=True, exist_ok=True)
+                    ass_path = work_dir / f"{cut.cut_id}.ass"
+                    script_path = work_dir / f"filter_script_{cut.cut_id}.txt"
 
-                c.runtime.append_task_log(
-                    job_id,
-                    "render",
-                    f"[rendering] Cut {cut.cut_id} {cut_start:.2f}-{cut_end:.2f}",
-                )
-                percent = float(idx) / float(total_cuts) * 100.0
-                c.runtime.publish_progress(
-                    job_id,
-                    status=JobStatus.RENDERING,
-                    task="render",
-                    percent=percent,
-                    message=f"Renderizando corte {idx + 1}/{total_cuts} ({filename})",
-                )
-
-                # A. Build timeline mapper
-                timeline_mapper = build_timeline_mapper(
-                    cut_start=cut_start,
-                    cut_end=cut_end,
-                    words=words,
-                    segments=segments,
-                    trim_internal_silence=trim_silence,
-                )
-
-                # B. Extract or synthesize frame observations
-                if synthetic_observations_provider is not None:
-                    observations = synthetic_observations_provider(cut_start, cut_end)
-                else:
-                    observations = self.vision_adapter.analyze_video_cut(
-                        video_path,
-                        cut_start,
-                        cut_end,
-                        cancel_check=cancel_token.raise_if_cancelled,
+                    c.runtime.append_task_log(
+                        job_id,
+                        "render",
+                        f"[rendering] Cut {cut.cut_id} {cut_start:.2f}-{cut_end:.2f}",
+                    )
+                    percent = float(completed_cuts) / float(total_cuts) * 100.0
+                    c.runtime.publish_progress(
+                        job_id,
+                        status=JobStatus.RENDERING,
+                        task="render",
+                        percent=percent,
+                        message=f"Renderizando corte {idx + 1}/{total_cuts} ({filename})",
                     )
 
-                # C. Non-Causal Virtual Cameraman 9:16 planning
-                cameraman_plan = build_virtual_cameraman_plan(
-                    observations,
-                    vertical_mode=vertical_mode,
-                    time_remapper=timeline_mapper.remap_relative if timeline_mapper.trim_enabled else None,
-                )
-
-                # D. Generate ASS subtitles
-                if burn_subtitles:
-                    write_ass_subtitle_file(
-                        ass_path,
-                        words,
+                    # A. Build timeline mapper
+                    timeline_mapper = build_timeline_mapper(
                         cut_start=cut_start,
                         cut_end=cut_end,
+                        words=words,
                         segments=segments,
-                        subtitle_style=subtitle_style,
-                        timeline_mapper=timeline_mapper,
                         trim_internal_silence=trim_silence,
                     )
-                    c.runtime.register_partial_file(job_id, ass_path)
 
-                # E. Write filter complex script
-                opts = FilterScriptOptions(
-                    target_width=1080,
-                    target_height=1920,
-                    normalize_audio=normalize_audio,
-                    burn_subtitles=burn_subtitles,
-                    ass_path=ass_path if burn_subtitles else None,
-                    has_audio=has_audio,
-                )
-                write_filter_complex_script_file(
-                    script_path,
-                    cameraman_plan,
-                    dur,
-                    timeline_mapper=timeline_mapper,
-                    options=opts,
-                )
-                c.runtime.register_partial_file(job_id, script_path)
+                    # B. Extract or synthesize frame observations off the asyncio event loop
+                    if synthetic_observations_provider is not None:
+                        observations = synthetic_observations_provider(cut_start, cut_end)
+                    else:
+                        observations = await asyncio.to_thread(
+                            self.vision_adapter.analyze_video_cut,
+                            video_path,
+                            cut_start,
+                            cut_end,
+                            cancel_check=cancel_token.raise_if_cancelled,
+                        )
 
-                # F. Execute FFmpeg NVENC (with transparent fallback to libx264)
-                await self.ffmpeg_executor.execute_render_cut(
-                    job_id=job_id,
-                    input_path=video_path,
-                    output_path=output_path,
-                    script_path=script_path,
-                    start_time=cut_start,
-                    duration=dur,
-                    cancel_token=cancel_token,
-                    tool_config=tool_cfg,
-                )
+                    # C. Non-Causal Virtual Cameraman 9:16 planning
+                    cameraman_plan = build_virtual_cameraman_plan(
+                        observations,
+                        vertical_mode=vertical_mode,
+                        time_remapper=timeline_mapper.remap_relative if timeline_mapper.trim_enabled else None,
+                    )
 
-                # Clean up temporary work files for this cut
-                try:
-                    c.runtime.unregister_partial_file(job_id, ass_path)
-                    c.runtime.unregister_partial_file(job_id, script_path)
-                    if ass_path.exists():
-                        ass_path.unlink(missing_ok=True)
-                    if script_path.exists():
-                        script_path.unlink(missing_ok=True)
-                    if work_dir.exists():
-                        work_dir.rmdir()
-                except OSError:
-                    pass
+                    # D. Generate ASS subtitles
+                    if burn_subtitles:
+                        write_ass_subtitle_file(
+                            ass_path,
+                            words,
+                            cut_start=cut_start,
+                            cut_end=cut_end,
+                            segments=segments,
+                            subtitle_style=subtitle_style,
+                            timeline_mapper=timeline_mapper,
+                            trim_internal_silence=trim_silence,
+                        )
+                        c.runtime.register_partial_file(job_id, ass_path)
 
-                output_url = f"/media/shorts/{job_id}/{filename}"
-                output_urls.append(output_url)
+                    # E. Write filter complex script
+                    opts = FilterScriptOptions(
+                        target_width=1080,
+                        target_height=1920,
+                        normalize_audio=normalize_audio,
+                        burn_subtitles=burn_subtitles,
+                        ass_path=ass_path if burn_subtitles else None,
+                        has_audio=has_audio,
+                    )
+                    write_filter_complex_script_file(
+                        script_path,
+                        cameraman_plan,
+                        dur,
+                        timeline_mapper=timeline_mapper,
+                        options=opts,
+                    )
+                    c.runtime.register_partial_file(job_id, script_path)
+
+                    # F. Execute FFmpeg NVENC (with transparent fallback to libx264)
+                    await self.ffmpeg_executor.execute_render_cut(
+                        job_id=job_id,
+                        input_path=video_path,
+                        output_path=output_path,
+                        script_path=script_path,
+                        start_time=cut_start,
+                        duration=dur,
+                        cancel_token=cancel_token,
+                        tool_config=tool_cfg,
+                    )
+
+                    # Clean up temporary work files for this cut
+                    try:
+                        c.runtime.unregister_partial_file(job_id, ass_path)
+                        c.runtime.unregister_partial_file(job_id, script_path)
+                        if ass_path.exists():
+                            ass_path.unlink(missing_ok=True)
+                        if script_path.exists():
+                            script_path.unlink(missing_ok=True)
+                        if work_dir.exists():
+                            work_dir.rmdir()
+                    except OSError:
+                        pass
+
+                    results_by_idx[idx] = f"/media/shorts/{job_id}/{filename}"
+                    completed_cuts += 1
+                    c.runtime.publish_progress(
+                        job_id,
+                        status=JobStatus.RENDERING,
+                        task="render",
+                        percent=min(99.0, float(completed_cuts) / float(total_cuts) * 100.0),
+                        message=f"Corte concluído {completed_cuts}/{total_cuts} ({filename})",
+                    )
+
+            await asyncio.gather(*(_render_single_cut(idx, cut) for idx, cut in enumerate(selected_cuts)))
+            output_urls = [results_by_idx[idx] for idx in range(total_cuts) if idx in results_by_idx]
 
             # 7. Check if cancelled during loop
             if cancel_token.is_set():

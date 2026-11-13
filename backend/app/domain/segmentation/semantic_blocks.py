@@ -23,6 +23,7 @@ HARD_MAX_SECONDS: float = 30.0
 EMERGENCY_MAX_SECONDS: float = 60.0
 PAUSE_THRESHOLD_SECONDS: float = 0.65
 LONG_PAUSE_THRESHOLD_SECONDS: float = 1.2
+STRONG_PAUSE_SPLIT_SECONDS: float = 1.5
 SENTENCE_BOUNDARIES: tuple[str, ...] = (".", "!", "?", "…")
 
 BLOCKING_OPENING_CONNECTIVES_PT_EN: tuple[str, ...] = (
@@ -286,6 +287,13 @@ def group_segments_into_semantic_blocks(
                 should_close = True
                 next_is_opener = True
             elif prev_is_question and current_duration >= 2.5:
+                should_close = True
+                next_is_opener = True
+            elif pause >= STRONG_PAUSE_SPLIT_SECONDS and current_duration >= 0.4:
+                # A strong >=1.5s silence gap unambiguously ends the previous utterance (e.g. ad signoff)
+                should_close = True
+                next_is_opener = True
+            elif pause >= LONG_PAUSE_THRESHOLD_SECONDS and prev_ended_sentence and current_duration >= 1.5:
                 should_close = True
                 next_is_opener = True
             elif pause >= LONG_PAUSE_THRESHOLD_SECONDS and current_duration >= TARGET_MIN_SECONDS:

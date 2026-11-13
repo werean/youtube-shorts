@@ -445,14 +445,14 @@ async def run_phase_4b_top_k_lookaround(
 
                     if adj_s_id in idx_map:
                         cand_s = idx_map[adj_s_id]
-                        if min_allowed_s <= cand_s <= cur_s and not _has_anaphoric_or_dependent_opening(
+                        if min_allowed_s <= cand_s <= min(orig_e, cur_e) and not _has_anaphoric_or_dependent_opening(
                             blocks[cand_s].text
                         ):
                             cur_s = cand_s
 
                     if adj_e_id in idx_map:
                         cand_e = idx_map[adj_e_id]
-                        if cur_e <= cand_e <= max_allowed_e:
+                        if cur_s <= cand_e <= max_allowed_e:
                             cur_e = cand_e
 
                     span, ids, s_time, e_time = expand_block_range(

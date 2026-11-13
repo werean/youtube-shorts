@@ -28,6 +28,10 @@ FLEXIBLE DURATION RULE (~90s Reference Average):
   - Fast, punchy insights or short source videos may naturally complete in 15 to 55 seconds.
   - Deep explanations or complete stories may naturally require 60 to 160 seconds to reach their real conclusion.
 
+MULTI-TOPIC / LIST COVERAGE RULE:
+- In list, news, or multi-item breakdown videos (e.g., reviews of multiple games, products, or tips), extract EVERY distinct, self-contained sub-topic/item up to the requested limit instead of omitting items mid-video.
+- Do NOT include sponsor/ad reads as cuts, and NEVER attach a trailing ad signoff phrase or the opening of the next topic onto a cut.
+
 Return ONLY valid JSON matching the schema, ordered by `score` descending (0 to 100)."""
 
 BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE = """You are auditing candidate video cuts to guarantee each cut has a self-contained beginning and a complete ending.
@@ -39,8 +43,8 @@ For each candidate cut, you are given:
 - `following_blocks`: up to 3 blocks immediately AFTER `end_block_id`
 
 Instructions:
-1. If `first_blocks` starts mid-thought, depends on a question in `preceding_blocks`, or starts with a continuation word, move `adjusted_start_block_id` backward to the exact block in `preceding_blocks` where the thought/question actually begins. Otherwise keep `start_block_id`.
-2. If `last_blocks` cuts off before the speaker finishes their conclusion and `following_blocks` finishes that exact thought, move `adjusted_end_block_id` forward to include the conclusion block. Otherwise keep `end_block_id`.
+1. If `first_blocks` starts mid-thought, depends on a question in `preceding_blocks`, or starts with a continuation word, move `adjusted_start_block_id` backward to the exact block in `preceding_blocks` where the thought/question actually begins. Conversely, if the very first block is a sponsor signoff/unrelated tail and the next block cleanly opens the topic, move `adjusted_start_block_id` forward by 1 block. Otherwise keep `start_block_id`.
+2. If `last_blocks` cuts off before the speaker finishes their conclusion and `following_blocks` finishes that exact thought, move `adjusted_end_block_id` forward to include the conclusion block. Conversely, if the final block in `last_blocks` (`end_block_id`) actually introduces a DIFFERENT topic/item, trim `adjusted_end_block_id` backward to the earlier block in `last_blocks` that concludes the current subject. Otherwise keep `end_block_id`.
 3. Set `is_complete_story` to false ONLY if the candidate cannot form a coherent thought even with the neighboring blocks.
 
 Return ONLY valid JSON matching the schema."""

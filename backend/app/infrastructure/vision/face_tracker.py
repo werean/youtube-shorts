@@ -20,7 +20,9 @@ MIN_VALID_FACE_AREA_RATIO: float = 0.015  # 1.5% of total frame area
 DEFAULT_HSV_SCENE_CUT_THRESHOLD: float = 0.40
 DEFAULT_ACTIVE_SPEAKER_WINDOW_SECONDS: float = 1.0
 DEFAULT_SPEAKER_DWELL_SECONDS: float = 2.5
-DEFAULT_SAMPLE_FPS: float = 8.0
+DEFAULT_SAMPLE_FPS: float = 5.0
+MAX_CV_ANALYSIS_WIDTH: int = 480
+MAX_HIST_ANALYSIS_WIDTH: int = 320
 
 
 @dataclass
@@ -531,26 +533,38 @@ class MediaPipeVisionAdapter:
                     self._backend_name = "opencv_haar"
 
                     def _detect_cv(bgr_frame: Any, timestamp: float, width: int, height: int) -> list[FaceBoundingBox]:
-                        gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+                        fh, fw = bgr_frame.shape[:2]
+                        if fw > MAX_CV_ANALYSIS_WIDTH:
+                            scale = float(MAX_CV_ANALYSIS_WIDTH) / float(fw)
+                            sw = max(2, int(round(fw * scale)))
+                            sh = max(2, int(round(fh * scale)))
+                            work_frame = cv2.resize(bgr_frame, (sw, sh), interpolation=cv2.INTER_AREA)
+                        else:
+                            scale = 1.0
+                            sw, sh = fw, fh
+                            work_frame = bgr_frame
+
+                        gray = cv2.cvtColor(work_frame, cv2.COLOR_BGR2GRAY)
                         rects = cascade.detectMultiScale(
                             gray,
                             scaleFactor=1.15,
                             minNeighbors=5,
-                            minSize=(int(width * 0.08), int(height * 0.08)),
+                            minSize=(max(16, int(sw * 0.08)), max(16, int(sh * 0.08))),
                         )
                         boxes: list[FaceBoundingBox] = []
                         if rects is None or len(rects) == 0:
                             return boxes
+                        inv_scale = 1.0 / scale
                         sorted_rects = sorted(rects, key=lambda r: float(r[0]))
                         for idx, (rx, ry, rw, rh) in enumerate(sorted_rects):
-                            mouth_energy = _estimate_lower_face_motion(bgr_frame, int(rx), int(ry), int(rw), int(rh))
+                            mouth_energy = _estimate_lower_face_motion(work_frame, int(rx), int(ry), int(rw), int(rh))
                             boxes.append(
                                 FaceBoundingBox(
                                     face_id=f"face_{idx}",
-                                    x=float(rx),
-                                    y=float(ry),
-                                    width=float(rw),
-                                    height=float(rh),
+                                    x=float(rx) * inv_scale,
+                                    y=float(ry) * inv_scale,
+                                    width=float(rw) * inv_scale,
+                                    height=float(rh) * inv_scale,
                                     frame_width=width,
                                     frame_height=height,
                                     confidence=0.85,
@@ -622,32 +636,51 @@ class MediaPipeVisionAdapter:
             while sample_idx < max_samples:
                 if cancel_check is not None:
                     cancel_check()
-                ok, frame = cap.read()
+                # Advance demuxer cleanly on skipped frames without decoding full 1080p BGR frames
+                if frame_counter % step_frames != 0:
+                    if not cap.grab():
+                        break
+                    frame_counter += 1
+                    continue
+
+                ok, frame = cap.retrieve()
                 if not ok or frame is None:
                     break
-                if frame_counter % step_frames == 0:
-                    rel_t = float(sample_idx) / max(1.0, self.sample_fps)
-                    if rel_t > duration + 0.05:
-                        break
-                    hist = compute_hsv_histogram_from_bgr(frame)
-                    raw_faces = detector(frame, rel_t, width, height)
-                    valid_faces = filter_false_faces(raw_faces, min_area_ratio=self.min_face_area_ratio)
-                    rms_val = 0.0
-                    if audio_rms_series is not None and len(audio_rms_series) > 0:
-                        rms_idx = min(len(audio_rms_series) - 1, max(0, int(round(rel_t * 100.0))))
-                        rms_val = float(audio_rms_series[rms_idx])
-                    observations.append(
-                        FrameObservation(
-                            frame_index=sample_idx,
-                            timestamp=rel_t,
-                            faces=valid_faces,
-                            audio_rms=rms_val,
-                            hsv_histogram=hist,
-                            frame_width=width,
-                            frame_height=height,
-                        )
+
+                rel_t = float(sample_idx) / max(1.0, self.sample_fps)
+                if rel_t > duration + 0.05:
+                    break
+
+                fh, fw = frame.shape[:2]
+                if fw > MAX_HIST_ANALYSIS_WIDTH:
+                    h_scale = float(MAX_HIST_ANALYSIS_WIDTH) / float(fw)
+                    hist_frame = cv2.resize(
+                        frame,
+                        (MAX_HIST_ANALYSIS_WIDTH, max(2, int(round(fh * h_scale)))),
+                        interpolation=cv2.INTER_AREA,
                     )
-                    sample_idx += 1
+                else:
+                    hist_frame = frame
+
+                hist = compute_hsv_histogram_from_bgr(hist_frame)
+                raw_faces = detector(frame, rel_t, width, height)
+                valid_faces = filter_false_faces(raw_faces, min_area_ratio=self.min_face_area_ratio)
+                rms_val = 0.0
+                if audio_rms_series is not None and len(audio_rms_series) > 0:
+                    rms_idx = min(len(audio_rms_series) - 1, max(0, int(round(rel_t * 100.0))))
+                    rms_val = float(audio_rms_series[rms_idx])
+                observations.append(
+                    FrameObservation(
+                        frame_index=sample_idx,
+                        timestamp=rel_t,
+                        faces=valid_faces,
+                        audio_rms=rms_val,
+                        hsv_histogram=hist,
+                        frame_width=width,
+                        frame_height=height,
+                    )
+                )
+                sample_idx += 1
                 frame_counter += 1
 
             return _assign_consistent_face_track_ids(observations)
