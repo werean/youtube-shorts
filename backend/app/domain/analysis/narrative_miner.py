@@ -512,64 +512,103 @@ async def analyze_job(
         )
 
     c.jobs.update_job_status(job_id, JobStatus.ANALYZING)
+    c.runtime.log_stage_start(
+        job_id,
+        "analysis",
+        message="[analysis] Executando mineração de arco narrativo em 3 fases...",
+    )
     c.runtime.publish_state_change(
         job_id,
         status=JobStatus.ANALYZING.value,
         message="[analysis] Executando mineração de arco narrativo em 3 fases...",
     )
 
-    tool_cfgs = c.load_active_tool_configs()
-    llm_cfg = dict(tool_cfgs.get("llm") or {})
+    try:
+        tool_cfgs = c.load_active_tool_configs()
+        llm_cfg = dict(tool_cfgs.get("llm") or {})
 
-    system_prompt = str(llm_cfg.get("system_prompt") or SYSTEM_PROMPT_TEMPLATE)
-    target_duration = int(
-        llm_cfg.get("target_cut_duration_seconds") or config.TARGET_CUT_DURATION_SECONDS
-    )
-    max_cuts = int(llm_cfg.get("max_suggested_cuts") or config.MAX_SUGGESTED_CUTS)
-    enable_lookaround = bool(
-        llm_cfg.get("enable_boundary_lookaround", config.ENABLE_BOUNDARY_LOOKAROUND)
-    )
+        raw_system_prompt = str(llm_cfg.get("system_prompt") or "").strip()
+        lower_prompt = raw_system_prompt.lower()
+        if (
+            not raw_system_prompt
+            or "never include score" in lower_prompt
+            or "return json array only" in lower_prompt
+        ):
+            if raw_system_prompt:
+                c.runtime.log_warning(
+                    job_id,
+                    "analysis",
+                    "Prompt legado incompatível com CUTS_RESPONSE_JSON_SCHEMA detectado em settings; usando SYSTEM_PROMPT_TEMPLATE canônico.",
+                )
+            system_prompt = SYSTEM_PROMPT_TEMPLATE
+        else:
+            system_prompt = raw_system_prompt
 
-    source_info = c.jobs.load_source_info(job_id) or {}
-    chapters = source_info.get("chapters") if isinstance(source_info, dict) else None
-    video_title = (
-        str(source_info.get("title") or job.video_name or "").strip()
-        if isinstance(source_info, dict)
-        else (job.video_name or "")
-    )
+        target_duration = int(
+            llm_cfg.get("target_cut_duration_seconds") or config.TARGET_CUT_DURATION_SECONDS
+        )
+        max_cuts = int(llm_cfg.get("max_suggested_cuts") or config.MAX_SUGGESTED_CUTS)
+        enable_lookaround = bool(
+            llm_cfg.get("enable_boundary_lookaround", config.ENABLE_BOUNDARY_LOOKAROUND)
+        )
 
-    words = c.jobs.load_transcription_words(job_id)
-    audio_wav = c.jobs.audio_16k_path(job_id)
+        source_info = c.jobs.load_source_info(job_id) or {}
+        chapters = source_info.get("chapters") if isinstance(source_info, dict) else None
+        video_title = (
+            str(source_info.get("title") or job.video_name or "").strip()
+            if isinstance(source_info, dict)
+            else (job.video_name or "")
+        )
 
-    adapter = llm_adapter or UnifiedLocalLLMAdapter(container=c)
-    cuts, raw_response = await mine_narrative_cuts(
-        blocks,
-        topics=topics,
-        chapters=chapters if isinstance(chapters, list) else None,
-        video_title=video_title,
-        video_duration_seconds=job.video_duration_seconds,
-        system_prompt=system_prompt,
-        target_cut_duration_seconds=target_duration,
-        max_suggested_cuts=max_cuts,
-        enable_boundary_lookaround=enable_lookaround,
-        words=words,
-        pcm_samples=pcm_samples,
-        rms_10ms=rms_10ms,
-        audio_wav_path=audio_wav if audio_wav.exists() else None,
-        llm_adapter=adapter,
-    )
+        words = c.jobs.load_transcription_words(job_id)
+        audio_wav = c.jobs.audio_16k_path(job_id)
 
-    c.jobs.save_cuts(job_id, cuts)
-    c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
-    c.runtime.publish_state_change(
-        job_id,
-        status=JobStatus.WAITING_APPROVAL.value,
-        message=f"[analysis] {len(cuts)} corte(s) sugerido(s) com arco narrativo completo.",
-    )
-    return {
-        "cuts": cuts,
-        "raw_response": raw_response,
-    }
+        adapter = llm_adapter or UnifiedLocalLLMAdapter(container=c)
+        cuts, raw_response = await mine_narrative_cuts(
+            blocks,
+            topics=topics,
+            chapters=chapters if isinstance(chapters, list) else None,
+            video_title=video_title,
+            video_duration_seconds=job.video_duration_seconds,
+            system_prompt=system_prompt,
+            target_cut_duration_seconds=target_duration,
+            max_suggested_cuts=max_cuts,
+            enable_boundary_lookaround=enable_lookaround,
+            words=words,
+            pcm_samples=pcm_samples,
+            rms_10ms=rms_10ms,
+            audio_wav_path=audio_wav if audio_wav.exists() else None,
+            llm_adapter=adapter,
+        )
+
+        c.jobs.save_cuts(job_id, cuts)
+        c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
+        c.runtime.log_stage_end(
+            job_id,
+            "analysis",
+            message=f"[analysis] {len(cuts)} corte(s) sugerido(s) com arco narrativo completo.",
+        )
+        c.runtime.publish_state_change(
+            job_id,
+            status=JobStatus.WAITING_APPROVAL.value,
+            message=f"[analysis] {len(cuts)} corte(s) sugerido(s) com arco narrativo completo.",
+        )
+        return {
+            "cuts": cuts,
+            "raw_response": raw_response,
+        }
+    except Exception as exc:
+        c.runtime.log_exception(
+            job_id,
+            "analysis",
+            exc,
+            message="[analysis] Erro durante mineração de cortes",
+        )
+        c.jobs.update_job_status(job_id, JobStatus.ERROR)
+        c.runtime.publish_state_change(
+            job_id, JobStatus.ERROR.value, f"[analysis] {exc}"
+        )
+        raise
 
 
 # --- Cut Curation Operations (`/jobs/:id/cuts*`) ---

@@ -106,3 +106,46 @@ def archived_dir() -> Path:
 
 def archived_job_dir(job_id: str) -> Path:
     return archived_dir() / job_id
+
+
+def _sanitize_log_segment(value: str, fallback: str = "_unknown") -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in (value or "").strip())
+    cleaned = cleaned.strip("._")
+    return cleaned or fallback
+
+
+def logs_dir() -> Path:
+    """Return `{media.base_dir}/logs` resolved dynamically via load_settings()."""
+    from app.core.settings import load_settings
+
+    base = Path(load_settings().media.base_dir)
+    return base / "logs"
+
+
+def ensure_logs_dir() -> Path:
+    d = logs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def backend_log_path() -> Path:
+    return logs_dir() / "backend.log"
+
+
+def job_logs_dir(job_id: str) -> Path:
+    return logs_dir() / _sanitize_log_segment(job_id, "_global")
+
+
+def ensure_job_logs_dir(job_id: str) -> Path:
+    d = job_logs_dir(job_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def job_pipeline_log_path(job_id: str) -> Path:
+    return job_logs_dir(job_id) / "pipeline.log"
+
+
+def job_stage_log_path(job_id: str, stage: str) -> Path:
+    safe_stage = _sanitize_log_segment(stage, "general")
+    return job_logs_dir(job_id) / f"{safe_stage}.log"

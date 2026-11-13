@@ -6,6 +6,8 @@ Exposes the clean public callable interface for Wave 2 router and Wave 3 orchest
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -39,6 +41,44 @@ from app.infrastructure.vision.face_tracker import (
     MediaPipeVisionAdapter,
 )
 from app.models.domain import Cut, Job, JobStatus, Segment, WordTiming
+
+
+def _probe_video_has_audio(video_path: Path) -> bool:
+    """Detect whether a real video file contains at least one audio stream via ffprobe."""
+    try:
+        if not video_path.exists() or video_path.stat().st_size <= 4096:
+            return True
+    except OSError:
+        return True
+
+    ffprobe_bin = shutil.which("ffprobe")
+    if not ffprobe_bin:
+        return True
+
+    try:
+        proc = subprocess.run(
+            [
+                ffprobe_bin,
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return bool(proc.stdout.strip())
+    except Exception:
+        pass
+    return True
 
 
 def format_timestamp_for_filename(seconds: float) -> str:
@@ -200,6 +240,13 @@ class RenderingService:
             # 6. Load transcription words and segments
             words = c.jobs.load_transcription_words(job_id)
             segments = c.jobs.load_transcription_segments(job_id)
+            has_audio = _probe_video_has_audio(video_path)
+            if not has_audio:
+                c.runtime.log_warning(
+                    job_id,
+                    "render",
+                    f"Source media {video_path.name} has no audio stream; synthesizing silent stereo track.",
+                )
 
             shorts_dir = c.jobs.shorts_dir_path(job_id, create=True)
             output_urls: list[str] = []
@@ -281,6 +328,7 @@ class RenderingService:
                     normalize_audio=normalize_audio,
                     burn_subtitles=burn_subtitles,
                     ass_path=ass_path if burn_subtitles else None,
+                    has_audio=has_audio,
                 )
                 write_filter_complex_script_file(
                     script_path,
@@ -351,7 +399,12 @@ class RenderingService:
                 c.jobs.update_job_status(job_id, JobStatus.DOWNLOADED)
                 c.runtime.append_task_log(job_id, "render", "[rendering] Cancel acknowledged")
                 return []
-            c.runtime.append_task_log(job_id, "render", f"[rendering] ✗ Error: {exc}")
+            c.runtime.log_exception(
+                job_id,
+                "render",
+                exc,
+                message=f"[rendering] ✗ Error: {exc}",
+            )
             try:
                 c.jobs.update_job_status(job_id, JobStatus.ERROR)
             except Exception:

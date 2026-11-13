@@ -21,6 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cuda = [
+  "nvidia-cublas-cu12>=12.1",
+  "nvidia-cudnn-cu12>=9.0",
+  "nvidia-cuda-runtime-cu12>=12.1",
+]
 vision = [
   "mediapipe>=0.10.14",
 ]

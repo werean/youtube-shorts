@@ -13,12 +13,15 @@ Features:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Literal, Sequence
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.application.runtime_service import CancelToken, ServiceContainer, get_container
 from app.core.config import CUTS_RESPONSE_JSON_SCHEMA, config
@@ -336,7 +339,7 @@ class UnifiedLocalLLMAdapter:
 
         if provider_pref == "lmstudio":
             lms_ok, lms_models = await self._probe_lmstudio(lms_url)
-            if lms_ok:
+            if lms_ok and lms_models:
                 resolved = ProviderResolution(
                     provider="lmstudio",
                     base_url=lms_url,
@@ -345,6 +348,11 @@ class UnifiedLocalLLMAdapter:
                 )
                 self.last_resolution = resolved
                 return resolved
+            if lms_ok and not lms_models:
+                logger.warning(
+                    "LM Studio at %s is online but has no loaded model; probing Ollama fallback.",
+                    lms_url,
+                )
             ollama_ok, ollama_models = await self._probe_ollama(ollama_url)
             if ollama_ok:
                 resolved = ProviderResolution(
@@ -355,6 +363,10 @@ class UnifiedLocalLLMAdapter:
                 )
                 self.last_resolution = resolved
                 return resolved
+            if lms_ok and not lms_models:
+                raise LocalLLMUnavailableError(
+                    f"LM Studio is reachable at {lms_url} but has no loaded model, and Ollama is offline."
+                )
             raise LocalLLMUnavailableError()
 
         if provider_pref == "ollama":
@@ -369,7 +381,7 @@ class UnifiedLocalLLMAdapter:
                 self.last_resolution = resolved
                 return resolved
             lms_ok, lms_models = await self._probe_lmstudio(lms_url)
-            if lms_ok:
+            if lms_ok and lms_models:
                 resolved = ProviderResolution(
                     provider="lmstudio",
                     base_url=lms_url,
@@ -403,15 +415,10 @@ class UnifiedLocalLLMAdapter:
             self.last_resolution = resolved
             return resolved
 
-        if lms_ok:
-            resolved = ProviderResolution(
-                provider="lmstudio",
-                base_url=lms_url,
-                model=configured_model,
-                online=True,
+        if lms_ok and not lms_models:
+            raise LocalLLMUnavailableError(
+                f"LM Studio is reachable at {lms_url} with no model loaded, and Ollama is unavailable."
             )
-            self.last_resolution = resolved
-            return resolved
 
         raise LocalLLMUnavailableError()
 
@@ -459,17 +466,39 @@ class UnifiedLocalLLMAdapter:
                         single = payload.get("embedding")
                         if isinstance(single, list) and len(clean_texts) == 1:
                             return [[float(x) for x in single]]
-                except Exception:
-                    pass
+                    else:
+                        logger.warning(
+                            "Ollama embedding request returned HTTP %s for model=%s",
+                            status,
+                            emb_model,
+                        )
+                except Exception as exc:
+                    logger.warning("Ollama embedding request failed (%s): %s", emb_model, exc)
 
-            # Try LM Studio /v1/embeddings
+            # Try LM Studio /v1/embeddings (match loaded embedding model id if available)
             if provider_pref in ("auto", "lmstudio", "ollama"):
                 try:
+                    lms_emb_model = emb_model
+                    lms_ok, lms_models = await self._probe_lmstudio(lms_url)
+                    if lms_ok and lms_models:
+                        emb_candidates = [m for m in lms_models if _is_embedding_model_name(m)]
+                        if emb_candidates:
+                            emb_norm = re.sub(r"[^a-z0-9]+", "-", emb_model.lower()).strip("-")
+                            matched = next(
+                                (
+                                    m
+                                    for m in emb_candidates
+                                    if m.lower() == emb_model.lower()
+                                    or (emb_norm and emb_norm in re.sub(r"[^a-z0-9]+", "-", m.lower()).strip("-"))
+                                ),
+                                emb_candidates[0],
+                            )
+                            lms_emb_model = matched
                     status, payload = await self._request_json(
                         "POST",
                         f"{lms_url}/embeddings",
                         {
-                            "model": emb_model,
+                            "model": lms_emb_model,
                             "input": clean_texts,
                         },
                         timeout=30.0,
@@ -482,8 +511,14 @@ class UnifiedLocalLLMAdapter:
                                 for item in data
                                 if isinstance(item, dict)
                             ]
-                except Exception:
-                    pass
+                    else:
+                        logger.warning(
+                            "LM Studio embedding request returned HTTP %s for model=%s",
+                            status,
+                            lms_emb_model,
+                        )
+                except Exception as exc:
+                    logger.warning("LM Studio embedding request failed (%s): %s", emb_model, exc)
 
         return []
 
@@ -518,41 +553,57 @@ class UnifiedLocalLLMAdapter:
                 {"role": "user", "content": user_prompt},
             ]
 
-            if resolution.provider == "lmstudio":
-                req_body: dict[str, Any] = {
-                    "model": resolution.model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": schema_name,
-                            "strict": True,
-                            "schema": json_schema,
-                        },
-                    },
-                }
-                status, payload = await self._request_json(
-                    "POST",
-                    f"{resolution.base_url}/chat/completions",
-                    req_body,
-                )
-            else:
-                req_body = {
-                    "model": resolution.model,
-                    "messages": messages,
-                    "stream": False,
-                    "format": json_schema,
-                    "options": {
+            try:
+                if resolution.provider == "lmstudio":
+                    req_body: dict[str, Any] = {
+                        "model": resolution.model,
+                        "messages": messages,
                         "temperature": temperature,
-                        "num_ctx": 8192,
-                    },
-                }
-                status, payload = await self._request_json(
-                    "POST",
-                    f"{resolution.base_url}/api/chat",
-                    req_body,
-                )
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": schema_name,
+                                "strict": True,
+                                "schema": json_schema,
+                            },
+                        },
+                    }
+                    status, payload = await self._request_json(
+                        "POST",
+                        f"{resolution.base_url}/chat/completions",
+                        req_body,
+                    )
+                    if status == 400:
+                        logger.warning(
+                            "LM Studio returned HTTP 400 for json_schema response_format; retrying with json_object."
+                        )
+                        fallback_body = dict(req_body)
+                        fallback_body["response_format"] = {"type": "json_object"}
+                        status, payload = await self._request_json(
+                            "POST",
+                            f"{resolution.base_url}/chat/completions",
+                            fallback_body,
+                        )
+                else:
+                    req_body = {
+                        "model": resolution.model,
+                        "messages": messages,
+                        "stream": False,
+                        "format": json_schema,
+                        "options": {
+                            "temperature": temperature,
+                            "num_ctx": 8192,
+                        },
+                    }
+                    status, payload = await self._request_json(
+                        "POST",
+                        f"{resolution.base_url}/api/chat",
+                        req_body,
+                    )
+            except (httpx.TimeoutException, httpx.RequestError, OSError) as exc:
+                raise LocalLLMUnavailableError(
+                    f"Local LLM request failed ({resolution.provider} at {resolution.base_url}): {exc}"
+                ) from exc
 
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()

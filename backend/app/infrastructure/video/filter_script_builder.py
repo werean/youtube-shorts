@@ -87,6 +87,7 @@ class FilterScriptOptions:
     audio_fade_in_seconds: float = 0.03
     audio_fade_out_seconds: float = 0.05
     target_lufs: float = -14.0
+    has_audio: bool = True
 
 
 def build_filter_complex_script_content(
@@ -106,24 +107,26 @@ def build_filter_complex_script_content(
     v_in = "0:v"
     a_in = "0:a"
 
-    if timeline_mapper is not None and timeline_mapper.trim_enabled and len(timeline_mapper.intervals) > 1:
+    if timeline_mapper is not None and timeline_mapper.trim_enabled and len(timeline_mapper.intervals) >= 1:
         v_segs: list[str] = []
         a_segs: list[str] = []
         for idx, iv in enumerate(timeline_mapper.intervals):
             lines.append(
                 f"[0:v]trim=start={iv.rel_start:.3f}:end={iv.rel_end:.3f},setpts=PTS-STARTPTS[vt{idx}];"
             )
-            lines.append(
-                f"[0:a]atrim=start={iv.rel_start:.3f}:end={iv.rel_end:.3f},asetpts=PTS-STARTPTS[at{idx}];"
-            )
             v_segs.append(f"[vt{idx}]")
-            a_segs.append(f"[at{idx}]")
+            if opts.has_audio:
+                lines.append(
+                    f"[0:a]atrim=start={iv.rel_start:.3f}:end={iv.rel_end:.3f},asetpts=PTS-STARTPTS[at{idx}];"
+                )
+                a_segs.append(f"[at{idx}]")
 
         concat_n = len(timeline_mapper.intervals)
         lines.append(f"{''.join(v_segs)}concat=n={concat_n}:v=1:a=0[v_trimmed];")
-        lines.append(f"{''.join(a_segs)}concat=n={concat_n}:v=0:a=1[a_trimmed];")
         v_in = "v_trimmed"
-        a_in = "a_trimmed"
+        if opts.has_audio:
+            lines.append(f"{''.join(a_segs)}concat=n={concat_n}:v=0:a=1[a_trimmed];")
+            a_in = "a_trimmed"
         dur = timeline_mapper.compacted_duration
 
     # Video processing by layout mode
@@ -131,19 +134,22 @@ def build_filter_complex_script_content(
 
     if layout_mode == "split_screen":
         # 50% Top (speaker 1) + 50% Bottom (speaker 2), stacked vertically
-        split_crop_w = min(plan.source_width, int(round(plan.source_height * 9.0 / 8.0)))
+        # Match virtual_cameraman.py (`min(source_width, 960)`) so crop width never overflows 16:9 width
+        split_crop_w = min(plan.source_width, 960)
         if split_crop_w % 2 != 0:
             split_crop_w -= 1
         half_h = th // 2  # 960
+        max_split_x = float(max(0, plan.source_width - split_crop_w))
 
-        # Left / right crop centers
+        # Left / right crop offsets clamped to [0, source_width - split_crop_w]
         left_kfs = [k for k in plan.keyframes if k.mode == "split_screen"]
-        left_x = left_kfs[0].x if left_kfs else 0.0
-        right_x = (
+        left_x = min(max(0.0, left_kfs[0].x if left_kfs else 0.0), max_split_x)
+        raw_right_x = (
             left_kfs[0].secondary_x
             if (left_kfs and left_kfs[0].secondary_x is not None)
-            else float(plan.source_width - split_crop_w)
+            else max_split_x
         )
+        right_x = min(max(0.0, float(raw_right_x)), max_split_x)
 
         lines.append(
             f"[{v_in}]crop={split_crop_w}:{plan.source_height}:{left_x:.1f}:0,"
@@ -180,7 +186,7 @@ def build_filter_complex_script_content(
             default_x=float(max(0, plan.source_width - plan.crop_width)) * 0.5,
         )
         lines.append(
-            f"[{v_in}]crop={plan.crop_width}:{plan.crop_height}:{crop_expr}:0,"
+            f"[{v_in}]crop={plan.crop_width}:{plan.crop_height}:'{crop_expr}':0,"
             f"scale={tw}:{th},setsar=1[v_base];"
         )
 
@@ -193,20 +199,23 @@ def build_filter_complex_script_content(
 
     lines.append(f"[{v_current}]format=yuv420p[v_out];")
 
-    # Audio mastering: fades + loudnorm
-    a_filters: list[str] = []
-    if opts.audio_fade_in_seconds > 0:
-        a_filters.append(f"afade=t=in:st=0:d={opts.audio_fade_in_seconds:.3f}")
-    if opts.audio_fade_out_seconds > 0:
-        fade_out_start = max(0.0, dur - opts.audio_fade_out_seconds)
-        a_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={opts.audio_fade_out_seconds:.3f}")
-    if opts.normalize_audio:
-        a_filters.append(f"loudnorm=I={opts.target_lufs:.1f}:TP=-1.5:LRA=11")
-
-    if a_filters:
-        lines.append(f"[{a_in}]{','.join(a_filters)}[a_out]")
+    # Audio mastering: fades + loudnorm (or silent stream fallback when input has no audio)
+    if not opts.has_audio:
+        lines.append(f"anullsrc=channel_layout=stereo:sample_rate=44100:d={dur:.3f}[a_out]")
     else:
-        lines.append(f"[{a_in}]anull[a_out]")
+        a_filters: list[str] = []
+        if opts.audio_fade_in_seconds > 0:
+            a_filters.append(f"afade=t=in:st=0:d={opts.audio_fade_in_seconds:.3f}")
+        if opts.audio_fade_out_seconds > 0:
+            fade_out_start = max(0.0, dur - opts.audio_fade_out_seconds)
+            a_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={opts.audio_fade_out_seconds:.3f}")
+        if opts.normalize_audio:
+            a_filters.append(f"loudnorm=I={opts.target_lufs:.1f}:TP=-1.5:LRA=11")
+
+        if a_filters:
+            lines.append(f"[{a_in}]{','.join(a_filters)}[a_out]")
+        else:
+            lines.append(f"[{a_in}]anull[a_out]")
 
     return "\n".join(lines) + "\n"
 

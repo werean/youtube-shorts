@@ -465,13 +465,11 @@ class IngestDomainService:
                     "status": JobStatus.DOWNLOADED.value,
                 }
         except Exception as exc:
-            c.runtime.append_task_logs(
+            c.runtime.log_exception(
                 job_id,
                 "ingest",
-                [
-                    "[ingest] CRITICAL ERROR",
-                    f"[ingest] {exc}",
-                ],
+                exc,
+                message="[ingest] CRITICAL ERROR",
             )
             c.jobs.update_job_status(job_id, JobStatus.ERROR)
             c.runtime.publish_state_change(job_id, JobStatus.ERROR.value, f"[ingest] {exc}")
@@ -501,47 +499,79 @@ class IngestDomainService:
         if isinstance(content, (bytes, bytearray, memoryview)):
             video_path.write_bytes(bytes(content))
         elif hasattr(content, "read"):
-            data = content.read()
-            if inspect.isawaitable(data):
-                data = await data
-            video_path.write_bytes(bytes(data))
+            try:
+                sig = inspect.signature(content.read)
+                accepts_size = len(sig.parameters) > 0
+            except (TypeError, ValueError):
+                accepts_size = False
+
+            if accepts_size:
+                with video_path.open("wb") as out_fh:
+                    while True:
+                        chunk = content.read(1024 * 1024)
+                        if inspect.isawaitable(chunk):
+                            chunk = await chunk
+                        if not chunk:
+                            break
+                        out_fh.write(bytes(chunk))
+            else:
+                data = content.read()
+                if inspect.isawaitable(data):
+                    data = await data
+                video_path.write_bytes(bytes(data))
         else:
             raise ValueError("Unsupported upload content stream")
 
-        async with c.scheduler.io_slot():
-            probed_duration = await self._probe_duration(video_path)
-            duration_sec = round(float(probed_duration), 3) if probed_duration and probed_duration > 0 else 0.0
+        job_created = False
+        try:
+            async with c.scheduler.io_slot():
+                probed_duration = await self._probe_duration(video_path)
+                duration_sec = round(float(probed_duration), 3) if probed_duration and probed_duration > 0 else 0.0
 
-            job = c.jobs.create_job(
-                f"[Local Upload] {clean_filename}",
-                status=JobStatus.DOWNLOADED,
-                job_id=job_id,
-                source_video_path=str(video_path),
-                source_file_name=clean_filename,
-                video_name=video_name,
-                video_duration_seconds=duration_sec,
-            )
-            c.jobs.set_cached_source_video(job_id, video_path)
+                job = c.jobs.create_job(
+                    f"[Local Upload] {clean_filename}",
+                    status=JobStatus.DOWNLOADED,
+                    job_id=job_id,
+                    source_video_path=str(video_path),
+                    source_file_name=clean_filename,
+                    video_name=video_name,
+                    video_duration_seconds=duration_sec,
+                )
+                job_created = True
+                c.jobs.set_cached_source_video(job_id, video_path)
 
-            # Save source.info.json for local upload consistency
-            c.jobs.save_source_info(
-                job_id,
-                {
-                    "id": job_id,
-                    "title": video_name,
-                    "duration": duration_sec,
-                    "webpage_url": job.youtube_url,
-                    "chapters": [],
-                },
-            )
+                # Save source.info.json for local upload consistency
+                c.jobs.save_source_info(
+                    job_id,
+                    {
+                        "id": job_id,
+                        "title": video_name,
+                        "duration": duration_sec,
+                        "webpage_url": job.youtube_url,
+                        "chapters": [],
+                    },
+                )
 
-            # Extract 16kHz PCM WAV in {video_dir}/transcrições/audio_16k.wav
-            wav_target = c.jobs.audio_16k_path(job_id)
-            await self._extract_audio_16k(
-                video_path,
-                wav_target,
-                duration_hint=duration_sec if duration_sec > 0 else 1.0,
-            )
+                # Extract 16kHz PCM WAV in {video_dir}/transcrições/audio_16k.wav
+                wav_target = c.jobs.audio_16k_path(job_id)
+                await self._extract_audio_16k(
+                    video_path,
+                    wav_target,
+                    duration_hint=duration_sec if duration_sec > 0 else 1.0,
+                )
+        except Exception as exc:
+            if job_created:
+                c.runtime.log_exception(
+                    job_id,
+                    "ingest",
+                    exc,
+                    message=f"[ingest] Local upload post-processing failed for {clean_filename}",
+                )
+                c.jobs.update_job_status(job_id, JobStatus.ERROR)
+                c.runtime.publish_state_change(
+                    job_id, JobStatus.ERROR.value, f"[ingest] Local upload failed: {exc}"
+                )
+            raise
 
         c.runtime.publish_state_change(
             job_id, JobStatus.DOWNLOADED.value, f"[ingest] Local upload saved: {clean_filename}"

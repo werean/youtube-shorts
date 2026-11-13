@@ -12,8 +12,10 @@ Supports:
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Sequence
 
@@ -25,6 +27,31 @@ from app.application.runtime_service import (
 )
 
 SubprocessRunner = Callable[[list[str], Callable[[str], None] | None, CancelToken | None], Awaitable[int]]
+
+
+@functools.lru_cache(maxsize=1)
+def resolve_filter_complex_script_flag() -> str:
+    """Detect whether installed FFmpeg uses `-/filter_complex` (FFmpeg 8/9+) or `-filter_complex_script`."""
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return "-filter_complex_script"
+    try:
+        proc = subprocess.run(
+            [ffmpeg_bin, "-h", "long"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        help_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        if "-filter_complex_script" in help_text:
+            return "-filter_complex_script"
+        # FFmpeg 8/9 removed `-filter_complex_script` in favor of `-/option` file syntax (`-/filter_complex`)
+        if "-filter_complex" in help_text:
+            return "-/filter_complex"
+    except Exception:
+        pass
+    return "-filter_complex_script"
 
 
 def build_ffmpeg_nvenc_command(
@@ -52,7 +79,7 @@ def build_ffmpeg_nvenc_command(
         str(input_path),
         "-t",
         f"{float(duration):.3f}",
-        "-filter_complex_script",
+        resolve_filter_complex_script_flag(),
         str(script_path),
         "-map",
         "[v_out]",
@@ -100,7 +127,7 @@ def build_ffmpeg_cpu_fallback_command(
         str(input_path),
         "-t",
         f"{float(duration):.3f}",
-        "-filter_complex_script",
+        resolve_filter_complex_script_flag(),
         str(script_path),
         "-map",
         "[v_out]",
@@ -229,6 +256,12 @@ class FFmpegNvencExecutor:
                 if output_path.exists():
                     output_path.unlink(missing_ok=True)
 
+                cpu_logs: list[str] = []
+
+                def _cpu_log_capture(line: str) -> None:
+                    cpu_logs.append(line)
+                    _log(line)
+
                 fallback_cmd = build_ffmpeg_cpu_fallback_command(
                     input_path=input_path,
                     output_path=output_path,
@@ -236,14 +269,16 @@ class FFmpegNvencExecutor:
                     start_time=start_time,
                     duration=duration,
                 )
-                retcode = await runner(fallback_cmd, _log, token)
+                retcode = await runner(fallback_cmd, _cpu_log_capture, token)
                 if token and token.is_set():
                     self.container.runtime.cleanup_partial_files(job_id)
                     raise OperationCancelledError(job_id, "render")
 
                 if retcode != 0:
                     self.container.runtime.cleanup_partial_files(job_id)
-                    raise RuntimeError(f"FFmpeg CPU render failed with exit code {retcode}")
+                    tail = " | ".join(cpu_logs[-5:]) if cpu_logs else ""
+                    detail = f" ({tail})" if tail else ""
+                    raise RuntimeError(f"FFmpeg CPU render failed with exit code {retcode}{detail}")
 
             self.container.runtime.unregister_partial_file(job_id, output_path)
             _log(
@@ -257,16 +292,19 @@ class FFmpegNvencExecutor:
         on_line: Callable[[str], None] | None,
         cancel_token: CancelToken | None,
     ) -> int:
-        """Run FFmpeg child process asynchronously line-by-line."""
+        """Run FFmpeg child process asynchronously line-by-line (with Windows SelectorEventLoop fallback)."""
         if cancel_token and cancel_token.is_set():
             return -1
 
-        proc = await asyncio.create_subprocess_exec(
-            command[0],
-            *command[1:],
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                command[0],
+                *command[1:],
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except NotImplementedError:
+            return await self._run_subprocess_threaded(command, on_line, cancel_token)
 
         pid = proc.pid
         job_id = cancel_token.job_id if cancel_token else "default"
@@ -294,3 +332,40 @@ class FFmpegNvencExecutor:
             raise
         finally:
             self.container.runtime.unregister_process(job_id, "render", pid)
+
+    async def _run_subprocess_threaded(
+        self,
+        command: list[str],
+        on_line: Callable[[str], None] | None,
+        cancel_token: CancelToken | None,
+    ) -> int:
+        """Fallback runner for Windows SelectorEventLoop where create_subprocess_exec raises NotImplementedError."""
+        loop = asyncio.get_running_loop()
+        job_id = cancel_token.job_id if cancel_token else "default"
+
+        def _worker() -> int:
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            pid = proc.pid
+            self.container.runtime.register_process(job_id, "render", pid)
+            try:
+                if proc.stdout is not None:
+                    for raw_line in proc.stdout:
+                        if cancel_token and cancel_token.is_set():
+                            self.container.runtime.kill_process_tree(pid)
+                            break
+                        line = raw_line.strip()
+                        if line and on_line:
+                            loop.call_soon_threadsafe(on_line, line)
+                return proc.wait()
+            finally:
+                self.container.runtime.unregister_process(job_id, "render", pid)
+
+        return await asyncio.to_thread(_worker)

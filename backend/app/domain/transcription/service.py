@@ -332,84 +332,90 @@ class FasterWhisperAdapter:
             return self.model_factory
         if _custom_whisper_model_factory is not None:
             return _custom_whisper_model_factory
+        # Register Windows/Linux CUDA DLL directories before lazy faster_whisper/ctranslate2 import.
+        from app.infrastructure.cuda_env import ensure_cuda_dll_directories
+
+        ensure_cuda_dll_directories()
         # Lazy import per architecture rules (never import faster_whisper at module top-level)
         from faster_whisper import WhisperModel
 
         return WhisperModel
 
-    def _transcribe_sync(
+    @staticmethod
+    def _cleanup_model_resources(whisper_model: Any, segments_gen: Any) -> None:
+        if segments_gen is not None and hasattr(segments_gen, "close"):
+            try:
+                segments_gen.close()
+            except Exception:
+                pass
+        if whisper_model is not None:
+            del whisper_model
+        gc.collect()
+        torch_mod = sys.modules.get("torch")
+        if torch_mod is not None:
+            try:
+                if torch_mod.cuda.is_available():
+                    torch_mod.cuda.empty_cache()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _build_transcribe_kwargs(whisper_cfg: dict[str, Any]) -> dict[str, Any]:
+        transcribe_kwargs: dict[str, Any] = {
+            "beam_size": int(whisper_cfg.get("beam_size") or 5),
+            "best_of": int(whisper_cfg.get("best_of") or 5),
+            "task": str(whisper_cfg.get("task") or "transcribe"),
+            "condition_on_previous_text": bool(
+                whisper_cfg.get("condition_on_previous_text", True)
+            ),
+            "word_timestamps": True,
+            "vad_filter": True,
+            "vad_parameters": {
+                "min_silence_duration_ms": 400,
+                "speech_pad_ms": 200,
+            },
+        }
+        if whisper_cfg.get("language"):
+            transcribe_kwargs["language"] = str(whisper_cfg["language"])
+        if whisper_cfg.get("initial_prompt"):
+            transcribe_kwargs["initial_prompt"] = str(whisper_cfg["initial_prompt"])
+        temp_val = whisper_cfg.get("temperature")
+        if temp_val is not None:
+            if isinstance(temp_val, (list, tuple)):
+                transcribe_kwargs["temperature"] = [float(t) for t in temp_val]
+            else:
+                transcribe_kwargs["temperature"] = float(temp_val)
+        return transcribe_kwargs
+
+    def _run_attempt(
         self,
+        factory: WhisperModelFactoryFn,
         audio_input_path: str,
         *,
         model_name: str,
-        decision: WhisperAllocationDecision,
-        whisper_cfg: dict[str, Any],
+        attempt_decision: WhisperAllocationDecision,
+        transcribe_kwargs: dict[str, Any],
         cancel_token: CancelToken | None = None,
         on_segment_progress: Callable[[float, float | None, str], None] | None = None,
         fallback_duration: float | None = None,
-    ) -> tuple[list[RawWhisperSegment], float | None, WhisperAllocationDecision]:
-        """Run `WhisperModel` creation, lazy segment iteration, and explicit VRAM cleanup in `finally:`."""
-        factory = self._get_model_factory()
+    ) -> tuple[list[RawWhisperSegment], float | None]:
         whisper_model: Any = None
         segments_gen: Any = None
-        active_decision = decision
-
         try:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
 
-            # 1. Load model on negotiated device (with automatic runtime fallback to CPU int8 if CUDA init fails)
-            try:
-                model_kwargs: dict[str, Any] = {
-                    "device": active_decision.device,
-                    "compute_type": active_decision.compute_type,
-                }
-                if active_decision.device == "cpu" and active_decision.cpu_threads > 0:
-                    model_kwargs["cpu_threads"] = active_decision.cpu_threads
-                whisper_model = factory(model_name, **model_kwargs)
-            except Exception:
-                if active_decision.device == "cuda":
-                    active_decision = WhisperAllocationDecision(
-                        device="cpu",
-                        compute_type=config.WHISPER_COMPUTE_TYPE_CPU,
-                        cpu_threads=config.WHISPER_CPU_THREADS,
-                        free_vram_gb=active_decision.free_vram_gb,
-                        unloaded_models=list(active_decision.unloaded_models),
-                        lms_unloaded=active_decision.lms_unloaded,
-                        fell_back_to_cpu=True,
-                    )
-                    whisper_model = factory(
-                        model_name,
-                        device="cpu",
-                        compute_type=config.WHISPER_COMPUTE_TYPE_CPU,
-                        cpu_threads=config.WHISPER_CPU_THREADS,
-                    )
-                else:
-                    raise
+            model_kwargs: dict[str, Any] = {
+                "device": attempt_decision.device,
+                "compute_type": attempt_decision.compute_type,
+            }
+            if attempt_decision.device == "cpu" and attempt_decision.cpu_threads > 0:
+                model_kwargs["cpu_threads"] = attempt_decision.cpu_threads
+
+            whisper_model = factory(model_name, **model_kwargs)
 
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-
-            transcribe_kwargs: dict[str, Any] = {
-                "beam_size": int(whisper_cfg.get("beam_size") or 5),
-                "best_of": int(whisper_cfg.get("best_of") or 5),
-                "task": str(whisper_cfg.get("task") or "transcribe"),
-                "condition_on_previous_text": bool(
-                    whisper_cfg.get("condition_on_previous_text", True)
-                ),
-                "word_timestamps": True,
-                "vad_filter": True,
-                "vad_parameters": {
-                    "min_silence_duration_ms": 400,
-                    "speech_pad_ms": 200,
-                },
-            }
-            if whisper_cfg.get("language"):
-                transcribe_kwargs["language"] = str(whisper_cfg["language"])
-            if whisper_cfg.get("initial_prompt"):
-                transcribe_kwargs["initial_prompt"] = str(whisper_cfg["initial_prompt"])
-            if whisper_cfg.get("temperature") is not None:
-                transcribe_kwargs["temperature"] = float(whisper_cfg["temperature"])
 
             segments_gen, info = whisper_model.transcribe(audio_input_path, **transcribe_kwargs)
             detected_duration: float | None = getattr(info, "duration", None)
@@ -436,23 +442,78 @@ class FasterWhisperAdapter:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
 
-            return collected, total_dur, active_decision
+            return collected, total_dur
         finally:
-            if segments_gen is not None and hasattr(segments_gen, "close"):
-                try:
-                    segments_gen.close()
-                except Exception:
-                    pass
-            if whisper_model is not None:
-                del whisper_model
-            gc.collect()
-            torch_mod = sys.modules.get("torch")
-            if torch_mod is not None:
-                try:
-                    if torch_mod.cuda.is_available():
-                        torch_mod.cuda.empty_cache()
-                except Exception:
-                    pass
+            self._cleanup_model_resources(whisper_model, segments_gen)
+
+    def _transcribe_sync(
+        self,
+        audio_input_path: str,
+        *,
+        model_name: str,
+        decision: WhisperAllocationDecision,
+        whisper_cfg: dict[str, Any],
+        cancel_token: CancelToken | None = None,
+        on_segment_progress: Callable[[float, float | None, str], None] | None = None,
+        fallback_duration: float | None = None,
+        on_fallback: Callable[[str], None] | None = None,
+    ) -> tuple[list[RawWhisperSegment], float | None, WhisperAllocationDecision]:
+        """Run `WhisperModel` creation, lazy segment iteration, transparent CUDA->CPU fallback, and VRAM cleanup."""
+        from app.infrastructure.cuda_env import is_cuda_or_dll_error
+
+        factory = self._get_model_factory()
+        transcribe_kwargs = self._build_transcribe_kwargs(whisper_cfg)
+        active_decision = decision
+
+        try:
+            collected, total_dur = self._run_attempt(
+                factory,
+                audio_input_path,
+                model_name=model_name,
+                attempt_decision=active_decision,
+                transcribe_kwargs=transcribe_kwargs,
+                cancel_token=cancel_token,
+                on_segment_progress=on_segment_progress,
+                fallback_duration=fallback_duration,
+            )
+            return collected, total_dur, active_decision
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            if active_decision.device != "cuda" or (
+                cancel_token is not None and cancel_token.is_set()
+            ):
+                raise
+            # Any load-time error on CUDA OR runtime CUDA/cuBLAS/cuDNN DLL error triggers CPU int8 fallback
+            reason = (
+                f"CUDA transcription failed ({exc}); falling back to CPU ({config.WHISPER_COMPUTE_TYPE_CPU})"
+                if is_cuda_or_dll_error(exc)
+                else f"Whisper CUDA execution failed ({exc}); retrying on CPU ({config.WHISPER_COMPUTE_TYPE_CPU})"
+            )
+            active_decision = WhisperAllocationDecision(
+                device="cpu",
+                compute_type=config.WHISPER_COMPUTE_TYPE_CPU,
+                cpu_threads=config.WHISPER_CPU_THREADS,
+                free_vram_gb=active_decision.free_vram_gb,
+                unloaded_models=list(active_decision.unloaded_models),
+                lms_unloaded=active_decision.lms_unloaded,
+                fell_back_to_cpu=True,
+                fallback_reason=reason,
+            )
+            if on_fallback is not None:
+                on_fallback(reason)
+
+            collected, total_dur = self._run_attempt(
+                factory,
+                audio_input_path,
+                model_name=model_name,
+                attempt_decision=active_decision,
+                transcribe_kwargs=transcribe_kwargs,
+                cancel_token=cancel_token,
+                on_segment_progress=on_segment_progress,
+                fallback_duration=fallback_duration,
+            )
+            return collected, total_dur, active_decision
 
     async def transcribe(
         self,
@@ -464,6 +525,7 @@ class FasterWhisperAdapter:
         cancel_token: CancelToken | None = None,
         on_segment_progress: Callable[[float, float | None, str], None] | None = None,
         fallback_duration: float | None = None,
+        on_fallback: Callable[[str], None] | None = None,
     ) -> tuple[list[RawWhisperSegment], float | None, WhisperAllocationDecision]:
         return await asyncio.to_thread(
             self._transcribe_sync,
@@ -474,6 +536,7 @@ class FasterWhisperAdapter:
             cancel_token=cancel_token,
             on_segment_progress=on_segment_progress,
             fallback_duration=fallback_duration,
+            on_fallback=on_fallback,
         )
 
 
@@ -511,7 +574,6 @@ class TranscriptionDomainService:
         c = self.c
         job = c.jobs.load_job(job_id)
 
-        c.runtime.clear_task_logs(job_id, "render")
         c.runtime.clear_task_logs(job_id, "transcription")
 
         cancel_token = c.runtime.create_cancel_token(job_id, "transcription")
@@ -534,8 +596,26 @@ class TranscriptionDomainService:
                 job_id, "transcription", f"[transcription] Using file: {video_path}"
             )
 
-            # Ensure 16kHz mono PCM WAV exists in {video_dir}/transcrições/audio_16k.wav
+            # Ensure 16kHz mono PCM WAV exists and is not a truncated fallback artifact
             wav_path = c.jobs.audio_16k_path(job_id)
+            if not job.video_duration_seconds and video_path.exists():
+                probed_dur = await probe_media_duration(video_path)
+                if probed_dur and probed_dur > 0:
+                    job = c.jobs.update_job(job_id, {"video_duration_seconds": probed_dur})
+
+            if wav_path.exists() and video_path.stat().st_size > 4096:
+                expected_dur = job.video_duration_seconds or await probe_media_duration(video_path)
+                wav_dur = await probe_media_duration(wav_path)
+                if expected_dur and expected_dur > 20.0 and (
+                    wav_dur is None or wav_dur < expected_dur * 0.5
+                ):
+                    c.runtime.log_warning(
+                        job_id,
+                        "transcription",
+                        f"Existing audio_16k.wav looks truncated/stale ({wav_dur}s vs video {expected_dur:.1f}s); re-extracting full audio.",
+                    )
+                    wav_path.unlink(missing_ok=True)
+
             if not wav_path.exists():
                 async with c.scheduler.io_slot():
                     await extract_pcm_16k_wav(
@@ -583,6 +663,9 @@ class TranscriptionDomainService:
                     message=msg,
                 )
 
+            def _on_runtime_fallback(reason: str) -> None:
+                c.runtime.log_warning(job_id, "transcription", reason)
+
             async with c.scheduler.whisper_slot(requested_device=requested_device) as decision:
                 if decision.unloaded_models:
                     c.runtime.append_task_log(
@@ -591,11 +674,11 @@ class TranscriptionDomainService:
                         f"[transcription] Unloaded idle Ollama models: {', '.join(decision.unloaded_models)}",
                     )
                 if decision.fell_back_to_cpu:
-                    c.runtime.append_task_log(
-                        job_id,
-                        "transcription",
-                        f"[transcription] Free VRAM ({decision.free_vram_gb:.2f}GB < {config.MIN_FREE_VRAM_GB_FOR_WHISPER}GB); falling back to CPU ({decision.compute_type})",
+                    fallback_msg = decision.fallback_reason or (
+                        f"Free VRAM ({decision.free_vram_gb:.2f}GB < {config.MIN_FREE_VRAM_GB_FOR_WHISPER}GB); "
+                        f"falling back to CPU ({decision.compute_type})"
                     )
+                    c.runtime.log_warning(job_id, "transcription", fallback_msg)
                 c.runtime.append_task_log(
                     job_id,
                     "transcription",
@@ -610,6 +693,7 @@ class TranscriptionDomainService:
                     cancel_token=cancel_token,
                     on_segment_progress=_on_segment_progress,
                     fallback_duration=job.video_duration_seconds,
+                    on_fallback=_on_runtime_fallback,
                 )
 
             cancel_token.raise_if_cancelled()
@@ -754,13 +838,11 @@ class TranscriptionDomainService:
                 )
                 raise OperationCancelledError(job_id, "transcription") from exc
 
-            c.runtime.append_task_logs(
+            c.runtime.log_exception(
                 job_id,
                 "transcription",
-                [
-                    "[transcription] ERROR executing Whisper",
-                    f"[transcription] {exc}",
-                ],
+                exc,
+                message="[transcription] ERROR executing Whisper",
             )
             c.jobs.update_job_status(job_id, JobStatus.ERROR)
             c.runtime.publish_state_change(

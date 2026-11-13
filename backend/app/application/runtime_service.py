@@ -19,11 +19,32 @@ from app.application.job_lifecycle import JobLifecycleService, utc_now_iso
 from app.application.scheduler import HardwareResourceScheduler
 from app.core import paths, settings, tool_configs
 from app.core.config import config
+from app.infrastructure.logging.stage_logger import StageLogger, get_stage_logger
 from app.infrastructure.storage.atomic_store import AtomicJsonArtifactStore
 from app.models.schemas import BatchPipelineProgress
 
-TaskName = Literal["ingest", "transcription", "render", "orchestrator", "all"]
-VALID_TASK_NAMES: set[str] = {"ingest", "transcription", "render", "orchestrator", "all"}
+TaskName = Literal[
+    "ingest",
+    "transcription",
+    "blocks",
+    "topics",
+    "analysis",
+    "render",
+    "orchestrator",
+    "batch",
+    "all",
+]
+VALID_TASK_NAMES: set[str] = {
+    "ingest",
+    "transcription",
+    "blocks",
+    "topics",
+    "analysis",
+    "render",
+    "orchestrator",
+    "batch",
+    "all",
+}
 
 
 class OperationCancelledError(RuntimeError):
@@ -98,34 +119,59 @@ class JobEvent:
         return f"event: {self.event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _safe_queue_put_nowait(q: asyncio.Queue[JobEvent | None], item: JobEvent | None) -> None:
+    try:
+        q.put_nowait(item)
+    except asyncio.QueueFull:
+        pass
+
+
 class JobEventBus:
-    """Async pub/sub event bus per job_id for real-time Server-Sent Events (`/jobs/:id/events`)."""
+    """Thread-safe async pub/sub event bus per job_id for real-time Server-Sent Events (`/jobs/:id/events`)."""
 
     def __init__(self, max_history: int = 100) -> None:
-        self._subscribers: dict[str, set[asyncio.Queue[JobEvent | None]]] = collections.defaultdict(set)
+        self._lock = threading.RLock()
+        self._subscribers: dict[str, dict[asyncio.Queue[JobEvent | None], asyncio.AbstractEventLoop]] = (
+            collections.defaultdict(dict)
+        )
         self._history: dict[str, collections.deque[JobEvent]] = collections.defaultdict(
             lambda: collections.deque(maxlen=max_history)
         )
 
+    def _dispatch(self, q: asyncio.Queue[JobEvent | None], loop: asyncio.AbstractEventLoop, item: JobEvent | None) -> None:
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is loop:
+            _safe_queue_put_nowait(q, item)
+            return
+
+        if not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(_safe_queue_put_nowait, q, item)
+            except RuntimeError:
+                pass
+
     def publish(self, job_id: str, event: str, data: dict[str, Any]) -> JobEvent:
         evt = JobEvent(job_id=job_id, event=event, data={"job_id": job_id, **data})
-        self._history[job_id].append(evt)
-        for q in list(self._subscribers.get(job_id, ())):
-            try:
-                q.put_nowait(evt)
-            except asyncio.QueueFull:
-                pass
+        with self._lock:
+            self._history[job_id].append(evt)
+            subscribers = list(self._subscribers.get(job_id, {}).items())
+        for q, loop in subscribers:
+            self._dispatch(q, loop, evt)
         return evt
 
     def get_history(self, job_id: str) -> list[JobEvent]:
-        return list(self._history.get(job_id, ()))
+        with self._lock:
+            return list(self._history.get(job_id, ()))
 
     def close_stream(self, job_id: str) -> None:
-        for q in list(self._subscribers.get(job_id, ())):
-            try:
-                q.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
+        with self._lock:
+            subscribers = list(self._subscribers.get(job_id, {}).items())
+        for q, loop in subscribers:
+            self._dispatch(q, loop, None)
 
     @asynccontextmanager
     async def subscribe(
@@ -134,15 +180,20 @@ class JobEventBus:
         *,
         replay_history: bool = False,
     ) -> AsyncIterator[asyncio.Queue[JobEvent | None]]:
+        loop = asyncio.get_running_loop()
         q: asyncio.Queue[JobEvent | None] = asyncio.Queue(maxsize=256)
-        if replay_history:
-            for item in self._history.get(job_id, ()):
-                q.put_nowait(item)
-        self._subscribers[job_id].add(q)
+        with self._lock:
+            if replay_history:
+                for item in self._history.get(job_id, ()):
+                    _safe_queue_put_nowait(q, item)
+            self._subscribers[job_id][q] = loop
         try:
             yield q
         finally:
-            self._subscribers[job_id].discard(q)
+            with self._lock:
+                subs = self._subscribers.get(job_id)
+                if subs is not None:
+                    subs.pop(q, None)
 
 
 def default_kill_process_tree(pid: int) -> None:
@@ -172,17 +223,20 @@ def default_kill_process_tree(pid: int) -> None:
 
 
 class OperationRuntimeService:
-    """Centralized in-memory state for task logs, cancel tokens, process trees, SSE events, and sessions."""
+    """Centralized in-memory state + persistent stage file logging for task logs, cancel tokens, process trees, SSE events, and sessions."""
 
     def __init__(
         self,
         *,
         max_log_lines: int = config.MAX_TASK_LOG_LINES,
         process_killer: Callable[[int], None] | None = None,
+        stage_logger: StageLogger | None = None,
     ) -> None:
         self.max_log_lines = max_log_lines
         self._process_killer = process_killer or default_kill_process_tree
+        self._stage_logger = stage_logger or get_stage_logger()
         self._logs: dict[str, dict[str, collections.deque[str]]] = {}
+        self._cleared_tasks: set[tuple[str, str]] = set()
         self._cancel_tokens: dict[tuple[str, str], CancelToken] = {}
         self._process_pids: dict[tuple[str, str], set[int]] = collections.defaultdict(set)
         self._partial_files: dict[str, set[Path]] = collections.defaultdict(set)
@@ -193,7 +247,11 @@ class OperationRuntimeService:
         self.event_bus = JobEventBus()
         self.killed_pids: list[int] = []
 
-    # --- Task Ring-Buffer Logs (400 lines) ---
+    @property
+    def stage_logger(self) -> StageLogger:
+        return self._stage_logger
+
+    # --- Task Ring-Buffer & Persistent File Logs ---
 
     def _get_job_log_store(self, job_id: str) -> dict[str, collections.deque[str]]:
         store = self._logs.get(job_id)
@@ -206,46 +264,165 @@ class OperationRuntimeService:
             self._logs[job_id] = store
         return store
 
-    def append_task_log(self, job_id: str, task: str, line: str) -> None:
+    def _append_ring_buffer_line(self, job_id: str, task: str, line: str) -> None:
         store = self._get_job_log_store(job_id)
         if task not in store:
             store[task] = collections.deque(maxlen=self.max_log_lines)
         store[task].append(line)
+        self._cleared_tasks.discard((job_id, task))
+        self._cleared_tasks.discard((job_id, "all"))
 
-    def append_log(self, job_id: str, line: str, task: str = "orchestrator") -> None:
-        self.append_task_log(job_id, task, line)
-
-    def append_task_logs(self, job_id: str, task: str, lines: list[str]) -> None:
+    def _append_ring_buffer_lines(self, job_id: str, task: str, lines: list[str]) -> None:
         if not lines:
             return
         store = self._get_job_log_store(job_id)
         if task not in store:
             store[task] = collections.deque(maxlen=self.max_log_lines)
         store[task].extend(lines)
+        self._cleared_tasks.discard((job_id, task))
+        self._cleared_tasks.discard((job_id, "all"))
 
-    def get_task_logs(self, job_id: str, task: str) -> list[str]:
-        store = self._get_job_log_store(job_id)
+    def append_task_log(self, job_id: str, task: str, line: str, *, level: str = "INFO") -> None:
+        self._append_ring_buffer_line(job_id, task, line)
+        self._stage_logger.log(job_id, task, line, level=level, write_backend_log=False)
+
+    def append_log(self, job_id: str, line: str, task: str = "orchestrator", *, level: str = "INFO") -> None:
+        self.append_task_log(job_id, task, line, level=level)
+
+    def append_task_logs(self, job_id: str, task: str, lines: list[str], *, level: str = "INFO") -> None:
+        if not lines:
+            return
+        self._append_ring_buffer_lines(job_id, task, lines)
+        self._stage_logger.log_lines(job_id, task, lines, level=level, write_backend_log=False)
+
+    def log_stage_start(
+        self,
+        job_id: str,
+        task: str,
+        *,
+        inputs: dict[str, Any] | None = None,
+        message: str = "",
+    ) -> None:
+        msg = message or f"Stage '{task}' started"
+        self._append_ring_buffer_line(job_id, task, f"[{task}] START: {msg}")
+        self._stage_logger.log_stage_start(job_id, task, inputs=inputs, message=msg)
+
+    def log_stage_end(
+        self,
+        job_id: str,
+        task: str,
+        *,
+        duration_ms: float | None = None,
+        outputs: dict[str, Any] | None = None,
+        message: str = "",
+    ) -> None:
+        msg = message or f"Stage '{task}' completed"
+        dur_tag = f" ({duration_ms:.1f}ms)" if duration_ms is not None else ""
+        self._append_ring_buffer_line(job_id, task, f"[{task}] END{dur_tag}: {msg}")
+        self._stage_logger.log_stage_end(
+            job_id,
+            task,
+            duration_ms=duration_ms,
+            outputs=outputs,
+            message=msg,
+        )
+
+    def log_warning(
+        self,
+        job_id: str,
+        task: str,
+        message: str,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a warning (e.g. CUDA->CPU or TF-IDF fallback) to disk and ring buffer."""
+        line = f"[{task}] WARNING: {message}"
+        if extra:
+            line = f"{line} ({extra})"
+        self._append_ring_buffer_line(job_id, task, line)
+        self._stage_logger.log(
+            job_id,
+            task,
+            message,
+            level="WARNING",
+            extra=extra,
+            write_backend_log=True,
+        )
+
+    def log_exception(
+        self,
+        job_id: str,
+        task: str,
+        exc: BaseException,
+        *,
+        message: str | None = None,
+        context: dict[str, Any] | None = None,
+        include_env_diagnostics: bool = True,
+    ) -> list[str]:
+        """Log full exception traceback and environment diagnostics to disk and ring buffer."""
+        formatted = self._stage_logger.log_exception(
+            job_id,
+            task,
+            exc,
+            message=message,
+            context=context,
+            include_env_diagnostics=include_env_diagnostics,
+        )
+        self._append_ring_buffer_lines(job_id, task, formatted)
+        return formatted
+
+    def get_task_logs(self, job_id: str, task: str, *, fallback_to_disk: bool = True) -> list[str]:
         if task == "all":
-            all_lines: list[str] = []
-            for t in ("orchestrator", "ingest", "transcription", "render"):
-                all_lines.extend(store.get(t, ()))
-            return all_lines
-        return list(store.get(task, ()))
+            if job_id in self._logs:
+                store = self._logs[job_id]
+                ordered_keys = [
+                    "orchestrator",
+                    "batch",
+                    "ingest",
+                    "transcription",
+                    "blocks",
+                    "topics",
+                    "analysis",
+                    "render",
+                ]
+                seen = set(ordered_keys)
+                all_lines: list[str] = []
+                for t in ordered_keys:
+                    all_lines.extend(store.get(t, ()))
+                for t, q in store.items():
+                    if t not in seen:
+                        all_lines.extend(q)
+                if all_lines:
+                    return all_lines
+            if fallback_to_disk and (job_id, "all") not in self._cleared_tasks:
+                return self._stage_logger.read_stage_log(job_id, "all", tail=self.max_log_lines)
+            return []
+
+        if job_id in self._logs:
+            lines = list(self._logs[job_id].get(task, ()))
+            if lines:
+                return lines
+            if (job_id, task) in self._cleared_tasks:
+                return []
+
+        if fallback_to_disk:
+            return self._stage_logger.read_stage_log(job_id, task, tail=self.max_log_lines)
+        return []
 
     def clear_task_logs(self, job_id: str, task: str) -> None:
         store = self._get_job_log_store(job_id)
         if task in store:
             store[task].clear()
+        self._cleared_tasks.add((job_id, task))
 
     def clear_all_task_logs(self, job_id: str) -> None:
         store = self._get_job_log_store(job_id)
-        for q in store.values():
+        for t, q in store.items():
             q.clear()
+            self._cleared_tasks.add((job_id, t))
+        self._cleared_tasks.add((job_id, "all"))
 
     # --- SSE Event Bus Helpers ---
-
-    def publish_event(self, job_id: str, event: str, data: dict[str, Any]) -> JobEvent:
-        return self.event_bus.publish(job_id, event, data)
 
     def _normalize_status(self, status: Any) -> str:
         s = status.value if hasattr(status, "value") else str(status)
@@ -264,13 +441,21 @@ class OperationRuntimeService:
         message: str = "",
     ) -> JobEvent:
         clean_status = self._normalize_status(status)
+        pct = round(float(percent), 2)
         if message:
-            self.append_task_log(job_id, task, message)
+            self._append_ring_buffer_line(job_id, task, message)
+        eta_part = f" eta={eta_seconds}s" if eta_seconds is not None else ""
+        disk_msg = (
+            f"[progress status={clean_status} percent={pct}%{eta_part}] {message}"
+            if message
+            else f"[progress status={clean_status} percent={pct}%{eta_part}]"
+        )
+        self._stage_logger.log(job_id, task, disk_msg, level="INFO", write_backend_log=False)
         payload: dict[str, Any] = {
             "job_id": job_id,
             "status": clean_status,
             "task": task,
-            "percent": round(float(percent), 2),
+            "percent": pct,
             "eta_seconds": eta_seconds,
             "message": message,
         }
@@ -278,6 +463,8 @@ class OperationRuntimeService:
 
     def publish_state_change(self, job_id: str, status: Any, message: str = "") -> JobEvent:
         clean_status = self._normalize_status(status)
+        state_line = f"[state status={clean_status}] {message}" if message else f"[state status={clean_status}]"
+        self._stage_logger.log(job_id, "orchestrator", state_line, level="INFO", write_backend_log=True)
         return self.event_bus.publish(
             job_id,
             "state",

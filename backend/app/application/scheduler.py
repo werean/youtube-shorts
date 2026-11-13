@@ -26,9 +26,11 @@ class WhisperAllocationDecision:
     unloaded_models: list[str] = field(default_factory=list)
     lms_unloaded: bool = False
     fell_back_to_cpu: bool = False
+    fallback_reason: str | None = None
 
 
 VRAMProbeFn = Callable[[], float | Awaitable[float]]
+CudaRuntimeProbeFn = Callable[[], tuple[bool, str | None] | Awaitable[tuple[bool, str | None]]]
 OllamaUnloadFn = Callable[[], list[str] | Awaitable[list[str]]]
 LmsUnloadFn = Callable[[], bool | Awaitable[bool]]
 CudaCacheClearFn = Callable[[], None]
@@ -111,6 +113,19 @@ async def default_lms_unloader() -> bool:
         )
         await asyncio.wait_for(proc.wait(), timeout=5.0)
         return proc.returncode == 0
+    except NotImplementedError:
+        try:
+            proc_sync = await asyncio.to_thread(
+                subprocess.run,
+                [lms_bin, "unload", "--all"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5.0,
+                check=False,
+            )
+            return proc_sync.returncode == 0
+        except Exception:
+            return False
     except Exception:
         return False
 
@@ -135,6 +150,7 @@ class ActiveVRAMBudgetManager:
         *,
         min_free_vram_gb: float = config.MIN_FREE_VRAM_GB_FOR_WHISPER,
         vram_probe: VRAMProbeFn | None = None,
+        cuda_runtime_probe: CudaRuntimeProbeFn | None = None,
         ollama_unloader: OllamaUnloadFn | None = None,
         lms_unloader: LmsUnloadFn | None = None,
         cuda_cache_clear: CudaCacheClearFn | None = None,
@@ -143,6 +159,7 @@ class ActiveVRAMBudgetManager:
     ) -> None:
         self.min_free_vram_gb = min_free_vram_gb
         self._vram_probe = vram_probe or default_vram_probe
+        self._cuda_runtime_probe = cuda_runtime_probe
         self._ollama_unloader = ollama_unloader
         self._lms_unloader = lms_unloader or default_lms_unloader
         self._cuda_cache_clear = cuda_cache_clear or default_cuda_cache_clear
@@ -190,11 +207,31 @@ class ActiveVRAMBudgetManager:
             return bool(await res)
         return bool(res)
 
+    async def probe_cuda_runtime(self) -> tuple[bool, str | None]:
+        """Verify CUDA DLL availability before committing Whisper to GPU.
+
+        Only runs the default Windows DLL probe when using the real default VRAM
+        probe (or when an explicit `cuda_runtime_probe` was injected), so unit
+        tests injecting synthetic `vram_probe` callbacks remain deterministic.
+        """
+        if self._cuda_runtime_probe is None and self._vram_probe is not default_vram_probe:
+            return True, None
+        probe_fn = self._cuda_runtime_probe
+        if probe_fn is None:
+            from app.infrastructure.cuda_env import probe_cuda_whisper_runtime
+
+            probe_fn = probe_cuda_whisper_runtime
+        res = probe_fn()
+        if inspect.isawaitable(res):
+            res = await res
+        ok, reason = res
+        return bool(ok), (str(reason) if reason else None)
+
     async def prepare_for_whisper(
         self,
         requested_device: str = "cuda",
     ) -> WhisperAllocationDecision:
-        """Inspect free VRAM (>=2.2GB), unload idle Ollama/LMS models if needed, or fall back to CPU int8."""
+        """Inspect CUDA runtime + free VRAM (>=2.2GB), unload idle Ollama/LMS models if needed, or fall back to CPU int8."""
         if requested_device == "cpu":
             return WhisperAllocationDecision(
                 device="cpu",
@@ -202,6 +239,17 @@ class ActiveVRAMBudgetManager:
                 cpu_threads=config.WHISPER_CPU_THREADS,
                 free_vram_gb=0.0,
                 fell_back_to_cpu=False,
+            )
+
+        cuda_ready, cuda_reason = await self.probe_cuda_runtime()
+        if not cuda_ready:
+            return WhisperAllocationDecision(
+                device="cpu",
+                compute_type=config.WHISPER_COMPUTE_TYPE_CPU,
+                cpu_threads=config.WHISPER_CPU_THREADS,
+                free_vram_gb=0.0,
+                fell_back_to_cpu=True,
+                fallback_reason=cuda_reason or "CUDA runtime libraries unavailable",
             )
 
         free_gb = await self.probe_free_vram_gb()
@@ -237,6 +285,10 @@ class ActiveVRAMBudgetManager:
             unloaded_models=unloaded,
             lms_unloaded=lms_unloaded,
             fell_back_to_cpu=True,
+            fallback_reason=(
+                f"Free VRAM ({free_after:.2f}GB < {self.min_free_vram_gb:.2f}GB); "
+                "falling back to CPU int8"
+            ),
         )
 
     def cleanup_whisper_vram(self) -> None:

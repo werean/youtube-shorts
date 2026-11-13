@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import math
 import shutil
 import struct
@@ -14,6 +15,7 @@ from typing import Any, Awaitable, Callable
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
 SAMPLE_RATE_16K = 16000
 
 MediaProbeFn = Callable[[Path], float | None | Awaitable[float | None]]
@@ -168,7 +170,15 @@ def probe_media_duration_sync(
                 val = float(proc.stdout.strip().splitlines()[0].strip())
                 if math.isfinite(val) and val > 0:
                     return round(val, 3)
-        except Exception:
+            elif proc.returncode != 0:
+                logger.warning(
+                    "ffprobe duration probe failed for %s (rc=%s): %s",
+                    path,
+                    proc.returncode,
+                    (proc.stderr or "").strip(),
+                )
+        except Exception as exc:
+            logger.warning("ffprobe duration probe exception for %s: %s", path, exc)
             return None
 
     return None
@@ -277,28 +287,76 @@ async def extract_pcm_16k_wav(
             )
         raise RuntimeError(f"FFmpeg runner did not produce {dst}")
 
+    src_size = src.stat().st_size if src.exists() else 0
+    ffmpeg_error_detail = ""
+    ffmpeg_attempted = False
+
     if shutil.which("ffmpeg"):
+        ffmpeg_attempted = True
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            _stdout, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=180.0)
             if proc.returncode == 0 and dst.exists() and dst.stat().st_size > 44:
                 return dst
-        except Exception:
-            pass
+            ffmpeg_error_detail = (
+                stderr_bytes.decode("utf-8", errors="replace").strip()
+                or f"exit code {proc.returncode}"
+            )
+            logger.warning(
+                "ffmpeg 16kHz PCM extraction failed for %s (rc=%s): %s",
+                src,
+                proc.returncode,
+                ffmpeg_error_detail,
+            )
+        except NotImplementedError:
+            # Windows SelectorEventLoop (common under `uvicorn --reload`) does not support
+            # asyncio.create_subprocess_exec; run blocking subprocess.run in a worker thread.
+            try:
+                proc_sync = await asyncio.to_thread(
+                    subprocess.run,
+                    cmd,
+                    capture_output=True,
+                    timeout=180.0,
+                    check=False,
+                )
+                if proc_sync.returncode == 0 and dst.exists() and dst.stat().st_size > 44:
+                    return dst
+                ffmpeg_error_detail = (
+                    (proc_sync.stderr or b"").decode("utf-8", errors="replace").strip()
+                    or f"exit code {proc_sync.returncode}"
+                )
+                logger.warning(
+                    "ffmpeg 16kHz PCM thread extraction failed for %s (rc=%s): %s",
+                    src,
+                    proc_sync.returncode,
+                    ffmpeg_error_detail,
+                )
+            except Exception as exc:
+                ffmpeg_error_detail = f"{type(exc).__name__}: {exc}".strip(": ")
+                logger.warning(
+                    "ffmpeg 16kHz PCM thread extraction exception for %s: %s",
+                    src,
+                    ffmpeg_error_detail,
+                )
+        except Exception as exc:
+            ffmpeg_error_detail = f"{type(exc).__name__}: {exc}".strip(": ")
+            logger.warning("ffmpeg 16kHz PCM extraction exception for %s: %s", src, ffmpeg_error_detail)
 
-    if allow_synthetic_fallback:
-        # When running with synthetic video bytes in tests without real ffmpeg binary
+    # Allow synthetic WAV fallback when testing with tiny/stub media payloads (< 4KB)
+    # or when ffmpeg is absent, but fail loudly for real media files (> 4KB) whose FFmpeg decode failed.
+    if allow_synthetic_fallback and (not ffmpeg_attempted or src_size <= 4096):
         return write_synthetic_pcm16_wav(
             dst,
             sample_rate=sample_rate,
             duration_seconds=max(0.5, min(float(duration_hint_seconds or 1.0), 10.0)),
         )
 
-    raise RuntimeError(f"Failed to extract 16kHz PCM WAV from {src}")
+    detail = f": {ffmpeg_error_detail}" if ffmpeg_error_detail else ""
+    raise RuntimeError(f"Failed to extract 16kHz PCM WAV from {src}{detail}")
 
 
 def read_wav_chunk_float32(

@@ -6,12 +6,15 @@ never at module top-level, keeping logical unit tests 100% hardware-free and fas
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 MIN_VALID_FACE_AREA_RATIO: float = 0.015  # 1.5% of total frame area
 DEFAULT_HSV_SCENE_CUT_THRESHOLD: float = 0.40
@@ -514,56 +517,64 @@ class MediaPipeVisionAdapter:
 
                 self._detector = _detect_mp
                 return _detect_mp
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("MediaPipe face detector unavailable (%s); trying OpenCV fallback.", exc)
 
-        # 2. Automatic graceful fallback to OpenCV Haar Cascade
+        # 2. Automatic graceful fallback to OpenCV Haar Cascade (if available in cv2 build)
         try:
             import cv2  # Lazy import inside method only
 
-            cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
-            cascade = cv2.CascadeClassifier(cascade_path)
-            self._backend_name = "opencv_haar"
+            if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data"):
+                cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
+                cascade = cv2.CascadeClassifier(cascade_path)
+                if not cascade.empty():
+                    self._backend_name = "opencv_haar"
 
-            def _detect_cv(bgr_frame: Any, timestamp: float, width: int, height: int) -> list[FaceBoundingBox]:
-                gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-                rects = cascade.detectMultiScale(
-                    gray,
-                    scaleFactor=1.15,
-                    minNeighbors=5,
-                    minSize=(int(width * 0.08), int(height * 0.08)),
-                )
-                boxes: list[FaceBoundingBox] = []
-                if rects is None or len(rects) == 0:
-                    return boxes
-                sorted_rects = sorted(rects, key=lambda r: float(r[0]))
-                for idx, (rx, ry, rw, rh) in enumerate(sorted_rects):
-                    mouth_energy = _estimate_lower_face_motion(bgr_frame, int(rx), int(ry), int(rw), int(rh))
-                    boxes.append(
-                        FaceBoundingBox(
-                            face_id=f"face_{idx}",
-                            x=float(rx),
-                            y=float(ry),
-                            width=float(rw),
-                            height=float(rh),
-                            frame_width=width,
-                            frame_height=height,
-                            confidence=0.85,
-                            mouth_openness=mouth_energy,
+                    def _detect_cv(bgr_frame: Any, timestamp: float, width: int, height: int) -> list[FaceBoundingBox]:
+                        gray = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+                        rects = cascade.detectMultiScale(
+                            gray,
+                            scaleFactor=1.15,
+                            minNeighbors=5,
+                            minSize=(int(width * 0.08), int(height * 0.08)),
                         )
-                    )
-                return boxes
+                        boxes: list[FaceBoundingBox] = []
+                        if rects is None or len(rects) == 0:
+                            return boxes
+                        sorted_rects = sorted(rects, key=lambda r: float(r[0]))
+                        for idx, (rx, ry, rw, rh) in enumerate(sorted_rects):
+                            mouth_energy = _estimate_lower_face_motion(bgr_frame, int(rx), int(ry), int(rw), int(rh))
+                            boxes.append(
+                                FaceBoundingBox(
+                                    face_id=f"face_{idx}",
+                                    x=float(rx),
+                                    y=float(ry),
+                                    width=float(rw),
+                                    height=float(rh),
+                                    frame_width=width,
+                                    frame_height=height,
+                                    confidence=0.85,
+                                    mouth_openness=mouth_energy,
+                                )
+                            )
+                        return boxes
 
-            self._detector = _detect_cv
-            return _detect_cv
-        except Exception:
-            self._backend_name = "noop_fallback"
+                    self._detector = _detect_cv
+                    return _detect_cv
+            logger.warning(
+                "No face detector backend active (mediapipe missing and OpenCV Haar Cascade unavailable); "
+                "Virtual Cameraman will use blur/zoom framing."
+            )
+        except Exception as exc:
+            logger.warning("OpenCV face detector fallback failed (%s); using blur/zoom framing.", exc)
 
-            def _detect_noop(bgr_frame: Any, timestamp: float, width: int, height: int) -> list[FaceBoundingBox]:
-                return []
+        self._backend_name = "noop_fallback"
 
-            self._detector = _detect_noop
-            return _detect_noop
+        def _detect_noop(bgr_frame: Any, timestamp: float, width: int, height: int) -> list[FaceBoundingBox]:
+            return []
+
+        self._detector = _detect_noop
+        return _detect_noop
 
     def analyze_video_cut(
         self,

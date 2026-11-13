@@ -11,8 +11,11 @@ Guarantees every candidate cut has:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Sequence
+
+logger = logging.getLogger(__name__)
 
 from app.application.runtime_service import CancelToken
 from app.core.config import BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE
@@ -461,8 +464,11 @@ async def run_phase_4b_top_k_lookaround(
                         cur_cand.block_ids = ids
                         cur_cand.start = s_time
                         cur_cand.end = e_time
-        except Exception:
-            # Graceful fallback to deterministic lookaround results when LLM lookaround response is not applicable
-            pass
+        except Exception as exc:
+            # Graceful fallback to deterministic lookaround results when LLM lookaround response fails
+            logger.warning(
+                "LLM boundary lookaround failed; falling back to deterministic lookaround: %s",
+                exc,
+            )
 
     return [c for c in det_adjusted if c.is_complete_story]

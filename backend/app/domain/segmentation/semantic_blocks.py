@@ -320,18 +320,41 @@ def build_semantic_blocks(
     c = container or get_container()
     c.jobs.load_job(job_id)
     c.jobs.update_job_status(job_id, JobStatus.BUILDING_BLOCKS)
+    c.runtime.log_stage_start(
+        job_id,
+        "blocks",
+        message="[segmentation] Construindo blocos semânticos conscientes de discurso...",
+    )
     c.runtime.publish_state_change(
         job_id,
         status=JobStatus.BUILDING_BLOCKS.value,
         message="[segmentation] Construindo blocos semânticos conscientes de discurso...",
     )
 
-    segments = c.jobs.load_transcription_segments(job_id)
-    if not segments:
-        raise ValueError(f"No transcription segments available for job {job_id}")
+    try:
+        segments = c.jobs.load_transcription_segments(job_id)
+        if not segments:
+            raise ValueError(f"No transcription segments available for job {job_id}")
 
-    words = c.jobs.load_transcription_words(job_id)
-    blocks = group_segments_into_semantic_blocks(segments, words=words)
-    c.jobs.save_semantic_blocks(job_id, blocks)
-    c.jobs.update_job_status(job_id, JobStatus.ANALYZING)
-    return blocks
+        words = c.jobs.load_transcription_words(job_id)
+        blocks = group_segments_into_semantic_blocks(segments, words=words)
+        c.jobs.save_semantic_blocks(job_id, blocks)
+        c.jobs.update_job_status(job_id, JobStatus.BUILDING_TOPICS)
+        c.runtime.log_stage_end(
+            job_id,
+            "blocks",
+            message=f"[segmentation] {len(blocks)} blocos semânticos gerados",
+        )
+        return blocks
+    except Exception as exc:
+        c.runtime.log_exception(
+            job_id,
+            "blocks",
+            exc,
+            message="[segmentation] Erro ao construir blocos semânticos",
+        )
+        c.jobs.update_job_status(job_id, JobStatus.ERROR)
+        c.runtime.publish_state_change(
+            job_id, JobStatus.ERROR.value, f"[segmentation] {exc}"
+        )
+        raise

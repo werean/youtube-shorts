@@ -418,6 +418,7 @@ async def segment_blocks_into_topics(
     min_topic_duration: float = MIN_TOPIC_DURATION_SECONDS,
     llm_adapter: UnifiedLocalLLMAdapter | None = None,
     block_embeddings_override: Sequence[Sequence[float]] | None = None,
+    on_embedding_fallback: Callable[[str], None] | None = None,
 ) -> list[TopicSegment]:
     """Run contextual TextTiling over `blocks` and return `TopicSegment` list."""
     if not blocks:
@@ -464,6 +465,12 @@ async def segment_blocks_into_topics(
             embeddings = await adapter.embed_texts(texts, model=embedding_model)
 
         if not embeddings or len(embeddings) != len(blocks):
+            msg = (
+                f"Embeddings indisponíveis ou incompletos ({len(embeddings)}/{len(blocks)}); "
+                "usando fallback TF-IDF léxico para TextTiling"
+            )
+            if on_embedding_fallback is not None:
+                on_embedding_fallback(msg)
             embeddings = compute_lexical_tfidf_embeddings([b.text for b in blocks])
 
         similarities = compute_window_similarities(embeddings, k=window_k)
@@ -498,37 +505,61 @@ async def build_topic_segments(
     c = container or get_container()
     job = c.jobs.load_job(job_id)
     c.jobs.update_job_status(job_id, JobStatus.BUILDING_TOPICS)
+    c.runtime.log_stage_start(
+        job_id,
+        "topics",
+        message="[segmentation] Segmentando tópicos via TextTiling contextual...",
+    )
     c.runtime.publish_state_change(
         job_id,
         status=JobStatus.BUILDING_TOPICS.value,
         message="[segmentation] Segmentando tópicos via TextTiling contextual...",
     )
 
-    blocks_file = c.jobs.semantic_blocks_path(job_id)
-    if not blocks_file.exists():
-        raise ValueError(
-            f"Semantic blocks not found for job {job_id}. Run build_semantic_blocks first."
+    try:
+        blocks_file = c.jobs.semantic_blocks_path(job_id)
+        if not blocks_file.exists():
+            raise ValueError(
+                f"Semantic blocks not found for job {job_id}. Run build_semantic_blocks first."
+            )
+
+        blocks = c.jobs.load_semantic_blocks(job_id)
+        if not blocks:
+            raise ValueError(f"No semantic blocks available for job {job_id}")
+
+        source_info = c.jobs.load_source_info(job_id) or {}
+        chapters = source_info.get("chapters") if isinstance(source_info, dict) else None
+
+        topics = await segment_blocks_into_topics(
+            blocks,
+            video_duration_seconds=job.video_duration_seconds,
+            chapters=chapters if isinstance(chapters, list) else None,
+            use_embeddings=use_embeddings,
+            embedding_model=embedding_model,
+            sigma_factor=sigma_factor,
+            min_topic_duration=min_topic_duration,
+            llm_adapter=llm_adapter or UnifiedLocalLLMAdapter(container=c, embedding_model=embedding_model),
+            block_embeddings_override=block_embeddings_override,
+            on_embedding_fallback=lambda msg: c.runtime.log_warning(job_id, "topics", msg),
         )
 
-    blocks = c.jobs.load_semantic_blocks(job_id)
-    if not blocks:
-        raise ValueError(f"No semantic blocks available for job {job_id}")
-
-    source_info = c.jobs.load_source_info(job_id) or {}
-    chapters = source_info.get("chapters") if isinstance(source_info, dict) else None
-
-    topics = await segment_blocks_into_topics(
-        blocks,
-        video_duration_seconds=job.video_duration_seconds,
-        chapters=chapters if isinstance(chapters, list) else None,
-        use_embeddings=use_embeddings,
-        embedding_model=embedding_model,
-        sigma_factor=sigma_factor,
-        min_topic_duration=min_topic_duration,
-        llm_adapter=llm_adapter or UnifiedLocalLLMAdapter(container=c, embedding_model=embedding_model),
-        block_embeddings_override=block_embeddings_override,
-    )
-
-    c.jobs.save_topic_segments(job_id, topics)
-    c.jobs.update_job_status(job_id, JobStatus.ANALYZING)
-    return topics
+        c.jobs.save_topic_segments(job_id, topics)
+        c.jobs.update_job_status(job_id, JobStatus.ANALYZING)
+        c.runtime.log_stage_end(
+            job_id,
+            "topics",
+            message=f"[segmentation] {len(topics)} tópicos identificados",
+        )
+        return topics
+    except Exception as exc:
+        c.runtime.log_exception(
+            job_id,
+            "topics",
+            exc,
+            message="[segmentation] Erro na segmentação de tópicos",
+        )
+        c.jobs.update_job_status(job_id, JobStatus.ERROR)
+        c.runtime.publish_state_change(
+            job_id, JobStatus.ERROR.value, f"[segmentation] {exc}"
+        )
+        raise
