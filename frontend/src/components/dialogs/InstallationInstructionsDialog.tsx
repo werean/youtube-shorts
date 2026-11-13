@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { getInstallationGuide, type InstallationGuide } from "../../api";
+import { AppDialog } from "../shared";
+import { GlassButton, GlassCard } from "../ui/glass";
 
 interface InstallationInstructionsDialogProps {
   dependencyName: string;
@@ -26,135 +28,78 @@ export function InstallationInstructionsDialog({
     })();
   }, [dependencyName]);
 
-  if (isLoading) {
-    return (
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-      >
-        <p style={{ textAlign: "center", color: "var(--muted)" }}>Carregando instruções...</p>
-      </div>
-    );
-  }
-
-  if (!guide) {
-    return (
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-      >
-        <p style={{ textAlign: "center", color: "var(--muted)" }}>Erro ao carregar instruções</p>
-      </div>
-    );
-  }
+  const title = guide?.manual?.title || `Instruções de Instalação: ${dependencyName}`;
 
   return (
-    <div
-      className="dialog"
-      onClick={(e) => e.stopPropagation()}
-      style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
+    <AppDialog
+      title={title}
+      description={guide?.manual?.description}
+      onClose={onClose}
+      wide
+      scrollable
     >
-      <div className="dialog-header">
-        <h3>{guide.manual.title}</h3>
-        <div className="dialog-actions">
-          <button className="icon-btn close-btn" onClick={onClose}>
-            X
-          </button>
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center p-12 text-zinc-400 gap-3">
+          <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+          <p className="text-xs">Carregando instruções oficiais...</p>
         </div>
-      </div>
-      <div className="dialog-content" style={{ padding: "20px" }}>
-        <p style={{ marginBottom: "16px", color: "var(--muted)" }}>{guide.manual.description}</p>
-
-        <div style={{ marginBottom: "20px" }}>
-          <h4 style={{ marginBottom: "12px", fontSize: "14px", fontWeight: "600" }}>Passos:</h4>
-          <ol
-            style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px", color: "var(--ink)" }}
-          >
-            {guide.manual.steps.map((step, idx) => (
-              <li key={idx} style={{ marginBottom: "8px" }}>
-                {step}
-              </li>
-            ))}
-          </ol>
+      ) : !guide ? (
+        <div className="p-8 text-center text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl">
+          <p className="text-xs font-medium">Não foi possível carregar as instruções para esta dependência.</p>
         </div>
-
-        {guide.manual.links && guide.manual.links.length > 0 && (
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "12px",
-              background: "var(--bg-contrast)",
-              borderRadius: "8px",
-            }}
-          >
-            <h4 style={{ marginBottom: "8px", fontSize: "14px", fontWeight: "600" }}>
-              Links úteis:
+      ) : (
+        <div className="space-y-4">
+          {/* Passos de Instalação */}
+          <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
+            <h4 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              Passo a Passo
             </h4>
-            <ul style={{ marginLeft: "20px", lineHeight: "1.8", fontSize: "14px" }}>
-              {guide.manual.links.map((link, idx) => (
-                <li key={idx}>
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "var(--accent-2)" }}
-                  >
-                    {link.text}
-                  </a>
+            <ol className="space-y-2.5 pt-1">
+              {guide.manual.steps.map((step, idx) => (
+                <li
+                  key={idx}
+                  className="flex items-start gap-3 p-2.5 rounded-lg bg-black/30 border border-white/[0.06] text-xs text-zinc-200"
+                >
+                  <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-white/[0.08] text-white font-mono text-xs font-bold">
+                    {idx + 1}
+                  </span>
+                  <span className="leading-relaxed flex-1 font-mono">{step}</span>
                 </li>
               ))}
-            </ul>
-          </div>
-        )}
+            </ol>
+          </GlassCard>
 
-        {guide.automatic && (
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "12px",
-              background: "var(--bg-3)",
-              borderRadius: "8px",
-              borderLeft: "4px solid var(--success)",
-            }}
-          >
-            <h4 style={{ marginBottom: "8px", fontSize: "14px", fontWeight: "600" }}>
-              Instalação Automática:
-            </h4>
-            <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>
-              {guide.automatic.description}
-            </p>
-            <code
-              style={{
-                display: "block",
-                padding: "8px",
-                background: "var(--bg-contrast)",
-                borderRadius: "4px",
-                fontSize: "11px",
-                wordBreak: "break-all",
-                fontFamily: "monospace",
-              }}
-            >
-              {guide.automatic.command}
-            </code>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "20px" }}>
-          <button
-            onClick={onClose}
-            className="secondary"
-            style={{
-              padding: "10px 20px",
-              borderRadius: "8px",
-            }}
-          >
-            Fechar
-          </button>
+          {/* Links Úteis */}
+          {guide.manual.links && guide.manual.links.length > 0 && (
+            <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-2.5">
+              <h4 className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Documentação e Downloads
+              </h4>
+              <ul className="space-y-1.5 pt-1">
+                {guide.manual.links.map((link, idx) => (
+                  <li key={idx}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 hover:underline transition-colors p-1"
+                    >
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                      <span>{link.title || link.url}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </GlassCard>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+    </AppDialog>
   );
 }
-

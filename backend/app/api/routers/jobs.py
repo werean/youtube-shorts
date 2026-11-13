@@ -17,7 +17,12 @@ from app.api.routers import (
     jobs_render,
     jobs_transcription,
 )
-from app.application.job_lifecycle import JobNotFoundError
+from app.application.job_lifecycle import (
+    AttemptNotFoundError,
+    EmptyAttemptError,
+    JobActivelyProcessingError,
+    JobNotFoundError,
+)
 from app.application.orchestrator import (
     BatchStatus,
     get_batch_runner,
@@ -155,6 +160,87 @@ async def cancel_job_pipeline(job_id: str) -> dict[str, Any]:
         "job_id": job_id,
         "status": "cancelled",
         "new_status": new_status.value,
+    }
+
+
+# ============================================================================
+# 3. ARCHIVED ATTEMPTS ROUTES (/jobs/{job_id}/attempts*)
+# ============================================================================
+
+
+@router.get("/{job_id}/attempts", response_model=None)
+async def list_job_attempts(job_id: str) -> list[dict[str, Any]]:
+    """List archived attempts for `job_id`, ordered newest-first."""
+    container = get_container()
+    attempts = container.jobs.list_attempts(job_id)
+    return [a.model_dump() for a in attempts]
+
+
+@router.post("/{job_id}/attempts/archive", response_model=None)
+async def archive_job_attempt(
+    job_id: str,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Snapshot active attempt artifacts and optionally reset active state to DOWNLOADED."""
+    container = get_container()
+    raw_label = body.get("label") if isinstance(body, dict) else None
+    label = str(raw_label) if raw_label is not None else None
+    raw_reset = body.get("reset_active") if isinstance(body, dict) else None
+    reset_active = True if raw_reset is None else bool(raw_reset)
+
+    try:
+        attempt, job, attempts = container.jobs.archive_attempt(
+            job_id,
+            label=label,
+            reset_active=reset_active,
+        )
+    except JobNotFoundError:
+        raise
+    except JobActivelyProcessingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EmptyAttemptError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "attempt": attempt.model_dump(),
+        "job": job.model_dump(),
+        "attempts": [a.model_dump() for a in attempts],
+    }
+
+
+@router.get("/{job_id}/attempts/{attempt_id}", response_model=None)
+async def get_job_attempt_detail(job_id: str, attempt_id: str) -> dict[str, Any]:
+    """Return full archived snapshot details (`attempt`, `cuts`, `transcription`, `renders`)."""
+    container = get_container()
+    try:
+        return container.jobs.get_attempt_detail(job_id, attempt_id)
+    except JobNotFoundError:
+        raise
+    except AttemptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/{job_id}/attempts/{attempt_id}", response_model=None)
+async def delete_job_attempt(job_id: str, attempt_id: str) -> dict[str, Any]:
+    """Atomically delete an archived attempt and return updated attempts list."""
+    container = get_container()
+    try:
+        attempts = container.jobs.delete_attempt(job_id, attempt_id)
+    except JobNotFoundError:
+        raise
+    except AttemptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "ok": True,
+        "attempt_id": attempt_id,
+        "attempts": [a.model_dump() for a in attempts],
     }
 
 

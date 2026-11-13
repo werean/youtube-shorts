@@ -70,16 +70,10 @@ export function TimestampDialog({
     <AppDialog
       title={mode === "add" ? "Adicionar Corte Manual" : "Editar timestamp"}
       onClose={onClose}
-      showHeaderClose={false}
       footer={
-        <>
-          <AppButton variant="primary" onClick={onClose}>
-            Cancelar
-          </AppButton>
-          <AppButton variant="secondary" onClick={handleSave}>
-            {mode === "add" ? "Adicionar" : "Salvar"}
-          </AppButton>
-        </>
+        <AppButton variant="secondary" onClick={handleSave}>
+          {mode === "add" ? "Adicionar corte" : "Salvar timestamp"}
+        </AppButton>
       }
     >
       {error ? <p className="ds-dialog-error">{error}</p> : null}

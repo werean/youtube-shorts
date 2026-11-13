@@ -252,17 +252,17 @@ O backend responde automaticamente com cabeçalhos `Accept-Ranges: bytes` e `Con
 
 Use este checklist para acompanhar a implementação:
 
-- [ ] **1. API Client & Jobs:**
-  - [ ] Verificar `src/api/jobs.ts`: garantir que `renameVideo` receba o objeto `Job` direto (sem `.job`).
-  - [ ] Adicionar `runJobPipeline` em `src/api/jobs.ts`.
-- [ ] **2. Server-Sent Events (SSE):**
-  - [ ] Criar o hook `src/hooks/useJobEvents.ts`.
-  - [ ] Substituir o polling de status no Studio / Workspace pelo `useJobEvents`, mantendo fallback para polling se a conexão cair.
-- [ ] **3. Curadoria de Cortes & Arcos Narrativos:**
-  - [ ] Atualizar a tipagem de `Cut` em `src/types/` ou sincronizar com `shared/contracts.ts` incluindo `narrative_arc`.
-  - [ ] Renderizar `narrative_arc` em `ShortInspectorView.tsx` com estilo Liquid Glass.
-- [ ] **4. Controles de Pipeline 1-Clique & Lote:**
-  - [ ] Conectar o botão principal "1-Clique" para acionar `runJobPipeline`.
-  - [ ] Testar botões de cancelamento cooperativo: `cancelTranscription` (`/jobs/:id/transcribe/cancel`), `cancelRendering` (`/jobs/:id/render/cancel`) e `cancelBatchPipeline` (`/jobs/batch/:batch_id/cancel`).
-- [ ] **5. Player de Vídeo:**
-  - [ ] Garantir que o player em `VideoPlayerView.tsx` aponte para `${apiBaseUrl}/media/videos/${jobId}` e teste o seek na timeline.
+- [x] **1. API Client & Jobs:**
+  - [x] Verificar `src/api/jobs.ts`: garantir que `renameVideo` receba o objeto `Job` direto (sem `.job`).
+  - [x] Adicionar `runJobPipeline` em `src/api/jobs.ts`.
+- [x] **2. Server-Sent Events (SSE):**
+  - [x] Criar o hook `src/hooks/useJobEvents.ts`.
+  - [x] Substituir o polling de status no Studio / Workspace pelo `useJobEvents`, mantendo fallback para polling se a conexão cair.
+- [x] **3. Curadoria de Cortes & Arcos Narrativos:**
+  - [x] Atualizar a tipagem de `Cut` em `src/types/` ou sincronizar com `shared/contracts.ts` incluindo `narrative_arc`.
+  - [x] Renderizar `narrative_arc` em `ShortInspectorView.tsx` com estilo Liquid Glass.
+- [x] **4. Controles de Pipeline 1-Clique & Lote:**
+  - [x] Conectar o botão principal "1-Clique" para acionar `runJobPipeline`.
+  - [x] Testar botões de cancelamento cooperativo: `cancelTranscription` (`/jobs/:id/transcribe/cancel`), `cancelRendering` (`/jobs/:id/render/cancel`) e `cancelBatchPipeline` (`/jobs/batch/:batch_id/cancel`).
+- [x] **5. Player de Vídeo:**
+  - [x] Garantir que o player em `VideoPlayerView.tsx` aponte para `${apiBaseUrl}/media/videos/${jobId}` e teste o seek na timeline.

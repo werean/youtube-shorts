@@ -650,6 +650,17 @@ def replace_cuts(
     return validated
 
 
+def _apply_cut_curation_status(cut: Cut, status: str) -> None:
+    """Set `status`, `approved`, and `rejected` flags consistently on a `Cut`."""
+    cut.status = status
+    if status == "approved":
+        cut.approved = True
+        cut.rejected = False
+    elif status == "rejected":
+        cut.rejected = True
+        cut.approved = False
+
+
 def update_cut_status(
     job_id: str,
     cut_id: str,
@@ -665,13 +676,7 @@ def update_cut_status(
     target_cut: Cut | None = None
     for cut in cuts:
         if cut.cut_id == cut_id or cut.id == cut_id:
-            cut.status = status
-            if status == "approved":
-                cut.approved = True
-                cut.rejected = False
-            elif status == "rejected":
-                cut.rejected = True
-                cut.approved = False
+            _apply_cut_curation_status(cut, status)
             target_cut = cut
             break
 
@@ -681,6 +686,25 @@ def update_cut_status(
     c.jobs.save_cuts(job_id, cuts)
     c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
     return target_cut
+
+
+def update_all_cuts_status(
+    job_id: str,
+    status: str,
+    *,
+    container: ServiceContainer | None = None,
+) -> list[Cut]:
+    """Atomically update every cut's `status` (`approved` or `rejected`) and transition job to `WAITING_APPROVAL`."""
+    c = container or get_container()
+    c.jobs.load_job(job_id)
+    cuts = c.jobs.load_cuts(job_id)
+
+    for cut in cuts:
+        _apply_cut_curation_status(cut, status)
+
+    c.jobs.save_cuts(job_id, cuts)
+    c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
+    return cuts
 
 
 def approve_cut(
@@ -699,3 +723,21 @@ def reject_cut(
     container: ServiceContainer | None = None,
 ) -> Cut:
     return update_cut_status(job_id, cut_id, "rejected", container=container)
+
+
+def approve_all_cuts(
+    job_id: str,
+    *,
+    container: ServiceContainer | None = None,
+) -> list[Cut]:
+    """Atomically approve all cuts for `job_id` and transition job to `WAITING_APPROVAL`."""
+    return update_all_cuts_status(job_id, "approved", container=container)
+
+
+def reject_all_cuts(
+    job_id: str,
+    *,
+    container: ServiceContainer | None = None,
+) -> list[Cut]:
+    """Atomically reject all cuts for `job_id` and transition job to `WAITING_APPROVAL`."""
+    return update_all_cuts_status(job_id, "rejected", container=container)

@@ -11,8 +11,10 @@ from app.application.runtime_service import get_container
 from app.domain.analysis.narrative_miner import (
     CutNotFoundError,
     analyze_job,
+    approve_all_cuts,
     approve_cut,
     list_cuts,
+    reject_all_cuts,
     reject_cut,
     replace_cuts,
 )
@@ -72,6 +74,18 @@ async def update_job_cuts(
         return {"ok": True, "cuts": cuts}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{job_id}/cuts/approve-all", response_model=list[Cut])
+async def approve_all_job_cuts(job_id: str) -> list[Cut]:
+    """Atomically approve all cuts for `job_id` and set job status to `WAITING_APPROVAL`."""
+    return approve_all_cuts(job_id)
+
+
+@router.post("/{job_id}/cuts/reject-all", response_model=list[Cut])
+async def reject_all_job_cuts(job_id: str) -> list[Cut]:
+    """Atomically reject all cuts for `job_id` and set job status to `WAITING_APPROVAL`."""
+    return reject_all_cuts(job_id)
 
 
 @router.post("/{job_id}/cuts/{cut_id}/approve", response_model=Cut)

@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Job, VideoRecord } from "./types";
+import type {
+  AttemptDetail,
+  AttemptSummary,
+  Cut,
+  Job,
+  JobStatus,
+  Segment,
+  VideoItem,
+  VideoRecord,
+} from "./types";
+import { recordToVideoItem } from "./utils/videoHelpers";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
-import { useUIState } from "./hooks";
+import { useJobEvents, useUIState } from "./hooks";
 import { useCutsWorkflow } from "./hooks/useCutsWorkflow";
 import { useCutTimestampWorkflow } from "./hooks/useCutTimestampWorkflow";
 import { useDependencyManagementWorkflow } from "./hooks/useDependencyManagementWorkflow";
@@ -13,15 +23,24 @@ import { useTranscriptionWorkflow } from "./hooks/useTranscriptionWorkflow";
 import {
   analyzeJob,
   apiBaseUrl,
+  archiveJobAttempt,
   archiveVideo,
   buildBlocks,
+  cancelJob,
+  cancelRendering,
+  cancelTranscription,
   createJob,
+  deleteJobAttempt,
   deleteVideo,
   getJob,
+  getJobAttempt,
   ingestJob,
   listArchivedVideos,
+  listJobAttempts,
   listVideos,
+  openVideoFolder,
   renameVideo,
+  runJobPipeline,
   updateCuts,
   uploadVideoFile,
   getSettings,
@@ -61,6 +80,7 @@ import { AiResponseDialog } from "./components/dialogs/AiResponseDialog";
 import { RegenerateAnalyzeDialog } from "./components/dialogs/RegenerateAnalyzeDialog";
 import { AppDialog } from "./components/shared";
 import { formatTimestamp, parseTimestampInput } from "./utils/formatters";
+import { cn } from "./lib/utils";
 import { GlassWindow, GlassToast, GlassToastContainer, GlassCard, GlassButton } from "./components/ui/glass";
 import {
   StudioTopbar,
@@ -71,9 +91,10 @@ import {
   type VideoPlayerViewHandle,
   TranscriptInteractiveView,
   ShortInspectorView,
+  TerminalLogsView,
+  LiveTaskFeedbackCard,
 } from "./components/workspace";
 import { getTranscription } from "./api/transcription";
-import type { Segment } from "./types";
 
 interface ActionState {
   busy: boolean;
@@ -91,8 +112,81 @@ interface OllamaModelCatalogItem {
   size?: number;
 }
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  CREATED: "Vídeo criado",
+  DOWNLOADING: "Baixando vídeo fonte via yt-dlp",
+  DOWNLOADED: "Pronto para processar",
+  TRANSCRIBING: "Transcrevendo áudio na GPU (Whisper + VAD)",
+  BUILDING_BLOCKS: "Construindo blocos semânticos e prosódicos",
+  BUILDING_TOPICS: "Segmentando tópicos contextuais (TextTiling)",
+  ANALYZING: "Minerando cortes virais via IA (LLM)",
+  WAITING_APPROVAL: "Aguardando aprovação de cortes",
+  RENDERING: "Renderizando Shorts 9:16 (NVENC)",
+  DONE: "Processamento concluído com sucesso",
+  ERROR: "Erro durante o processamento",
+};
+
+function formatEtaSeconds(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || seconds < 0) return "";
+  if (seconds < 60) return `~${Math.round(seconds)}s restantes`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `~${mins}m ${secs}s restantes`;
+}
+
+function formatTimestampForFilename(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, "0")}_${String(secs).padStart(2, "0")}`;
+}
+
+function buildCutFilenameFromRange(start: number, end: number): string {
+  return `${formatTimestampForFilename(start)}-${formatTimestampForFilename(end)}.mp4`;
+}
+
+function toCatchyTitle(cut: Cut): string {
+  const base = String(cut.title || "")
+    .replace(/\s+/g, " ")
+    .replace(/[.]+$/g, "")
+    .trim();
+
+  if (!base) {
+    return "Corte em destaque";
+  }
+
+  if (base.length <= 72) {
+    return base;
+  }
+
+  return `${base.slice(0, 69).trimEnd()}...`;
+}
+
+function normalizeArchivedRenderPath(jobId: string, attemptId: string, path: string): string {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("/")
+  ) {
+    return trimmed;
+  }
+  return `/media/shorts/${encodeURIComponent(jobId)}/attempts/${encodeURIComponent(attemptId)}/${encodeURIComponent(trimmed)}`;
+}
+
+function formatAttemptTimestamp(iso?: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function App() {
-  const videoRef = useRef<HTMLVideoElement>(null);
   const toolConfigsInputRef = useRef<HTMLInputElement>(null);
   const {
     uploadMode,
@@ -162,6 +256,7 @@ export default function App() {
   const [expandUploadSection, setExpandUploadSection] = useState(true);
   const [expandVideoListSection, setExpandVideoListSection] = useState(true);
   const [expandVideoPlayerSection, setExpandVideoPlayerSection] = useState(true);
+  const [expandTerminalSection, setExpandTerminalSection] = useState(true);
   const [expandTranscriptSection, setExpandTranscriptSection] = useState(true);
   const [expandRenderingSection, setExpandRenderingSection] = useState(true);
   const [studioTab, setStudioTab] = useState<StudioTab>("workspace");
@@ -252,6 +347,10 @@ export default function App() {
     selectSuggestedCut,
     setCutActionHover,
     clearCutActionHover,
+    approveSingleCut,
+    rejectSingleCut,
+    approveAllSuggestedCuts,
+    rejectAllSuggestedCuts,
   } = useCutsWorkflow({
     activeJobId: activeVideo?.job.job_id ?? null,
     appSettings,
@@ -261,36 +360,79 @@ export default function App() {
     onAiResponseRawChange: setAiResponseRaw,
     onShowAiResponseDialogChange: setShowAiResponseDialog,
     onRefreshVideo: refreshVideo,
-    onPausePlayback: () => videoRef.current?.pause(),
+    onPausePlayback: () => {
+      videoPlayerHandleRef.current?.pause();
+    },
     onSeekAndPlay: (seconds) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = seconds;
-        videoRef.current.play();
+      if (videoPlayerHandleRef.current) {
+        videoPlayerHandleRef.current.seek(seconds);
+        void videoPlayerHandleRef.current.play();
       }
     },
   });
 
-  const workspaceVideos: WorkspaceVideoItem[] = useMemo(() => {
-    return videos.map((v) => {
-      const isCurrentActive = v.job.job_id === activeVideoId;
-      const cutsCount = isCurrentActive ? suggestedCuts.length : 0;
-      return {
-        id: v.job.job_id,
-        title: String(v.job.video_name || v.job.youtube_url || "Vídeo sem título").trim(),
-        durationSeconds: null,
-        cutsCount,
-        status: v.job.status,
-        isProcessing: [
-          "DOWNLOADING",
-          "TRANSCRIBING",
-          "BUILDING_BLOCKS",
-          "BUILDING_TOPICS",
-          "ANALYZING",
-          "RENDERING",
-        ].includes(v.job.status),
-      };
-    });
-  }, [videos, activeVideoId, suggestedCuts]);
+  const [is1ClickRunning, setIs1ClickRunning] = useState(false);
+  const pipelineIncludeRenderRef = useRef<boolean>(true);
+  const [attemptsByJobId, setAttemptsByJobId] = useState<Record<string, AttemptSummary[]>>({});
+  const [attemptsCountByJobId, setAttemptsCountByJobId] = useState<Record<string, number>>({});
+  const [loadingAttemptsByJobId, setLoadingAttemptsByJobId] = useState<Record<string, boolean>>({});
+  const [archivingJobId, setArchivingJobId] = useState<string | null>(null);
+  const [inspectingAttempt, setInspectingAttempt] = useState<{
+    jobId: string;
+    attemptId: string;
+    detail: AttemptDetail;
+  } | null>(null);
+  const [selectedArchivedCutId, setSelectedArchivedCutId] = useState<string | null>(null);
+  const [isLoadingAttemptDetail, setIsLoadingAttemptDetail] = useState(false);
+
+  const {
+    progress,
+    etaSeconds,
+    currentMessage,
+    jobStatus: sseJobStatus,
+    logs: sseLogs,
+    resetProgress,
+  } = useJobEvents(activeVideoId, (newStatus) => {
+    const normalizedStatus = String(newStatus).replace(/^JobStatus\./i, "").toUpperCase() as JobStatus;
+    console.log(`[SSE] Status alterado para ${activeVideoId}: ${normalizedStatus}`);
+    if (activeVideoId) {
+      updateVideo(activeVideoId, {
+        job: {
+          ...(videos.find((v) => v.job.job_id === activeVideoId)?.job ?? {
+            job_id: activeVideoId,
+            youtube_url: "",
+            status: normalizedStatus,
+            created_at: new Date().toISOString(),
+          }),
+          status: normalizedStatus,
+        },
+        isTranscribing: normalizedStatus === "TRANSCRIBING",
+      });
+
+      if (normalizedStatus === "WAITING_APPROVAL") {
+        void loadCutsForActiveJob(activeVideoId);
+        void refreshVideo(activeVideoId);
+        if (!pipelineIncludeRenderRef.current) {
+          setIs1ClickRunning(false);
+          setToastNotification(
+            "Cortes prontos! Revise, aprove ou recuse no menu à direita antes de renderizar.",
+          );
+          void loadVideos();
+        }
+      }
+      if (normalizedStatus === "DONE") {
+        void loadCutsForActiveJob(activeVideoId);
+        void refreshRenderOutputs(activeVideoId);
+        void refreshVideo(activeVideoId);
+      }
+      if (normalizedStatus === "DOWNLOADED" || normalizedStatus === "DONE" || normalizedStatus === "ERROR") {
+        setIs1ClickRunning(false);
+        pipelineIncludeRenderRef.current = true;
+        void refreshVideo(activeVideoId);
+        void loadVideos();
+      }
+    }
+  });
 
   const selectedSuggestedCut = useMemo(() => {
     if (!suggestedCuts.length) return null;
@@ -441,11 +583,13 @@ export default function App() {
     setCuts,
     setSuggestedCuts,
     setSelectedSuggestedCutId,
-    persistCuts: updateCuts,
+    persistCuts: async (jobId, cutsToPersist) => {
+      await updateCuts(jobId, cutsToPersist);
+    },
     seekTo: (seconds) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = seconds;
-        videoRef.current.play();
+      if (videoPlayerHandleRef.current) {
+        videoPlayerHandleRef.current.seek(seconds);
+        void videoPlayerHandleRef.current.play();
       }
     },
   });
@@ -457,6 +601,7 @@ export default function App() {
     renderTitlesByFileName,
     buildRenderUrl,
     clearRenderOutputs,
+    refreshRenderOutputs,
     startRenderFlow,
     cancelActiveRendering,
     openRenderOutputFolder,
@@ -475,23 +620,492 @@ export default function App() {
       });
     },
   });
+  const rawActiveStatus = (activeVideoId && sseJobStatus) ? sseJobStatus : activeVideo?.job.status;
+  const activeStatus = rawActiveStatus ? String(rawActiveStatus).replace(/^JobStatus\./i, "").toUpperCase() : "";
+
+  const isVideoProcessing = [
+    "DOWNLOADING",
+    "TRANSCRIBING",
+    "BUILDING_BLOCKS",
+    "BUILDING_TOPICS",
+    "ANALYZING",
+    "RENDERING",
+  ].includes(activeStatus || "");
+
+  const isAnyOperationRunning =
+    isVideoProcessing ||
+    is1ClickRunning ||
+    isRendering ||
+    Boolean(activeVideo?.isTranscribing) ||
+    isIngesting ||
+    action.busy;
+
+  const isInspectingArchive = Boolean(
+    inspectingAttempt && inspectingAttempt.jobId === activeVideoId,
+  );
+
+  const archivedCuts = useMemo(() => {
+    if (!isInspectingArchive || !inspectingAttempt) return [];
+    return inspectingAttempt.detail.cuts || [];
+  }, [isInspectingArchive, inspectingAttempt]);
+
+  const selectedArchivedCut = useMemo(() => {
+    if (!isInspectingArchive || !archivedCuts.length) return null;
+    return archivedCuts.find((c) => c.cut_id === selectedArchivedCutId) || archivedCuts[0];
+  }, [isInspectingArchive, archivedCuts, selectedArchivedCutId]);
+
+  const archivedSegments: Segment[] = useMemo(() => {
+    if (!isInspectingArchive || !inspectingAttempt) return [];
+    const rawSegs = inspectingAttempt.detail.transcription?.segments || [];
+    return rawSegs.map((s, idx) => ({
+      segment_id: String(s.segment_id || `arch_seg_${idx}`),
+      start: Number(s.start) || 0,
+      end: Number(s.end) || 0,
+      text: String(s.text || "").trim(),
+    }));
+  }, [isInspectingArchive, inspectingAttempt]);
+
+  const archivedRenderOutputs = useMemo(() => {
+    if (!isInspectingArchive || !inspectingAttempt) return [];
+    const raw =
+      inspectingAttempt.detail.renders && inspectingAttempt.detail.renders.length > 0
+        ? inspectingAttempt.detail.renders
+        : inspectingAttempt.detail.attempt.rendered_urls || [];
+    return raw
+      .map((item) =>
+        normalizeArchivedRenderPath(inspectingAttempt.jobId, inspectingAttempt.attemptId, item),
+      )
+      .filter(Boolean);
+  }, [isInspectingArchive, inspectingAttempt]);
+
+  const archivedRenderTitlesByFileName = useMemo(() => {
+    const next: Record<string, string> = {};
+    for (const cut of archivedCuts) {
+      const filename = buildCutFilenameFromRange(cut.start, cut.end);
+      next[filename] = toCatchyTitle(cut);
+    }
+    return next;
+  }, [archivedCuts]);
+
+  const effectiveCuts = isInspectingArchive ? archivedCuts : suggestedCuts;
+  const effectiveSelectedCut = isInspectingArchive ? selectedArchivedCut : selectedSuggestedCut;
+  const effectiveSelectedCutId = isInspectingArchive
+    ? (selectedArchivedCutId && archivedCuts.some((c) => c.cut_id === selectedArchivedCutId)
+        ? selectedArchivedCutId
+        : null)
+    : selectedSuggestedCutId;
+  const effectiveSegments = isInspectingArchive
+    ? archivedSegments
+    : activeVideo?.transcriptionSegments || [];
+  const effectiveRenderOutputs = isInspectingArchive ? archivedRenderOutputs : renderOutputs;
+  const effectiveRenderTitlesByFileName = isInspectingArchive
+    ? archivedRenderTitlesByFileName
+    : renderTitlesByFileName;
+
+  const workspaceVideos: WorkspaceVideoItem[] = useMemo(() => {
+    return videos.map((v) => {
+      const jobId = v.job.job_id;
+      const isCurrentActive = jobId === activeVideoId;
+      const cutsCount = isCurrentActive ? suggestedCuts.length : 0;
+      const rawStatus = isCurrentActive && sseJobStatus ? sseJobStatus : v.job.status;
+      const status = rawStatus ? String(rawStatus).replace(/^JobStatus\./i, "").toUpperCase() : "";
+      const isProcessing = [
+        "DOWNLOADING",
+        "TRANSCRIBING",
+        "BUILDING_BLOCKS",
+        "BUILDING_TOPICS",
+        "ANALYZING",
+        "RENDERING",
+      ].includes(status);
+      const hasTranscriptionContent = Boolean(
+        v.hasTranscription ||
+          v.transcription ||
+          (v.transcriptionSegments && v.transcriptionSegments.length > 0),
+      );
+      const hasActiveContent = Boolean(
+        hasTranscriptionContent ||
+          v.hasAnalysis ||
+          (isCurrentActive && (suggestedCuts.length > 0 || renderOutputs.length > 0)) ||
+          status === "WAITING_APPROVAL" ||
+          status === "DONE",
+      );
+      const attemptsCount =
+        attemptsCountByJobId[jobId] ??
+        attemptsByJobId[jobId]?.length ??
+        v.attemptsCount ??
+        0;
+
+      return {
+        id: jobId,
+        title: String(v.job.video_name || v.job.youtube_url || "Vídeo sem título").trim(),
+        durationSeconds: v.job.video_duration_seconds ?? null,
+        cutsCount,
+        status,
+        isProcessing,
+        attemptsCount,
+        canArchive: !isProcessing && hasActiveContent,
+      };
+    });
+  }, [
+    videos,
+    activeVideoId,
+    suggestedCuts,
+    sseJobStatus,
+    renderOutputs.length,
+    attemptsCountByJobId,
+    attemptsByJobId,
+  ]);
+
+  async function loadAttemptsForJob(jobId: string) {
+    setLoadingAttemptsByJobId((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      const list = await listJobAttempts(jobId);
+      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: list }));
+      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: list.length }));
+    } catch (error) {
+      console.error("[UI] Falha ao carregar tentativas arquivadas:", error);
+    } finally {
+      setLoadingAttemptsByJobId((prev) => ({ ...prev, [jobId]: false }));
+    }
+  }
+
+  function handleExitArchivedInspection() {
+    setInspectingAttempt(null);
+    setSelectedArchivedCutId(null);
+  }
+
+  async function handleSelectArchivedAttempt(jobId: string, attemptId: string) {
+    if (activeVideoId !== jobId) {
+      const validation = canStartOperation(jobId);
+      if (!validation.allowed) {
+        alert(validation.message);
+        return;
+      }
+    }
+
+    setIsLoadingAttemptDetail(true);
+    try {
+      const detail = await getJobAttempt(jobId, attemptId);
+      if (activeVideoId !== jobId) {
+        setActiveVideoId(jobId);
+      }
+      setInspectingAttempt({ jobId, attemptId, detail });
+      setSelectedArchivedCutId(detail.cuts?.[0]?.cut_id ?? null);
+      videoPlayerHandleRef.current?.pause();
+    } catch (error: unknown) {
+      console.error("[UI] Erro ao carregar tentativa arquivada:", error);
+      const msg = error instanceof Error ? error.message : "Falha ao carregar tentativa arquivada";
+      setAction({ busy: false, error: msg });
+    } finally {
+      setIsLoadingAttemptDetail(false);
+    }
+  }
+
+  async function handleArchiveAttempt(jobId: string, resetActive: boolean) {
+    const targetVideo = videos.find((v) => v.job.job_id === jobId);
+    const targetStatus = String(targetVideo?.job.status || "")
+      .replace(/^JobStatus\./i, "")
+      .toUpperCase();
+    const isTargetProcessing = [
+      "DOWNLOADING",
+      "TRANSCRIBING",
+      "BUILDING_BLOCKS",
+      "BUILDING_TOPICS",
+      "ANALYZING",
+      "RENDERING",
+    ].includes(targetStatus);
+
+    if (isTargetProcessing || (jobId === activeVideoId && isAnyOperationRunning)) {
+      setToastNotification("Aguarde ou cancele o processamento antes de arquivar.");
+      return;
+    }
+
+    setArchivingJobId(jobId);
+    try {
+      const result = await archiveJobAttempt(jobId, { reset_active: resetActive });
+      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: result.attempts }));
+      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: result.attempts.length }));
+
+      if (resetActive) {
+        updateVideo(jobId, {
+          job: result.job,
+          hasTranscription: false,
+          transcription: "",
+          transcriptionSegments: [],
+          transcriptionFormats: undefined,
+          attemptsCount: result.attempts.length,
+        });
+
+        if (jobId === activeVideoId) {
+          clearCuts();
+          clearRenderOutputs();
+          setBlocks([]);
+          setAiResponseRaw(null);
+          setShowAiResponseDialog(false);
+          handleExitArchivedInspection();
+          resetProgress();
+        } else if (inspectingAttempt?.jobId === jobId) {
+          handleExitArchivedInspection();
+        }
+
+        setToastNotification(
+          `Tentativa "${result.attempt.label}" arquivada! Workspace pronto em DOWNLOADED para nova tentativa.`,
+        );
+      } else {
+        updateVideo(jobId, {
+          job: result.job,
+          attemptsCount: result.attempts.length,
+        });
+        setToastNotification(`Cópia "${result.attempt.label}" salva nos arquivados!`);
+      }
+    } catch (error: unknown) {
+      console.error("[UI] Erro ao arquivar tentativa:", error);
+      const msg = error instanceof Error ? error.message : "Falha ao arquivar tentativa";
+      setAction({ busy: false, error: msg });
+    } finally {
+      setArchivingJobId(null);
+    }
+  }
+
+  async function handleDeleteAttempt(jobId: string, attemptId: string) {
+    try {
+      const result = await deleteJobAttempt(jobId, attemptId);
+      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: result.attempts }));
+      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: result.attempts.length }));
+      updateVideo(jobId, { attemptsCount: result.attempts.length });
+
+      if (inspectingAttempt?.jobId === jobId && inspectingAttempt?.attemptId === attemptId) {
+        handleExitArchivedInspection();
+      }
+      setToastNotification("Tentativa arquivada removida.");
+    } catch (error: unknown) {
+      console.error("[UI] Erro ao excluir tentativa arquivada:", error);
+      const msg = error instanceof Error ? error.message : "Falha ao excluir tentativa arquivada";
+      setAction({ busy: false, error: msg });
+    }
+  }
+
+  async function handleStartNewAttemptFromBanner() {
+    if (!activeVideo) return;
+    const jobId = activeVideo.job.job_id;
+    const activeItem = workspaceVideos.find((v) => v.id === jobId);
+
+    if (activeItem?.isProcessing || isAnyOperationRunning) {
+      setToastNotification("Aguarde ou cancele o processamento ativo antes de iniciar nova tentativa.");
+      return;
+    }
+
+    if (activeItem?.canArchive) {
+      await handleArchiveAttempt(jobId, true);
+      return;
+    }
+
+    handleExitArchivedInspection();
+    setToastNotification("Workspace ativo pronto em DOWNLOADED para iniciar nova tentativa.");
+  }
+
   const sharedTaskLogs = useSharedTaskLogWorkflow({
     activeJobId: activeVideo?.job.job_id ?? null,
     isTranscribing: activeVideo?.isTranscribing,
     isRendering,
+    isProcessing: Boolean(isAnyOperationRunning),
   });
   const {
     taskLogsContainerRef,
     activeTaskLogs,
     activeTaskLogType,
-    expandTaskLogs,
-    showMoreTaskLogs,
+    appendLogLine,
+    clearLogs,
   } = sharedTaskLogs;
+
+  useEffect(() => {
+    if (currentMessage) {
+      appendLogLine(currentMessage);
+    }
+  }, [currentMessage, appendLogLine]);
 
   const statusLabel = useMemo(
     () => videos.find((v) => v.job.job_id === activeVideoId)?.job.status ?? "NENHUM VÍDEO",
     [videos, activeVideoId],
   );
+
+  const showProgressBanner = Boolean(
+    activeVideo &&
+      (isVideoProcessing || is1ClickRunning) &&
+      activeStatus !== "DOWNLOADED" &&
+      activeStatus !== "ERROR" &&
+      activeStatus !== "DONE",
+  );
+
+  const allLogs = useMemo(() => {
+    const combined = [...activeTaskLogs];
+    for (const log of sseLogs) {
+      if (!combined.includes(log)) {
+        combined.push(log);
+      }
+    }
+    return combined.length > 0 ? combined : sseLogs;
+  }, [activeTaskLogs, sseLogs]);
+
+  async function handleRunPipeline(includeRender: boolean) {
+    if (!activeVideoId) {
+      setToastNotification("Selecione um vídeo na biblioteca primeiro.");
+      return;
+    }
+
+    if (isInspectingArchive) {
+      setToastNotification("Volte para a tentativa ativa para iniciar um processamento.");
+      return;
+    }
+
+    const validation = canStartOperation(activeVideoId);
+    if (!validation.allowed) {
+      alert(validation.message);
+      return;
+    }
+
+    pipelineIncludeRenderRef.current = includeRender;
+    setIs1ClickRunning(true);
+    try {
+      setToastNotification(
+        includeRender
+          ? "Pipeline 1-Clique iniciado com sucesso!"
+          : "Pipeline iniciado até curadoria (pausará antes de renderizar).",
+      );
+      await runJobPipeline(activeVideoId, { include_render: includeRender });
+      await refreshVideo(activeVideoId);
+    } catch (error: unknown) {
+      console.error("[UI] Erro ao iniciar pipeline:", error);
+      const message = error instanceof Error ? error.message : "Falha ao iniciar pipeline";
+      setAction({ busy: false, error: message });
+      setIs1ClickRunning(false);
+      pipelineIncludeRenderRef.current = true;
+    }
+  }
+
+  function handleRun1ClickPipeline() {
+    void handleRunPipeline(true);
+  }
+
+  function handleRunCuratePipeline() {
+    void handleRunPipeline(false);
+  }
+
+  async function handleDirectTranscribe(targetJobId?: string) {
+    const jobId = targetJobId || activeVideoId;
+    if (!jobId) {
+      setToastNotification("Selecione um vídeo primeiro.");
+      return;
+    }
+
+    if (isInspectingArchive && jobId === activeVideoId) {
+      setToastNotification("Volte para a tentativa ativa para transcrever.");
+      return;
+    }
+
+    const validation = canStartOperation(jobId);
+    if (!validation.allowed) {
+      alert(validation.message);
+      return;
+    }
+
+    if (jobId !== activeVideoId) {
+      handleExitArchivedInspection();
+      setActiveVideoId(jobId);
+    }
+
+    setToastNotification("Iniciando transcrição de áudio (Whisper)...");
+    requestTranscriptionStart();
+  }
+
+  async function handleDirectAnalyze(targetJobId?: string) {
+    const jobId = targetJobId || activeVideoId;
+    if (!jobId) {
+      setToastNotification("Selecione um vídeo primeiro.");
+      return;
+    }
+
+    if (isInspectingArchive && jobId === activeVideoId) {
+      setToastNotification("Volte para a tentativa ativa para gerar cortes.");
+      return;
+    }
+
+    const validation = canStartOperation(jobId);
+    if (!validation.allowed) {
+      alert(validation.message);
+      return;
+    }
+
+    if (jobId !== activeVideoId) {
+      handleExitArchivedInspection();
+      setActiveVideoId(jobId);
+    }
+
+    const targetVideo = videos.find((v) => v.job.job_id === jobId);
+    if (!targetVideo?.hasTranscription) {
+      setToastNotification("É necessário transcrever o áudio antes de minerar os cortes.");
+      return;
+    }
+
+    try {
+      setIsAnalyzing(true);
+      setToastNotification("Minerando cortes virais com IA...");
+      const result = await analyzeJob(jobId);
+      handleAnalyzeResult(result);
+      await loadCutsForActiveJob(jobId);
+      await refreshVideo(jobId);
+      setToastNotification("Cortes minerados com sucesso!");
+    } catch (err: any) {
+      console.error("[UI] Erro ao minerar cortes com IA:", err);
+      const msg = err?.message || "Falha ao minerar cortes com IA";
+      setAction({ busy: false, error: msg });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function handleCancelActiveOperation() {
+    if (!activeVideoId) return;
+    console.log(`[UI] Cancelando operação ativa para ${activeVideoId}`);
+    try {
+      // 1. Aciona o cancelamento unificado do job no backend
+      try {
+        await cancelJob(activeVideoId);
+      } catch (e) {
+        console.warn("[UI] cancelJob fallback:", e);
+      }
+
+      // 2. Aciona cancelamentos específicos adicionais por garantia
+      try {
+        await cancelTranscription(activeVideoId);
+      } catch {}
+      try {
+        await cancelRendering(activeVideoId);
+      } catch {}
+
+      // 3. Reseta estados visuais de loading do frontend imediatamente
+      pipelineIncludeRenderRef.current = true;
+      setIs1ClickRunning(false);
+      setIsRendering(false);
+      updateVideo(activeVideoId, {
+        isTranscribing: false,
+      });
+
+      setToastNotification("Operação cancelada com sucesso.");
+    } catch (err: any) {
+      console.error("[UI] Erro ao cancelar cooperativamente:", err);
+      setToastNotification("Falha ao cancelar operação.");
+    } finally {
+      setIs1ClickRunning(false);
+      setIsRendering(false);
+      resetProgress();
+      if (activeVideoId) {
+        await refreshVideo(activeVideoId);
+        await loadVideos();
+      }
+    }
+  }
+
   const hasAnyBlocks = useMemo(() => {
     if (!activeVideo) return false;
     return blocks.length > 0;
@@ -672,6 +1286,16 @@ export default function App() {
     }
   }, [ingestJobId, isIngesting, uploadMode]);
 
+  // Poll progressive render outputs during 1-click pipeline RENDERING stage
+  useEffect(() => {
+    if (!activeVideoId || activeStatus !== "RENDERING" || isRendering) return;
+    void refreshRenderOutputs(activeVideoId);
+    const intervalId = window.setInterval(() => {
+      void refreshRenderOutputs(activeVideoId);
+    }, 2000);
+    return () => window.clearInterval(intervalId);
+  }, [activeVideoId, activeStatus, isRendering]);
+
   // Load cuts when active video changes
   useEffect(() => {
     if (activeVideo?.job?.job_id) {
@@ -691,6 +1315,15 @@ export default function App() {
         const archivedItems = archived.map(recordToVideoItem);
         setVideos(activeItems);
         setArchivedVideos(archivedItems);
+        setAttemptsCountByJobId((prev) => {
+          const next = { ...prev };
+          for (const record of active) {
+            if (typeof record.attempts_count === "number") {
+              next[record.job_id] = record.attempts_count;
+            }
+          }
+          return next;
+        });
         hydrateTranscriptions(activeItems, updateVideo);
         hydrateTranscriptions(archivedItems, updateArchivedVideo);
 
@@ -705,17 +1338,20 @@ export default function App() {
 
   function upsertVideoIntoList(video: VideoItem) {
     const jobId = String(video?.job?.job_id ?? "").trim();
-    const title = String(video?.job?.video_name ?? video?.job?.source_file_name ?? "").trim();
-    const videoPath = String(video?.videoPath ?? "").trim();
-
-    if (!jobId || !title || !videoPath) {
-      console.warn("[UI] Ignorando vídeo inválido (faltando dados obrigatórios)", {
-        jobId,
-        title,
-        videoPath,
-      });
+    if (!jobId) {
+      console.warn("[UI] Ignorando vídeo inválido (sem job_id)", video);
       return;
     }
+
+    const rawTitle = String(
+      video?.job?.video_name ??
+      video?.job?.source_file_name ??
+      video?.job?.youtube_url ??
+      ""
+    ).trim();
+    const title = rawTitle || "Vídeo sem título";
+
+    const videoPath = String(video?.videoPath ?? "").trim() || `/media/videos/${jobId}`;
 
     const normalized: VideoItem = {
       ...video,
@@ -727,6 +1363,7 @@ export default function App() {
     };
 
     setVideos((current) => [normalized, ...current.filter((v) => v.job.job_id !== jobId)]);
+    handleExitArchivedInspection();
     setActiveVideoId(jobId);
   }
 
@@ -734,6 +1371,7 @@ export default function App() {
     setVideoView(next);
     setMenuOpenId(null);
     if (next === "archived") {
+      handleExitArchivedInspection();
       setActiveVideoId(null);
     }
     if (next === "archived") {
@@ -744,23 +1382,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !selectedSuggestedCutId) return;
-
-    const selectedCut = suggestedCuts.find((c) => c.cut_id === selectedSuggestedCutId);
-    if (!selectedCut) return;
-
-    const handleTimeUpdate = () => {
-      if (video.currentTime >= selectedCut.end) {
-        video.pause();
+    if (activeVideoId) {
+      const count = attemptsCountByJobId[activeVideoId];
+      if (typeof count === "number" && count > 0 && !attemptsByJobId[activeVideoId]) {
+        void loadAttemptsForJob(activeVideoId);
       }
-    };
-
-    video.addEventListener("timeupdate", handleTimeUpdate);
-    return () => {
-      video.removeEventListener("timeupdate", handleTimeUpdate);
-    };
-  }, [selectedSuggestedCutId, suggestedCuts]);
+    }
+  }, [activeVideoId, attemptsCountByJobId]);
 
   useEffect(() => {
     setBlocks([]);
@@ -1008,29 +1636,8 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  // Monitor video playback for cut end time
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !selectedSuggestedCutId) return;
-
-    // Find the selected cut
-    const selectedCut = suggestedCuts.find((cut) => cut.cut_id === selectedSuggestedCutId);
-    if (!selectedCut) return;
-
-    const handleTimeUpdate = () => {
-      // Check if we've reached or passed the end time of the cut
-      if (video.currentTime >= selectedCut.end) {
-        video.pause();
-        console.log(`[UI] Paused at ${formatTimestamp(selectedCut.end)}`);
-      }
-    };
-
-    video.addEventListener("timeupdate", handleTimeUpdate);
-    return () => video.removeEventListener("timeupdate", handleTimeUpdate);
-  }, [selectedSuggestedCutId, suggestedCuts]);
-
   return (
-    <div className="h-screen w-screen bg-[#07080b] text-[#f5f5f7] flex flex-col overflow-hidden relative select-none">
+    <div className="h-[100dvh] w-[100dvw] bg-[#07080b] text-[#f5f5f7] flex flex-col overflow-hidden relative select-none">
       {/* Ambient Light Mesh Background */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
         <div className="absolute -top-32 -left-32 w-[460px] h-[460px] bg-blue-600/10 rounded-full blur-[140px]" />
@@ -1044,17 +1651,280 @@ export default function App() {
           activeTab={studioTab}
           onTabChange={setStudioTab}
           activeVideoTitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : null}
-          gpuStatus={action.busy ? "busy" : "online"}
-          gpuLabel={action.busy ? "PROCESSANDO" : "GPU ONLINE"}
+          gpuStatus={isAnyOperationRunning ? "busy" : "online"}
+          gpuLabel={isAnyOperationRunning ? (STATUS_DESCRIPTIONS[activeStatus || ""] ? (activeStatus || "PROCESSANDO") : "PROCESSANDO") : "GPU ONLINE"}
           onConfigureApp={() => setShowConfigureAppDialog(true)}
           onManageDependencies={() => setShowDependenciesDialog(true)}
           onConfigureLLM={() => setShowLLMConfigDialog(true)}
           onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
           onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
           onShowHowToUse={() => setShowHowToUseDialog(true)}
+          actions={
+            <div className="flex items-center gap-2">
+              {activeVideo && (
+                <>
+                  <GlassButton
+                    variant="glass"
+                    size="sm"
+                    onClick={() => handleDirectTranscribe()}
+                    disabled={isAnyOperationRunning || isInspectingArchive}
+                    leadingIcon={
+                      <svg className="w-3.5 h-3.5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                      </svg>
+                    }
+                    className="text-xs font-medium border-white/10 hover:border-cyan-500/40 disabled:opacity-40"
+                    title={
+                      isInspectingArchive
+                        ? "Volte para a tentativa ativa para transcrever"
+                        : "Transcrever áudio deste vídeo com Whisper na GPU"
+                    }
+                  >
+                    Transcrever
+                  </GlassButton>
+
+                  <GlassButton
+                    variant="glass"
+                    size="sm"
+                    onClick={() => handleDirectAnalyze()}
+                    disabled={isAnyOperationRunning || isInspectingArchive || !activeVideo.hasTranscription}
+                    leadingIcon={
+                      <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="6" cy="6" r="3" />
+                        <circle cx="6" cy="18" r="3" />
+                        <line x1="20" y1="4" x2="8.12" y2="15.88" />
+                      </svg>
+                    }
+                    className="text-xs font-medium border-white/10 hover:border-amber-500/40 disabled:opacity-40"
+                    title={
+                      isInspectingArchive
+                        ? "Volte para a tentativa ativa para gerar cortes"
+                        : activeVideo.hasTranscription
+                          ? "Minerar cortes narrativos com IA (LLM)"
+                          : "Transcreva o áudio primeiro para habilitar a mineração de cortes"
+                    }
+                  >
+                    Gerar Cortes
+                  </GlassButton>
+
+                  <GlassButton
+                    variant="glass"
+                    size="sm"
+                    onClick={handleRunCuratePipeline}
+                    disabled={isAnyOperationRunning || isInspectingArchive}
+                    leadingIcon={
+                      <svg className="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M9 11l3 3L22 4" />
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                      </svg>
+                    }
+                    className="text-xs font-medium border-white/10 hover:border-emerald-500/40 disabled:opacity-40"
+                    title={
+                      isInspectingArchive
+                        ? "Volte para a tentativa ativa para gerar e revisar cortes"
+                        : "Transcrever, gerar cortes e pausar para sua revisão antes de renderizar"
+                    }
+                  >
+                    Gerar e Revisar
+                  </GlassButton>
+
+                  <GlassButton
+                    variant="primary"
+                    size="sm"
+                    onClick={handleRun1ClickPipeline}
+                    disabled={isAnyOperationRunning || isInspectingArchive}
+                    leadingIcon={
+                      isAnyOperationRunning ? (
+                        <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3.5 h-3.5 text-amber-300" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        </svg>
+                      )
+                    }
+                    className={cn(
+                      "shadow-[0_0_16px_rgba(59,130,246,0.35)] hover:shadow-[0_0_24px_rgba(59,130,246,0.55)] transition-all font-semibold text-sm",
+                      (isAnyOperationRunning || isInspectingArchive) && "opacity-60 cursor-not-allowed",
+                    )}
+                    title={
+                      isInspectingArchive
+                        ? "Volte para a tentativa ativa para iniciar o pipeline 1-Clique"
+                        : undefined
+                    }
+                  >
+                    {isAnyOperationRunning ? "Processando..." : "Gerar Shorts com 1-Clique"}
+                  </GlassButton>
+                </>
+              )}
+            </div>
+          }
         />
 
-        <div className="flex-1 flex overflow-hidden">
+        {/* Real-time SSE Progress Banner */}
+        {showProgressBanner && (
+          <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-blue-950/80 via-[#0d1224]/90 to-[#07080b]/90 border-b border-blue-500/25 backdrop-blur-xl flex items-center justify-between gap-4 z-30 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex-none">
+                <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping absolute" />
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-xs tracking-wide uppercase text-blue-300">
+                    {STATUS_DESCRIPTIONS[activeStatus || ""] || activeStatus || "Processando"}
+                  </span>
+                  {etaSeconds !== null && etaSeconds !== undefined && etaSeconds > 0 && (
+                    <span className="text-xs font-mono font-medium text-cyan-300 bg-cyan-950/60 px-2.5 py-0.5 rounded-md border border-cyan-500/30">
+                      {formatEtaSeconds(etaSeconds)}
+                    </span>
+                  )}
+                </div>
+                {currentMessage && (
+                  <p className="text-xs text-zinc-200 truncate max-w-md sm:max-w-xl mt-0.5">
+                    {currentMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Barra de Progresso + % e Botão de Cancelar Cooperativo */}
+            <div className="flex items-center gap-4 flex-none">
+              <div className="flex items-center gap-2.5">
+                <div className="w-28 sm:w-48 h-2 rounded-full bg-white/10 overflow-hidden border border-white/10 relative">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out"
+                    style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+                  />
+                </div>
+                <span className="font-mono text-sm font-bold text-white min-w-[3rem] text-right">
+                  {progress.toFixed(0)}%
+                </span>
+              </div>
+
+              <GlassButton
+                variant="danger"
+                size="sm"
+                onClick={handleCancelActiveOperation}
+                leadingIcon={
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                }
+              >
+                Cancelar
+              </GlassButton>
+            </div>
+          </div>
+        )}
+
+        {/* Banner de Inspeção de Tentativa Arquivada (Somente Leitura) */}
+        {isInspectingArchive && inspectingAttempt && (
+          <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-amber-950/80 via-[#1c1608]/90 to-[#0c0c0e]/95 border-b border-amber-400/30 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+            <div className="flex items-center gap-3 min-w-0 flex-wrap">
+              <div className="flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-200">
+                <svg
+                  className="w-3.5 h-3.5 text-amber-300 flex-shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="21 8 21 21 3 21 3 8" />
+                  <rect x="1" y="3" width="22" height="5" />
+                  <line x1="10" y1="12" x2="14" y2="12" />
+                </svg>
+                <span>Tentativa Arquivada: {inspectingAttempt.detail.attempt.label}</span>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-zinc-300 flex-wrap">
+                {formatAttemptTimestamp(
+                  inspectingAttempt.detail.attempt.archived_at ||
+                    inspectingAttempt.detail.attempt.created_at,
+                ) && (
+                  <span className="text-zinc-400">
+                    {formatAttemptTimestamp(
+                      inspectingAttempt.detail.attempt.archived_at ||
+                        inspectingAttempt.detail.attempt.created_at,
+                    )}
+                  </span>
+                )}
+                <span className="rounded bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 text-[11px]">
+                  {archivedCuts.length} {archivedCuts.length === 1 ? "corte" : "cortes"}
+                </span>
+                <span className="rounded bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[11px] text-emerald-300">
+                  {archivedRenderOutputs.length}{" "}
+                  {archivedRenderOutputs.length === 1 ? "render" : "renders"}
+                </span>
+                <span className="rounded bg-zinc-800/80 border border-white/10 px-2 py-0.5 text-[11px] text-zinc-300">
+                  Somente leitura
+                </span>
+              </div>
+
+              {studioTab === "workspace" && archivedCuts.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {archivedCuts.map((cut, idx) => {
+                    const isCutActive = cut.cut_id === effectiveSelectedCutId;
+                    return (
+                      <button
+                        key={cut.cut_id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedArchivedCutId(cut.cut_id);
+                          videoPlayerHandleRef.current?.seek(cut.start);
+                          void videoPlayerHandleRef.current?.play();
+                        }}
+                        title={
+                          cut.title ||
+                          `Corte ${idx + 1} (${formatTimestamp(cut.start)} - ${formatTimestamp(cut.end)})`
+                        }
+                        className={cn(
+                          "rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                          isCutActive
+                            ? "border-amber-400/50 bg-amber-400/20 text-amber-200"
+                            : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-amber-400/30 hover:text-white",
+                        )}
+                      >
+                        #{idx + 1} · {formatTimestamp(cut.start)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-none">
+              <GlassButton
+                variant="glass"
+                size="sm"
+                onClick={handleExitArchivedInspection}
+                className="text-xs border-white/15 hover:border-white/30"
+              >
+                Voltar para tentativa ativa
+              </GlassButton>
+              <GlassButton
+                variant="primary"
+                size="sm"
+                disabled={archivingJobId === activeVideoId || isAnyOperationRunning}
+                onClick={() => void handleStartNewAttemptFromBanner()}
+                className="text-xs"
+              >
+                {archivingJobId === activeVideoId ? "Preparando..." : "Iniciar nova tentativa"}
+              </GlassButton>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 flex overflow-hidden @container/workspace">
           {studioTab === "workspace" && (
             <>
               {/* Coluna 1: Biblioteca de Vídeos */}
@@ -1068,20 +1938,41 @@ export default function App() {
                     alert(validation.message);
                     return;
                   }
+                  handleExitArchivedInspection();
                   setActiveVideoId(id);
                 }}
                 onImportClick={() => setShowUploadModal(true)}
+                onTranscribeVideo={(id) => handleDirectTranscribe(id)}
+                onGenerateCuts={(id) => handleDirectAnalyze(id)}
+                attemptsByVideoId={attemptsByJobId}
+                loadingAttemptsByVideoId={loadingAttemptsByJobId}
+                selectedAttemptKey={
+                  isInspectingArchive && inspectingAttempt
+                    ? { jobId: inspectingAttempt.jobId, attemptId: inspectingAttempt.attemptId }
+                    : null
+                }
+                onToggleAttemptsDrawer={(videoId, expanded) => {
+                  if (expanded) {
+                    void loadAttemptsForJob(videoId);
+                  }
+                }}
+                onSelectAttempt={(jobId, attemptId) => void handleSelectArchivedAttempt(jobId, attemptId)}
+                onArchiveAndReset={(jobId) => void handleArchiveAttempt(jobId, true)}
+                onArchiveCopy={(jobId) => void handleArchiveAttempt(jobId, false)}
+                onDeleteAttempt={(jobId, attemptId) => void handleDeleteAttempt(jobId, attemptId)}
+                archivingVideoId={archivingJobId}
               />
 
-              {/* Coluna 2: Player e Transcrição Interativa com Painéis Estruturados e Colapsáveis */}
-              <main className="flex-1 flex flex-col overflow-hidden bg-black/10">
+              {/* Coluna 2: Player, Terminal de Logs e Transcrição Interativa com Painéis Estruturados e Colapsáveis */}
+              <main className="flex-1 flex flex-col min-w-0 overflow-hidden p-[clamp(0.5rem,1.2cqi,0.75rem)] gap-[clamp(0.5rem,1.2cqi,0.75rem)]">
+                {/* 1. Card do Player de Vídeo Master 16:9 */}
                 <div
                   className={cn(
-                    "flex-none border-b border-white/[0.08] bg-black/40 p-3 flex flex-col justify-center overflow-hidden transition-all duration-300",
+                    "flex flex-col min-h-0 overflow-hidden transition-all duration-300",
                     expandVideoPlayerSection && expandTranscriptSection
-                      ? "h-1/2"
+                      ? "flex-1 min-h-[160px]"
                       : expandVideoPlayerSection && !expandTranscriptSection
-                        ? "flex-1 h-full"
+                        ? "flex-1 h-full min-h-[220px]"
                         : "h-auto flex-none",
                   )}
                 >
@@ -1090,41 +1981,100 @@ export default function App() {
                     className="h-full flex flex-col justify-between"
                     src={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
                     title={activeVideo?.job.video_name || activeVideo?.job.youtube_url}
-                    cuts={suggestedCuts}
-                    selectedCutId={selectedSuggestedCutId}
-                    onSelectCut={selectSuggestedCut}
+                    status={activeStatus}
+                    archiveLabel={
+                      isInspectingArchive && inspectingAttempt
+                        ? inspectingAttempt.detail.attempt.label
+                        : null
+                    }
+                    cuts={effectiveCuts}
+                    selectedCutId={effectiveSelectedCutId}
+                    onSelectCut={(cutId) => {
+                      if (isInspectingArchive) {
+                        const found = archivedCuts.find((c) => c.cut_id === cutId);
+                        if (found) {
+                          setSelectedArchivedCutId(found.cut_id);
+                          videoPlayerHandleRef.current?.seek(found.start);
+                          void videoPlayerHandleRef.current?.play();
+                        }
+                        return;
+                      }
+                      const found = suggestedCuts.find((c) => c.cut_id === cutId);
+                      if (found) selectSuggestedCut(found);
+                    }}
+                    onClearSelectedCut={() => {
+                      if (isInspectingArchive) {
+                        setSelectedArchivedCutId(null);
+                        return;
+                      }
+                      clearSelectedSuggestedCut();
+                    }}
                     onTimeUpdate={setCurrentVideoTime}
                     isExpanded={expandVideoPlayerSection}
                     onToggleExpanded={() => setExpandVideoPlayerSection((prev) => !prev)}
                   />
                 </div>
 
+                {/* 2. Card de Feedback em Tempo Real Durante Processamento (Liquid Glass com Ponto Pulsante, ETA, Barra e Mini Console) */}
+                {(isVideoProcessing || is1ClickRunning) && (
+                  <div className="flex-none transition-all duration-300">
+                    <LiveTaskFeedbackCard
+                      status={activeStatus}
+                      progress={progress}
+                      etaSeconds={etaSeconds}
+                      currentMessage={currentMessage}
+                      logs={allLogs}
+                      onCancel={handleCancelActiveOperation}
+                      isExpanded={expandTerminalSection}
+                      onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
+                    />
+                  </div>
+                )}
+
+                {/* 3. Card de Terminal / Logs de Execução Histórico (Abaixo do Vídeo e Acima da Transcrição) */}
+                {!(isVideoProcessing || is1ClickRunning) && (
+                  <div className="flex-none transition-all duration-300">
+                    <TerminalLogsView
+                      logs={allLogs}
+                      activeTask={activeTaskLogType || (is1ClickRunning ? "1-Clique" : isRendering ? "Render" : activeVideo?.isTranscribing ? "Whisper" : null)}
+                      isProcessing={Boolean(isAnyOperationRunning)}
+                      isExpanded={expandTerminalSection}
+                      onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
+                      onClearLogs={clearLogs}
+                    />
+                  </div>
+                )}
+
+                {/* 3. Card de Transcrição Interativa */}
                 <div
                   className={cn(
-                    "min-h-0 overflow-hidden p-3 bg-[#0a0b0f]/60 transition-all duration-300",
+                    "flex flex-col min-h-0 overflow-hidden transition-all duration-300",
                     expandVideoPlayerSection && expandTranscriptSection
-                      ? "h-1/2"
+                      ? "flex-1 min-h-[160px]"
                       : !expandVideoPlayerSection && expandTranscriptSection
-                        ? "flex-1 h-full"
+                        ? "flex-1 h-full min-h-[220px]"
                         : "h-auto flex-none",
                   )}
                 >
                   <TranscriptInteractiveView
-                    segments={activeVideo?.transcriptionSegments || []}
+                    segments={effectiveSegments}
                     currentTime={currentVideoTime}
-                    activeCut={selectedSuggestedCut}
+                    activeCut={effectiveSelectedCut}
                     onSeek={(seconds) => videoPlayerHandleRef.current?.seek(seconds)}
-                    onCreateCutFromSelection={handleCreateCutFromTranscript}
-                    onRequestTranscription={() => {
-                      if (!activeVideo) return;
-                      const validation = canStartOperation(activeVideo.job.job_id);
-                      if (!validation.allowed) {
-                        alert(validation.message);
-                        return;
-                      }
-                      requestTranscriptionStart();
-                    }}
-                    isLoading={action.busy}
+                    onCreateCutFromSelection={
+                      isInspectingArchive ? undefined : handleCreateCutFromTranscript
+                    }
+                    onRequestTranscription={
+                      isInspectingArchive ? undefined : () => handleDirectTranscribe()
+                    }
+                    onGenerateCuts={
+                      isInspectingArchive ? undefined : () => handleDirectAnalyze()
+                    }
+                    isLoading={
+                      isInspectingArchive
+                        ? isLoadingAttemptDetail
+                        : action.busy || isAnalyzing
+                    }
                     isExpanded={expandTranscriptSection}
                     onToggleExpanded={() => setExpandTranscriptSection((prev) => !prev)}
                   />
@@ -1133,21 +2083,70 @@ export default function App() {
 
               {/* Coluna 3: Inspetor do Short 9:16 */}
               <ShortInspectorView
-                cut={selectedSuggestedCut}
+                cut={effectiveSelectedCut}
+                cuts={effectiveCuts}
                 videoSrc={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
-                isRendering={isRendering}
-                onAdjustStart={handleQuickAdjustStart}
-                onAdjustEnd={handleQuickAdjustEnd}
-                onRenderShort={() => {
-                  if (!activeVideo) return;
-                  const validation = canStartOperation(activeVideo.job.job_id);
-                  if (!validation.allowed) {
-                    alert(validation.message);
+                renderOutputs={effectiveRenderOutputs}
+                renderTitlesByFileName={effectiveRenderTitlesByFileName}
+                buildRenderUrl={buildRenderUrl}
+                readOnly={isInspectingArchive}
+                isRendering={isInspectingArchive ? false : isRendering}
+                onSelectCut={(cutId) => {
+                  if (isInspectingArchive) {
+                    const found = archivedCuts.find((c) => c.cut_id === cutId);
+                    if (found) {
+                      setSelectedArchivedCutId(found.cut_id);
+                      videoPlayerHandleRef.current?.seek(found.start);
+                      void videoPlayerHandleRef.current?.play();
+                    }
                     return;
                   }
-                  startRenderFlow();
+                  const found = suggestedCuts.find((c) => c.cut_id === cutId);
+                  if (found) selectSuggestedCut(found);
                 }}
-                onDiscardCut={(cutId) => requestDeleteSuggestedCut(cutId)}
+                onAdjustStart={isInspectingArchive ? undefined : handleQuickAdjustStart}
+                onAdjustEnd={isInspectingArchive ? undefined : handleQuickAdjustEnd}
+                onApproveCut={
+                  isInspectingArchive ? undefined : (cutId) => void approveSingleCut(cutId)
+                }
+                onRejectCut={
+                  isInspectingArchive ? undefined : (cutId) => void rejectSingleCut(cutId)
+                }
+                onApproveAllCuts={
+                  isInspectingArchive ? undefined : () => void approveAllSuggestedCuts()
+                }
+                onRejectAllCuts={
+                  isInspectingArchive ? undefined : () => void rejectAllSuggestedCuts()
+                }
+                onRenderApprovedCuts={
+                  isInspectingArchive
+                    ? undefined
+                    : () => {
+                        if (!activeVideo) return;
+                        const validation = canStartOperation(activeVideo.job.job_id);
+                        if (!validation.allowed) {
+                          alert(validation.message);
+                          return;
+                        }
+                        void startRenderFlow();
+                      }
+                }
+                onRenderShort={
+                  isInspectingArchive
+                    ? undefined
+                    : () => {
+                        if (!activeVideo) return;
+                        const validation = canStartOperation(activeVideo.job.job_id);
+                        if (!validation.allowed) {
+                          alert(validation.message);
+                          return;
+                        }
+                        void startRenderFlow();
+                      }
+                }
+                onDiscardCut={
+                  isInspectingArchive ? undefined : (cutId) => requestDeleteSuggestedCut(cutId)
+                }
               />
             </>
           )}
@@ -1246,13 +2245,29 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-6">
               <div className="max-w-5xl mx-auto">
                 <RenderingSection
-                  isLoadingRenderOutputs={isLoadingRenderOutputs}
-                  isRendering={isRendering}
-                  renderOutputs={renderOutputs}
-                  renderTitlesByFileName={renderTitlesByFileName}
+                  isLoadingRenderOutputs={
+                    isInspectingArchive ? isLoadingAttemptDetail : isLoadingRenderOutputs
+                  }
+                  isRendering={isInspectingArchive ? false : isRendering}
+                  renderOutputs={effectiveRenderOutputs}
+                  renderTitlesByFileName={effectiveRenderTitlesByFileName}
                   buildRenderUrl={buildRenderUrl}
-                  onOpenRenderFolder={openRenderOutputFolder}
-                  onDeleteRender={deleteRenderOutputFile}
+                  onOpenRenderFolder={async (fileName) => {
+                    if (isInspectingArchive && inspectingAttempt) {
+                      await openVideoFolder(inspectingAttempt.jobId);
+                      return;
+                    }
+                    await openRenderOutputFolder(fileName);
+                  }}
+                  onDeleteRender={async (fileName) => {
+                    if (isInspectingArchive) {
+                      setToastNotification(
+                        "Tentativa arquivada é somente leitura. Para remover, exclua a tentativa na barra lateral.",
+                      );
+                      return;
+                    }
+                    await deleteRenderOutputFile(fileName);
+                  }}
                   isExpanded={true}
                   onToggle={() => {}}
                 />

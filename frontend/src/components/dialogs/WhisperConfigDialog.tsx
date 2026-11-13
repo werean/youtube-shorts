@@ -12,7 +12,8 @@ import {
   ConfigSection,
 } from "../WhisperConfigComponents";
 import { generateWhisperCommand } from "../../utils/whisperCommandBuilder";
-import { AppButton } from "../shared";
+import { AppDialog } from "../shared";
+import { GlassButton, GlassCard } from "../ui/glass";
 
 interface WhisperConfigDialogProps {
   whisperDevice: "cpu" | "cuda";
@@ -272,82 +273,84 @@ export function WhisperConfigDialog({
   ]);
 
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "1100px", width: "95vw" }}
-      >
-        <div className="dialog-header">
-          <h3>Configurar Whisper</h3>
+    <AppDialog
+      title="Configurar Whisper (Motor de Transcrição GPU)"
+      description="Ajuste os parâmetros de extração de fala, modelo VAD, timestamps de palavras e detecção de alucinação."
+      onClose={onCancel}
+      wide
+      scrollable
+      footer={
+        <div className="flex items-center justify-end w-full">
+          <GlassButton
+            variant="primary"
+            onClick={handleSave}
+            loading={action.busy}
+            disabled={action.busy}
+          >
+            Salvar Configurações
+          </GlassButton>
         </div>
-        <div className="dialog-content" style={{ padding: "20px" }}>
-          {/* Basic Options Section */}
-          <ConfigSection title="Opções Básicas" showTopSeparator={false}>
-            <ConfigField
-              label="Modelo"
-              description="Escolha entre modelos rápidos ou precisos"
-              tooltip="Turbo é super rápido mas um pouco menos preciso. Large é mais lento mas muito mais preciso. Escolha baseado no que é mais importante para você."
-            >
-              <SelectInput
-                value={model}
-                onChange={setModel}
-                options={WHISPER_MODELS.map((m) => ({ label: m.label, value: m.id }))}
-              />
-              {/* Model specs display */}
-              {(() => {
-                const selectedModel = WHISPER_MODELS.find((m) => m.id === model);
-                if (selectedModel) {
-                  return (
-                    <div
-                      style={{
-                        marginTop: "12px",
-                        padding: "12px",
-                        backgroundColor: "var(--bg-contrast)",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                        lineHeight: "1.6",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      <div style={{ fontWeight: "600", marginBottom: "8px" }}>
+      }
+    >
+      <div className="space-y-4">
+        {/* Basic Options Section */}
+        <ConfigSection title="Opções Básicas" showTopSeparator={false}>
+          <ConfigField
+            label="Modelo"
+            description="Escolha entre modelos rápidos ou precisos"
+            tooltip="Turbo é super rápido mas um pouco menos preciso. Large é mais lento mas muito mais preciso. Escolha baseado no que é mais importante para você."
+          >
+            <SelectInput
+              value={model}
+              onChange={setModel}
+              options={WHISPER_MODELS.map((m) => ({ label: m.label, value: m.id }))}
+            />
+            {/* Model specs display */}
+            {(() => {
+              const selectedModel = WHISPER_MODELS.find((m) => m.id === model);
+              if (selectedModel) {
+                return (
+                  <GlassCard className="mt-3 p-3.5 border-white/10 bg-white/[0.02] space-y-2.5">
+                    <div className="text-xs font-semibold text-white flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
                         Especificações: {selectedModel.label}
+                      </span>
+                      <span className="text-xs text-zinc-300 font-mono">Tamanho: {selectedModel.size}</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 font-mono text-xs">
+                      <div className="p-2.5 rounded-lg bg-black/40 border border-white/[0.06]">
+                        <span className="text-xs text-zinc-400 block font-sans mb-0.5">VRAM</span>
+                        <span className="text-white font-semibold text-sm">{selectedModel.vram_required}</span>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                        <div>
-                          <strong>VRAM:</strong> {selectedModel.vram_required}
-                        </div>
-                        <div>
-                          <strong>RAM:</strong> {selectedModel.ram_required}
-                        </div>
-                        <div>
-                          <strong>Tamanho:</strong> {selectedModel.size}
-                        </div>
-                        <div>
-                          <strong>Tempo (1h audio):</strong> {selectedModel.time_1h_audio}
-                        </div>
-                        <div style={{ gridColumn: "1 / -1" }}>
-                          <strong>Qualidade:</strong> {selectedModel.quality}/5
-                        </div>
-                        <div style={{ gridColumn: "1 / -1" }}>
-                          <strong>Velocidade:</strong> {selectedModel.speed}/5
-                        </div>
-                        <div
-                          style={{
-                            gridColumn: "1 / -1",
-                            color: "var(--muted)",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          <strong>Recomendado:</strong> {selectedModel.recommended_use}
-                        </div>
+                      <div className="p-2.5 rounded-lg bg-black/40 border border-white/[0.06]">
+                        <span className="text-xs text-zinc-400 block font-sans mb-0.5">RAM</span>
+                        <span className="text-white font-semibold text-sm">{selectedModel.ram_required}</span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-black/40 border border-white/[0.06]">
+                        <span className="text-xs text-zinc-400 block font-sans mb-0.5">Tempo (1h)</span>
+                        <span className="text-white font-semibold text-sm">{selectedModel.time_1h_audio}</span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-black/40 border border-white/[0.06]">
+                        <span className="text-xs text-zinc-400 block font-sans mb-0.5">Qualidade / Vel.</span>
+                        <span className="text-emerald-400 font-semibold text-sm">{selectedModel.quality}/5 • {selectedModel.speed}/5</span>
                       </div>
                     </div>
-                  );
-                }
-                return null;
-              })()}
-            </ConfigField>
+                    {selectedModel.description && (
+                      <p className="text-xs text-zinc-300 leading-relaxed italic pt-1">{selectedModel.description}</p>
+                    )}
+                    {selectedModel.recommended_use && (
+                      <div className="text-xs text-zinc-200 leading-relaxed">
+                        <span className="font-semibold text-white">Recomendado: </span>
+                        {selectedModel.recommended_use}
+                      </div>
+                    )}
+                  </GlassCard>
+                );
+              }
+              return null;
+            })()}
+          </ConfigField>
 
             <ConfigField
               label="Tarefa"
@@ -387,26 +390,20 @@ export function WhisperConfigDialog({
               description="Usar processador comum ou placa gráfica (GPU)"
               tooltip="GPU (CUDA) é muito, muito mais rápido se você tiver placa NVIDIA. Processador (CPU) é mais compatível e funciona sempre, mas é bem mais lento."
             >
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div className="grid grid-cols-2 gap-2.5">
                 {(["cpu", "cuda"] as const).map((dev) => (
-                  <AppButton
+                  <button
                     key={dev}
+                    type="button"
                     onClick={() => setDevice(dev)}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "8px",
-                      border:
-                        device === dev ? "2px solid var(--accent-2)" : "1px solid var(--border)",
-                      background: device === dev ? "var(--bg-3)" : "var(--panel)",
-                      cursor: "pointer",
-                      fontWeight: device === dev ? "600" : "400",
-                      color: device === dev ? "var(--accent-2)" : "var(--muted)",
-                      fontSize: "14px",
-                    }}
+                    className={`p-3 rounded-xl border text-xs font-semibold uppercase tracking-wider transition-all ${
+                      device === dev
+                        ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]"
+                        : "border-white/10 bg-white/[0.02] text-zinc-400 hover:text-white hover:border-white/20 hover:bg-white/[0.04]"
+                    }`}
                   >
-                    {dev === "cpu" ? "CPU" : "CUDA"}
-                  </AppButton>
+                    {dev === "cpu" ? "CPU (Universal)" : "CUDA (GPU NVIDIA)"}
+                  </button>
                 ))}
               </div>
             </ConfigField>
@@ -425,44 +422,26 @@ export function WhisperConfigDialog({
           </ConfigSection>
 
           {/* Advanced Settings Toggle */}
-          <div
-            style={{
-              marginTop: "24px",
-              paddingTop: "16px",
-              borderTop: "1px solid var(--border)",
-            }}
-          >
-            <AppButton
+          <div className="pt-2">
+            <button
+              type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "12px 16px",
-                backgroundColor: "var(--bg-contrast)",
-                border: "1px solid var(--border)",
-                borderRadius: "8px",
-                cursor: "pointer",
-                fontWeight: "600",
-                fontSize: "14px",
-                color: "var(--bg)",
-                width: "100%",
-                justifyContent: "space-between",
-              }}
+              className="w-full flex items-center justify-between p-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20 transition-all text-left text-xs font-semibold text-white"
             >
-              <span>Configurações Avançadas</span>
-              <span
-                style={{
-                  transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: "transform 0.3s ease",
-                  display: "inline-flex",
-                }}
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                Configurações Avançadas do Whisper
               </span>
-            </AppButton>
+              <svg
+                className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${showAdvanced ? "rotate-180" : ""}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
           </div>
 
           {/* Advanced Sections */}
@@ -789,73 +768,20 @@ export function WhisperConfigDialog({
             </>
           )}
 
-          {/* Command Preview */}
-          <div
-            style={{
-              marginTop: "32px",
-              padding: "16px",
-              backgroundColor: "var(--bg-contrast)",
-              borderRadius: "8px",
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "12px",
-                fontWeight: "600",
-                color: "var(--muted)",
-                marginBottom: "8px",
-              }}
-            >
-              Comando Whisper (Prévia)
-            </div>
-            <div
-              style={{
-                backgroundColor: "var(--bg)",
-                color: "var(--success)",
-                padding: "12px",
-                borderRadius: "6px",
-                fontFamily: "monospace",
-                fontSize: "12px",
-                lineHeight: "1.5",
-                overflowX: "auto",
-                wordBreak: "break-word",
-              }}
-            >
-              {whisperCommand}
-            </div>
-            <div
-              style={{
-                fontSize: "11px",
-                color: "var(--muted)",
-                marginTop: "8px",
-                fontStyle: "italic",
-              }}
-            >
-              Este comando será executado com a video_source ou arquivo de áudio
-            </div>
+        {/* Command Preview */}
+        <GlassCard className="mt-6 p-4 border-white/10 bg-white/[0.02] space-y-2.5">
+          <div className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Comando Whisper (Prévia Gerada)
           </div>
-
-          {/* Action Buttons */}
-          <div
-            style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "24px" }}
-          >
-            <AppButton
-              onClick={onCancel}
-              variant="ghost"
-            >
-              Cancelar
-            </AppButton>
-            <AppButton
-              onClick={handleSave}
-              disabled={action.busy}
-              variant="primary"
-            >
-              Salvar Configurações
-            </AppButton>
+          <div className="p-3 rounded-xl bg-black/60 border border-white/[0.08] font-mono text-xs text-emerald-400 overflow-x-auto leading-relaxed">
+            {whisperCommand}
           </div>
-        </div>
+          <p className="text-xs text-zinc-400 italic">
+            Este comando é montado dinamicamente com base nas opções selecionadas acima e executado pelo backend local.
+          </p>
+        </GlassCard>
       </div>
-    </div>
+    </AppDialog>
   );
 }

@@ -129,6 +129,47 @@ async def stream_source_video(job_id: str, request: Request) -> Response:
     return build_video_stream_response(request, file_path)
 
 
+def _is_safe_media_segment(segment: str) -> bool:
+    if not segment or segment in {".", ".."}:
+        return False
+    if "/" in segment or "\\" in segment or "\x00" in segment:
+        return False
+    return True
+
+
+@router.get("/shorts/{job_id}/attempts/{attempt_id}/{file}", response_model=None)
+async def stream_attempt_short_video(
+    job_id: str,
+    attempt_id: str,
+    file: str,
+    request: Request,
+) -> Response:
+    if not (
+        _is_safe_media_segment(job_id)
+        and _is_safe_media_segment(attempt_id)
+        and _is_safe_media_segment(file)
+    ):
+        return JSONResponse(status_code=400, content={"detail": "Invalid path segment"})
+
+    container = get_container()
+    try:
+        shorts_dir = container.jobs.attempt_shorts_dir_path(job_id, attempt_id, create=False)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"detail": "Invalid path segment"})
+
+    base_resolved = shorts_dir.resolve()
+    file_path = (shorts_dir / file).resolve()
+    try:
+        file_path.relative_to(base_resolved)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"detail": "Invalid path segment"})
+
+    if not file_path.exists() or not file_path.is_file():
+        return JSONResponse(status_code=404, content={"detail": "Short not found"})
+
+    return build_video_stream_response(request, file_path)
+
+
 @router.get("/shorts/{job_id}/{file}", response_model=None)
 async def stream_short_video(job_id: str, file: str, request: Request) -> Response:
     container = get_container()

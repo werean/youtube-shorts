@@ -2,7 +2,17 @@
 export { apiBaseUrl } from "./client";
 
 // Jobs API
-export { createJob, getJob, ingestJob, renameVideo } from "./jobs";
+export {
+  createJob,
+  getJob,
+  ingestJob,
+  renameVideo,
+  runJobPipeline,
+  listJobAttempts,
+  archiveJobAttempt,
+  getJobAttempt,
+  deleteJobAttempt,
+} from "./jobs";
 
 // Videos API
 export {
@@ -24,7 +34,7 @@ export { listCuts, updateCuts, approveCut, rejectCut, analyzeJob } from "./cuts"
 export { renderJob, listRenderOutputs, deleteRenderOutput, openRenderFolder } from "./rendering";
 
 // Cancel API
-export { cancelTranscription, cancelRendering } from "./cancel";
+export { cancelJob, cancelTranscription, cancelRendering } from "./cancel";
 
 // Logs API
 export { getJobLogs } from "./logs";

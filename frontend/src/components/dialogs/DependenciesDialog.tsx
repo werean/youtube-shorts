@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { AppButton } from "../shared";
+import { AppButton, AppDialog } from "../shared";
+import { GlassButton } from "../ui/glass";
 
 interface Dependency {
   installed: boolean;
@@ -211,35 +212,27 @@ export function DependenciesDialog({
   }
 
   return (
-    <div
-      className="dialog-overlay"
-      onClick={onClose}
-      onWheelCapture={(event) => {
-        const dialogEl = dialogRef.current;
-        if (!dialogEl) {
-          return;
-        }
-
-        const target = event.target as Node | null;
-        const wheelOutsideDialog = !target || !dialogEl.contains(target);
-
-        if (wheelOutsideDialog) {
-          event.preventDefault();
-          dialogEl.scrollTop += event.deltaY;
-        }
-      }}
-    >
-      <div
-        ref={dialogRef}
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "500px" }}
-      >
-        <div className="dialog-header">
-          <h3>Gerenciar dependências</h3>
+    <AppDialog
+      title="Gerenciar Dependências do Sistema"
+      description="Verifique e instale os binários essenciais (Python, Whisper, FFmpeg, PyTorch, yt-dlp) para o funcionamento da IA."
+      onClose={onClose}
+      wide
+      scrollable
+      footer={
+        <div className="flex items-center justify-start w-full">
+          <GlassButton
+            variant="glass"
+            size="sm"
+            onClick={onRefresh}
+            disabled={refreshingDependencies}
+            loading={refreshingDependencies}
+          >
+            Atualizar Status
+          </GlassButton>
         </div>
-        <div className="dialog-content" style={{ padding: "20px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {Object.entries(deps).map(([name, status]) => {
               const isLoading = loadingDependencies.has(name);
               const isInstalling = installingDependency === name;
@@ -547,48 +540,33 @@ export function DependenciesDialog({
             </div>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              gap: "8px",
-              justifyContent: "flex-end",
-              marginTop: "16px",
-            }}
-          >
-            <AppButton variant="primary" onClick={onClose}>
-              Fechar
-            </AppButton>
+          {operationChoice && (
+        <AppDialog
+          title="Escolha como depurar o processo"
+          onClose={() => {
+            setOperationChoice(null);
+            setSelectedViewMode(null);
+          }}
+          className="max-w-xl"
+          footer={
             <AppButton
               variant="secondary"
+              disabled={!selectedViewMode}
               onClick={() => {
-                void onRefresh();
+                if (!selectedViewMode) {
+                  return;
+                }
+                void handleChosenViewMode(selectedViewMode);
               }}
-              disabled={refreshingDependencies}
+              className="ds-deps-mini-btn"
             >
-              {refreshingDependencies ? "Recarregando..." : "Recarregar status"}
+              {operationChoice.mode === "install" ? "Iniciar Instalação" : "Iniciar Desinstalação"}
             </AppButton>
-          </div>
-        </div>
-      </div>
-
-      {operationChoice && (
-        <div
-          className="dialog-overlay"
-          style={{ zIndex: 1100 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setOperationChoice(null);
-          }}
+          }
         >
-          <div
-            className="dialog"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "560px", padding: "20px" }}
-          >
-            <h3 style={{ marginBottom: "10px" }}>Escolha como depurar o processo</h3>
-
-            <p style={{ marginBottom: "12px", color: "var(--muted)", fontSize: "13px" }}>
-              Dependência: {operationChoice.name}
+          <div className="p-4 space-y-4">
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
+              Dependência: <strong className="text-white">{operationChoice.name}</strong>
             </p>
 
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -640,55 +618,36 @@ export function DependenciesDialog({
                 {getDependencyCommandPreview(operationChoice.name, operationChoice.mode)}
               </pre>
             </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}
-            >
-              <AppButton
-                variant="primary"
-                onClick={() => {
-                  setOperationChoice(null);
-                  setSelectedViewMode(null);
-                }}
-                className="ds-deps-mini-btn"
-              >
-                Cancelar
-              </AppButton>
-              <AppButton
-                variant="secondary"
-                disabled={!selectedViewMode}
-                onClick={() => {
-                  if (!selectedViewMode) {
-                    return;
-                  }
-                  void handleChosenViewMode(selectedViewMode);
-                }}
-                className="ds-deps-mini-btn"
-              >
-                {operationChoice.mode === "install" ? "Instalar" : "Desinstalar"}
-              </AppButton>
-            </div>
           </div>
-        </div>
+        </AppDialog>
       )}
 
       {pytorchGpuPrompt && (
-        <div
-          className="dialog-overlay"
-          style={{ zIndex: 1200 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setPytorchGpuPrompt(null);
-          }}
-        >
-          <div
-            className="dialog"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "560px", padding: "20px" }}
-          >
-            <h3 style={{ marginBottom: "10px" }}>Selecione seu tipo de GPU</h3>
+        <AppDialog
+          title="Selecione seu tipo de GPU"
+          onClose={() => setPytorchGpuPrompt(null)}
+          className="max-w-xl"
+          footer={
+            <AppButton
+              variant="secondary"
+              disabled={!pytorchGpuTier}
+              onClick={() => {
+                if (!pytorchGpuTier) {
+                  return;
+                }
 
-            <p style={{ marginBottom: "12px", color: "var(--muted)", fontSize: "13px" }}>
+                setPytorchGpuPrompt(null);
+                setOperationChoice(pytorchGpuPrompt);
+                setSelectedViewMode(null);
+              }}
+              className="ds-deps-mini-btn"
+            >
+              Continuar
+            </AppButton>
+          }
+        >
+          <div className="p-4 space-y-4">
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
               Antes de continuar, escolha qual opção corresponde à sua placa de vídeo.
             </p>
 
@@ -723,39 +682,9 @@ export function DependenciesDialog({
                 RTX 5000 series
               </AppButton>
             </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}
-            >
-              <AppButton
-                variant="primary"
-                onClick={() => {
-                  setPytorchGpuPrompt(null);
-                }}
-                className="ds-deps-mini-btn"
-              >
-                Cancelar
-              </AppButton>
-              <AppButton
-                variant="secondary"
-                disabled={!pytorchGpuTier}
-                onClick={() => {
-                  if (!pytorchGpuTier) {
-                    return;
-                  }
-
-                  setPytorchGpuPrompt(null);
-                  setOperationChoice(pytorchGpuPrompt);
-                  setSelectedViewMode(null);
-                }}
-                className="ds-deps-mini-btn"
-              >
-                Continuar
-              </AppButton>
-            </div>
           </div>
-        </div>
+        </AppDialog>
       )}
-    </div>
+    </AppDialog>
   );
 }

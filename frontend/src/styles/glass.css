@@ -6,6 +6,8 @@
    ========================================================================== */
 
 :root {
+  interpolate-size: allow-keywords;
+
   --glass-surface-base: rgba(18, 18, 22, 0.65);
   --glass-surface-elevated: rgba(26, 26, 32, 0.75);
   --glass-surface-sunken: rgba(10, 10, 14, 0.55);
@@ -24,6 +26,12 @@
 
   --glass-glow-emerald: 0 0 24px -4px rgba(16, 185, 129, 0.25);
   --glass-glow-white: 0 0 24px -4px rgba(255, 255, 255, 0.2);
+
+  /* Fluid Spacing & Rhythm */
+  --fluid-space-xs: clamp(0.25rem, 0.5cqi, 0.375rem);
+  --fluid-space-sm: clamp(0.5rem, 1cqi, 0.75rem);
+  --fluid-space-md: clamp(0.75rem, 1.5cqi + 0.25rem, 1.25rem);
+  --fluid-space-lg: clamp(1rem, 2cqi + 0.5rem, 1.75rem);
 }
 
 /* Base Glass Effect with Deep Frosted Blur */
@@ -108,5 +116,28 @@
   }
   100% {
     background-position: 200% 0;
+  }
+}
+
+/* Scrollbar Layout Stability (prevents CLS during scroll) */
+.scrollbar-stable {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* Reduced motion accessibility compliance */
+@media (prefers-reduced-motion: reduce) {
+  .glass-interactive {
+    transition: none !important;
+    transform: none !important;
+  }
+
+  .animate-glass-pulse-emerald {
+    animation-duration: 6s !important;
+    transform: none !important;
+  }
+
+  .ambient-glow-orb {
+    animation: none !important;
   }
 }

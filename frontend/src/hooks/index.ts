@@ -16,3 +16,5 @@ export { useVideoList } from "./useVideoList";
 export { useRendering as useRenderingState } from "./useRenderingState";
 export { useLogs } from "./useLogsState";
 export { useCutsState } from "./useCutsState";
+export { useJobEvents, type JobEventPayload } from "./useJobEvents";
+

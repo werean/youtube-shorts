@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { VideoItem } from "../hooks";
+import type { JobStatus } from "../types";
 import { createJob, getJob, ingestJob, uploadVideoFile } from "../api";
 import type { ActionState } from "../hooks/useAppAction";
 import { GlassButton, GlassCard } from "./ui/glass";
@@ -80,6 +81,64 @@ export function UploadSection({
     await onLoadVideos();
   }
 
+  async function handleUrlSubmit() {
+    const url = youtubeUrl.trim();
+    if (!url || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      // 1. Cria o job no backend imediatamente
+      const job = await createJob(url);
+      setYoutubeUrl("");
+      setIsSubmitting(false);
+
+      // 2. Notifica a UI imediatamente:
+      // - Adiciona à biblioteca com status DOWNLOADING
+      // - Torna-o o vídeo ativo no workspace
+      // - Fecha o modal de importação automaticamente
+      const tempVideo: VideoItem = {
+        job: {
+          ...job,
+          status: "DOWNLOADING" as JobStatus,
+          video_name: job.video_name || job.source_file_name || url,
+        },
+        transcriptionLogs: [],
+        videoPath: `/media/videos/${job.job_id}`,
+      };
+      onVideoAdded(tempVideo);
+
+      // 3. Dispara a ingestão (download yt-dlp) em segundo plano
+      void (async () => {
+        try {
+          const ingestResult = await ingestJob(job.job_id);
+          const updatedJob = await getJob(job.job_id);
+          const title = String(
+            updatedJob?.video_name ?? updatedJob?.source_file_name ?? url,
+          ).trim();
+          const videoPath = String(ingestResult?.video_path ?? `/media/videos/${job.job_id}`).trim();
+
+          const finalVideo: VideoItem = {
+            job: {
+              ...updatedJob,
+              video_name: title,
+            },
+            transcriptionLogs: [],
+            videoPath,
+          };
+          onVideoAdded(finalVideo);
+          await onLoadVideos();
+        } catch (err) {
+          console.error("[UploadSection] Erro ao baixar vídeo do YouTube:", err);
+          await onLoadVideos();
+        }
+      })();
+    } catch (err: any) {
+      console.error("[UploadSection] Erro ao criar job:", err);
+      setIsSubmitting(false);
+      alert(err?.message || "Falha ao iniciar importação do vídeo");
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Segmented Mode Selector */}
@@ -133,11 +192,17 @@ export function UploadSection({
                 type="text"
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleUrlSubmit();
+                  }
+                }}
                 placeholder="https://www.youtube.com/watch?v=..."
                 className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all font-mono"
               />
             </div>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-xs text-zinc-400 leading-relaxed">
               O pipeline fará download automático com resolução e áudio otimizados para transcrição.
             </p>
           </div>
@@ -145,48 +210,9 @@ export function UploadSection({
           <GlassButton
             variant="primary"
             fullWidth
-            loading={action.busy || isSubmitting}
-            disabled={action.busy || isSubmitting || youtubeUrl.trim().length === 0}
-            onClick={() => {
-              runAction(
-                async () => {
-                  const job = await createJob(youtubeUrl);
-                  setYoutubeUrl("");
-
-                  const ingestResult = await ingestJob(job.job_id);
-                  const updatedJob = await getJob(job.job_id);
-
-                  return { updatedJob, ingestResult };
-                },
-                ({ updatedJob, ingestResult }) => {
-                  const title = String(
-                    updatedJob?.video_name ?? updatedJob?.source_file_name ?? "",
-                  ).trim();
-                  const videoPath = String(ingestResult?.video_path ?? "").trim();
-
-                  if (!title || !videoPath) {
-                    console.warn(
-                      "[UploadSection] Vídeo baixado mas metadata incompleta; recarregando lista.",
-                      { title, videoPath, jobId: updatedJob?.job_id },
-                    );
-                    onLoadVideos();
-                    return;
-                  }
-
-                  const newVideo: VideoItem = {
-                    job: {
-                      ...updatedJob,
-                      video_name: title,
-                    },
-                    transcriptionLogs: [],
-                    videoPath,
-                  };
-
-                  onVideoAdded(newVideo);
-                  onLoadVideos();
-                },
-              );
-            }}
+            loading={isSubmitting}
+            disabled={isSubmitting || youtubeUrl.trim().length === 0}
+            onClick={handleUrlSubmit}
             leadingIcon={
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -254,7 +280,7 @@ export function UploadSection({
                     ? `${selectedFiles.length} arquivo(s) pronto(s) para upload`
                     : "Clique para selecionar ou arraste vídeos aqui"}
                 </p>
-                <p className="text-[11px] text-zinc-400 mt-0.5">
+                <p className="text-xs text-zinc-400 mt-1">
                   Formatos suportados: MP4, MOV, MKV, WebM
                 </p>
               </div>
@@ -297,7 +323,7 @@ export function UploadSection({
                     </svg>
                     <div className="truncate">
                       <p className="text-xs font-medium text-white truncate">{file.name}</p>
-                      <p className="text-[10px] font-mono text-zinc-400">
+                      <p className="text-xs font-mono text-zinc-400">
                         {(file.size / (1024 * 1024)).toFixed(2)} MB
                       </p>
                     </div>

@@ -1,3 +1,5 @@
+import { AppButton, AppDialog } from "../shared";
+
 interface MoveUploadDialogProps {
   onClose: () => void;
   onConfirmMove: () => void;
@@ -6,32 +8,26 @@ interface MoveUploadDialogProps {
 
 export function MoveUploadDialog({ onClose, onConfirmMove, onConfirmKeep }: MoveUploadDialogProps) {
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>Mover video para a pasta configurada?</h3>
-          <div className="dialog-actions">
-            <button className="icon-btn close-btn" onClick={onClose}>
-              X
-            </button>
-          </div>
+    <AppDialog
+      title="Mover vídeo para a pasta configurada?"
+      onClose={onClose}
+      className="max-w-md"
+      footer={
+        <div className="flex gap-2">
+          <AppButton variant="primary" onClick={onConfirmKeep}>
+            Manter cópia
+          </AppButton>
+          <AppButton variant="secondary" onClick={onConfirmMove}>
+            Mover e enviar
+          </AppButton>
         </div>
-        <div className="dialog-content">
-          <p>
-            Deseja mover o video selecionado para a pasta configurada para evitar uma copia extra em
-            disco?
-          </p>
-          <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="secondary" onClick={onConfirmMove}>
-              Mover e enviar
-            </button>
-            <button className="primary" onClick={onConfirmKeep}>
-              Manter copia
-            </button>
-          </div>
-        </div>
+      }
+    >
+      <div className="p-4 space-y-3">
+        <p className="text-sm text-zinc-300 leading-relaxed m-0">
+          Deseja mover o vídeo selecionado para a pasta configurada para economizar espaço e evitar uma cópia extra em disco?
+        </p>
       </div>
-    </div>
+    </AppDialog>
   );
 }
-

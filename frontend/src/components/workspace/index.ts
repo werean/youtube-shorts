@@ -18,3 +18,10 @@ export type { TranscriptInteractiveViewProps } from "./TranscriptInteractiveView
 
 export { ShortInspectorView } from "./ShortInspectorView";
 export type { ShortInspectorViewProps } from "./ShortInspectorView";
+
+export { TerminalLogsView } from "./TerminalLogsView";
+export type { TerminalLogsViewProps, LogFilterCategory } from "./TerminalLogsView";
+
+export { LiveTaskFeedbackCard } from "./LiveTaskFeedbackCard";
+export type { LiveTaskFeedbackCardProps } from "./LiveTaskFeedbackCard";
+

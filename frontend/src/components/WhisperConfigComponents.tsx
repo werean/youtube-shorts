@@ -39,8 +39,9 @@ export function Tooltip({ text, children }: TooltipProps) {
           style={{
             top: `${tooltipPos.top}px`,
             left: `${tooltipPos.left}px`,
+            backgroundColor: "rgba(18, 18, 24, 0.98)",
           }}
-          className="fixed -translate-y-1/2 z-[99999] max-w-sm min-w-[220px] rounded-xl border border-white/15 bg-[#121218]/95 p-3 text-xs text-zinc-200 shadow-2xl backdrop-blur-2xl pointer-events-none leading-relaxed animate-in fade-in duration-150"
+          className="fixed -translate-y-1/2 z-[99999] max-w-sm min-w-[220px] rounded-xl border border-white/20 p-3 text-xs text-zinc-200 shadow-2xl backdrop-blur-2xl pointer-events-none leading-relaxed animate-in fade-in duration-150"
         >
           {text}
         </div>
@@ -60,19 +61,19 @@ export function ConfigField({ label, description, tooltip, children }: ConfigFie
   return (
     <div className="space-y-1.5 mb-4">
       <div className="flex items-center gap-2">
-        <label className="text-xs font-semibold text-white">
+        <label className="text-sm font-semibold text-white">
           {label}
         </label>
         {tooltip && (
           <Tooltip text={tooltip}>
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-zinc-400 hover:text-white text-[10px] font-bold cursor-help transition-colors">
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/10 text-zinc-400 hover:text-white text-xs font-bold cursor-help transition-colors">
               ?
             </span>
           </Tooltip>
         )}
       </div>
       {description && (
-        <p className="text-[11px] text-zinc-400 leading-normal">
+        <p className="text-xs text-zinc-400 leading-relaxed">
           {description}
         </p>
       )}
@@ -214,7 +215,7 @@ export function MultiSelect({ values, onChange, options }: MultiSelectProps) {
               />
             </div>
             {option.description && (
-              <span className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1">{option.description}</span>
+              <span className="text-xs text-zinc-400 mt-0.5 line-clamp-1">{option.description}</span>
             )}
           </button>
         );

@@ -1,121 +1,123 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { getJobLogs } from "../api/logs";
 
-type TaskLogType = "transcription" | "render";
+export type TaskLogType = "ingest" | "transcription" | "render" | "orchestrator" | "all";
 
 interface UseSharedTaskLogWorkflowOptions {
   activeJobId: string | null;
   isTranscribing?: boolean;
-  isRendering: boolean;
+  isRendering?: boolean;
+  isProcessing?: boolean;
 }
 
 export function useSharedTaskLogWorkflow({
   activeJobId,
   isTranscribing,
   isRendering,
+  isProcessing = false,
 }: UseSharedTaskLogWorkflowOptions) {
   const logsPollRef = useRef<number | null>(null);
   const taskLogsContainerRef = useRef<HTMLDivElement>(null);
   const [activeTaskLogs, setActiveTaskLogs] = useState<string[]>([]);
-  const [activeTaskLogType, setActiveTaskLogType] = useState<TaskLogType | null>(null);
-  const [expandTaskLogs, setExpandTaskLogs] = useState(false);
+  const [activeTaskLogType, setActiveTaskLogType] = useState<TaskLogType | null>("all");
+  const [expandTaskLogs, setExpandTaskLogs] = useState(true);
 
-  async function pollTaskLogs(jobId: string, task: TaskLogType) {
+  const pollTaskLogs = useCallback(async (jobId: string, task: TaskLogType = "all") => {
     try {
       const result = await getJobLogs(jobId, task);
-      setActiveTaskLogs(result.logs || []);
+      if (Array.isArray(result.logs)) {
+        setActiveTaskLogs(result.logs);
+      }
     } catch (error) {
       console.error("[logs] Failed to fetch task logs:", error);
     }
-  }
+  }, []);
 
-  function startLogsPollingInterval(jobId: string, task: TaskLogType) {
-    if (logsPollRef.current) {
-      window.clearInterval(logsPollRef.current);
-    }
-    void pollTaskLogs(jobId, task);
-    logsPollRef.current = window.setInterval(() => {
+  const appendLogLine = useCallback((line: string) => {
+    if (!line) return;
+    setActiveTaskLogs((current) => {
+      if (current.length > 0 && current[current.length - 1] === line) {
+        return current;
+      }
+      return [...current, line];
+    });
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    setActiveTaskLogs([]);
+  }, []);
+
+  const startLogsPollingInterval = useCallback(
+    (jobId: string, task: TaskLogType = "all") => {
+      if (logsPollRef.current) {
+        window.clearInterval(logsPollRef.current);
+      }
       void pollTaskLogs(jobId, task);
-    }, 1500);
-  }
+      logsPollRef.current = window.setInterval(() => {
+        void pollTaskLogs(jobId, task);
+      }, 1500);
+    },
+    [pollTaskLogs],
+  );
 
-  function stopLogsPolling() {
+  const stopLogsPolling = useCallback(() => {
     if (logsPollRef.current) {
       window.clearInterval(logsPollRef.current);
       logsPollRef.current = null;
     }
-  }
-
-  function prepareTaskLog(task: TaskLogType) {
-    setActiveTaskLogType(task);
-    setActiveTaskLogs([]);
-    setExpandTaskLogs(false);
-  }
-
-  function resetTaskLogs() {
-    setActiveTaskLogs([]);
-    setActiveTaskLogType(null);
-    setExpandTaskLogs(false);
-    stopLogsPolling();
-  }
-
-  function showMoreTaskLogs() {
-    setExpandTaskLogs(true);
-  }
-
-  useEffect(() => {
-    if (taskLogsContainerRef.current) {
-      taskLogsContainerRef.current.scrollTop = taskLogsContainerRef.current.scrollHeight;
-    }
-  }, [activeTaskLogs]);
-
-  useEffect(() => {
-    return () => {
-      if (logsPollRef.current) {
-        window.clearInterval(logsPollRef.current);
-      }
-    };
   }, []);
 
+  const prepareTaskLog = useCallback((task: TaskLogType) => {
+    setActiveTaskLogType(task);
+    setActiveTaskLogs([]);
+  }, []);
+
+  const resetTaskLogs = useCallback(() => {
+    setActiveTaskLogs([]);
+    setActiveTaskLogType("all");
+    stopLogsPolling();
+  }, [stopLogsPolling]);
+
+  // Carrega logs ao trocar de vídeo ativo
   useEffect(() => {
-    if (!activeJobId || !activeTaskLogType) {
+    if (activeJobId) {
+      void pollTaskLogs(activeJobId, "all");
+    } else {
+      setActiveTaskLogs([]);
+    }
+  }, [activeJobId, pollTaskLogs]);
+
+  // Gerencia o polling enquanto alguma operação estiver em andamento
+  useEffect(() => {
+    if (!activeJobId) {
       stopLogsPolling();
       return;
     }
 
-    const shouldPoll =
-      activeTaskLogType === "transcription" ? Boolean(isTranscribing) : isRendering;
+    const shouldPoll = Boolean(isProcessing || isTranscribing || isRendering);
 
-    if (!shouldPoll) {
+    if (shouldPoll) {
+      startLogsPollingInterval(activeJobId, "all");
+    } else {
       stopLogsPolling();
-      return;
     }
 
-    if (!logsPollRef.current) {
-      startLogsPollingInterval(activeJobId, activeTaskLogType);
-    }
-  }, [activeJobId, activeTaskLogType, isTranscribing, isRendering]);
-
-  useEffect(() => {
-    if (activeJobId && activeTaskLogType === "transcription" && isTranscribing === false) {
-      void pollTaskLogs(activeJobId, "transcription");
-    }
-  }, [isTranscribing, activeJobId, activeTaskLogType]);
-
-  useEffect(() => {
-    if (activeJobId && activeTaskLogType === "render" && isRendering === false) {
-      void pollTaskLogs(activeJobId, "render");
-    }
-  }, [isRendering, activeJobId, activeTaskLogType]);
+    return () => {
+      stopLogsPolling();
+    };
+  }, [activeJobId, isProcessing, isTranscribing, isRendering, startLogsPollingInterval, stopLogsPolling]);
 
   return {
     taskLogsContainerRef,
     activeTaskLogs,
     activeTaskLogType,
     expandTaskLogs,
+    setExpandTaskLogs,
     prepareTaskLog,
     resetTaskLogs,
-    showMoreTaskLogs,
+    pollTaskLogs,
+    appendLogLine,
+    clearLogs,
     stopLogsPolling,
   };
 }

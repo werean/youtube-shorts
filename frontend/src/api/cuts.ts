@@ -24,6 +24,14 @@ export async function rejectCut(jobId: string, cutId: string): Promise<Cut> {
   return request(`/jobs/${jobId}/cuts/${cutId}/reject`, { method: "POST" });
 }
 
+export async function approveAllCuts(jobId: string): Promise<Cut[]> {
+  return request<Cut[]>(`/jobs/${jobId}/cuts/approve-all`, { method: "POST" });
+}
+
+export async function rejectAllCuts(jobId: string): Promise<Cut[]> {
+  return request<Cut[]>(`/jobs/${jobId}/cuts/reject-all`, { method: "POST" });
+}
+
 export async function analyzeJob(jobId: string): Promise<{ cuts: Cut[]; raw_response?: string }> {
   return request(`/jobs/${jobId}/analyze`, { method: "POST" });
 }

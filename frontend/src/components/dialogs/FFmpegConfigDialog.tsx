@@ -15,7 +15,8 @@ import {
   Toggle,
   ConfigSection,
 } from "../WhisperConfigComponents";
-import { AppButton } from "../shared";
+import { AppDialog } from "../shared";
+import { GlassButton, GlassCard } from "../ui/glass";
 
 interface FFmpegConfigDialogProps {
   action: ActionState;
@@ -123,100 +124,92 @@ export function FFmpegConfigDialog({
   ]);
 
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "1100px", width: "95vw" }}
-      >
-        <div className="dialog-header">
-          <h3>Configurar FFmpeg</h3>
-        </div>
-        <div className="dialog-content" style={{ padding: "20px" }}>
-          {/* Basic Options Section */}
-          <ConfigSection title="Opções Básicas">
-            <ConfigField
-              label="Formato"
-              description="Tipo de arquivo de saída"
-              tooltip="mp4 é padrão e compatível. mkv suporta mais recursos. mov para Apple. webm para web. Deixe vazio para detectar pela extensão."
-            >
-              <SelectInput
-                value={format}
-                onChange={setFormat}
-                options={CONTAINER_FORMATS.map((f) => ({ label: f.label, value: f.id }))}
-              />
-            </ConfigField>
-
-            <ConfigField
-              label="Preset de vídeo"
-              description="Velocidade de codificação vs qualidade"
-              tooltip="NVIDIA NVENC: p1-p7 (p1 rápido, p7 qualidade). Padrão: p5. Software: faster/fast/medium/slow/slower."
-            >
-              <SelectInput
-                value={video_preset}
-                onChange={setVideo_preset}
-                options={
-                  video_codec?.includes("nvenc")
-                    ? NVENC_PRESETS.map((p) => ({ label: p.label, value: p.id }))
-                    : SOFTWARE_PRESETS.map((p) => ({ label: p.label, value: p.id }))
-                }
-              />
-            </ConfigField>
-
-            <ConfigField
-              label="Codec de áudio"
-              tooltip="aac é compatível. mp3 é antigo. opus é melhor qualidade. Deixe vazio para manter original."
-            >
-              <SelectInput
-                value={audio_codec}
-                onChange={setAudio_codec}
-                options={AUDIO_CODECS.map((c) => ({ label: c.label, value: c.id }))}
-              />
-            </ConfigField>
-          </ConfigSection>
-
-          {/* Advanced Settings Toggle */}
-          <div
-            style={{
-              marginTop: "24px",
-              paddingTop: "16px",
-              borderTop: "1px solid var(--border)",
-            }}
+    <AppDialog
+      title="Configurar FFmpeg (Renderizador & NVENC)"
+      description="Parâmetros de aceleração por hardware (h264_nvenc), presets de velocidade, codecs e filtros de renderização."
+      onClose={onCancel}
+      wide
+      scrollable
+      footer={
+        <div className="flex items-center justify-end w-full">
+          <GlassButton
+            variant="primary"
+            onClick={handleSave}
+            loading={action.busy}
+            disabled={action.busy}
           >
-            <AppButton
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "12px 16px",
-                backgroundColor: "var(--bg-contrast)",
-                border: "1px solid var(--border)",
-                borderRadius: "8px",
-                cursor: "pointer",
-                fontWeight: "600",
-                fontSize: "14px",
-                color: "var(--ink)",
-                width: "100%",
-                justifyContent: "space-between",
-              }}
-            >
-              <span>Configurações Avançadas</span>
-              <span
-                style={{
-                  transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: "transform 0.3s ease",
-                  display: "inline-flex",
-                }}
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </span>
-            </AppButton>
-          </div>
+            Salvar Configurações
+          </GlassButton>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {/* Basic Options Section */}
+        <ConfigSection title="Opções Básicas" showTopSeparator={false}>
+          <ConfigField
+            label="Formato"
+            description="Tipo de arquivo de saída"
+            tooltip="mp4 é padrão e compatível. mkv suporta mais recursos. mov para Apple. webm para web. Deixe vazio para detectar pela extensão."
+          >
+            <SelectInput
+              value={format}
+              onChange={setFormat}
+              options={CONTAINER_FORMATS.map((f) => ({ label: f.label, value: f.id }))}
+            />
+          </ConfigField>
 
-          {/* Advanced Sections */}
+          <ConfigField
+            label="Preset de vídeo"
+            description="Velocidade de codificação vs qualidade"
+            tooltip="NVIDIA NVENC: p1-p7 (p1 rápido, p7 qualidade). Padrão: p5. Software: faster/fast/medium/slow/slower."
+          >
+            <SelectInput
+              value={video_preset}
+              onChange={setVideo_preset}
+              options={
+                video_codec?.includes("nvenc")
+                  ? NVENC_PRESETS.map((p) => ({ label: p.label, value: p.id }))
+                  : SOFTWARE_PRESETS.map((p) => ({ label: p.label, value: p.id }))
+              }
+            />
+          </ConfigField>
+
+          <ConfigField
+            label="Codec de áudio"
+            tooltip="aac é compatível. mp3 é antigo. opus é melhor qualidade. Deixe vazio para manter original."
+          >
+            <SelectInput
+              value={audio_codec}
+              onChange={setAudio_codec}
+              options={AUDIO_CODECS.map((c) => ({ label: c.label, value: c.id }))}
+            />
+          </ConfigField>
+        </ConfigSection>
+
+        {/* Advanced Settings Toggle */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="w-full flex items-center justify-between p-3 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20 transition-all text-left text-xs font-semibold text-white"
+          >
+            <span className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              Configurações Avançadas de Codificação
+            </span>
+            <svg
+              className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${showAdvanced ? "rotate-180" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Advanced Sections */}
           {showAdvanced && (
             <>
               {/* Quality Options */}
@@ -361,74 +354,21 @@ export function FFmpegConfigDialog({
             </>
           )}
 
-          {/* Command Preview */}
-          <div
-            style={{
-              marginTop: "32px",
-              padding: "16px",
-              backgroundColor: "var(--bg-contrast)",
-              borderRadius: "8px",
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "12px",
-                fontWeight: "600",
-                color: "var(--muted)",
-                marginBottom: "8px",
-              }}
-            >
-              Comando FFmpeg (Prévia)
-            </div>
-            <div
-              style={{
-                backgroundColor: "var(--bg)",
-                color: "var(--ink)",
-                padding: "12px",
-                borderRadius: "6px",
-                fontFamily: "monospace",
-                fontSize: "12px",
-                lineHeight: "1.5",
-                overflowX: "auto",
-                wordBreak: "break-word",
-              }}
-            >
-              {ffmpegCommand}
-            </div>
-            <div
-              style={{
-                fontSize: "11px",
-                color: "var(--muted)",
-                marginTop: "8px",
-                fontStyle: "italic",
-              }}
-            >
-              Este comando será executado com seus arquivos de entrada
-            </div>
+        {/* Command Preview */}
+        <GlassCard className="mt-6 p-4 border-white/10 bg-white/[0.02] space-y-2.5">
+          <div className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            Comando FFmpeg (Prévia Gerada)
           </div>
-
-          {/* Action Buttons */}
-          <div
-            style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "24px" }}
-          >
-            <AppButton
-              onClick={onCancel}
-              variant="ghost"
-            >
-              Cancelar
-            </AppButton>
-            <AppButton
-              onClick={handleSave}
-              disabled={action.busy}
-              variant="primary"
-            >
-              Salvar Configurações
-            </AppButton>
+          <div className="p-3 rounded-xl bg-black/60 border border-white/[0.08] font-mono text-xs text-blue-300 overflow-x-auto leading-relaxed">
+            {ffmpegCommand}
           </div>
-        </div>
+          <p className="text-xs text-zinc-400 italic">
+            Comando com aceleração por hardware NVENC aplicado para o corte 9:16 vertical com normalização de áudio para -14 LUFS.
+          </p>
+        </GlassCard>
       </div>
-    </div>
+    </AppDialog>
   );
 }
 

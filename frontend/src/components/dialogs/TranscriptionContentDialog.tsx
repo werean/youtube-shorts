@@ -19,22 +19,19 @@ export function TranscriptionContentDialog({
     <AppDialog
       title={title}
       onClose={onClose}
-      showHeaderClose={false}
       wide
       scrollable
       footer={
-        <>
-          <AppButton variant="default" className="danger" onClick={() => onDelete(selectedFormat)}>
-            Deletar transcrição
-          </AppButton>
-          <AppButton variant="primary" onClick={onClose}>
-            Fechar
-          </AppButton>
-        </>
+        <AppButton variant="default" className="danger" onClick={() => onDelete(selectedFormat)}>
+          Deletar transcrição
+        </AppButton>
       }
     >
-      <pre className="transcription-text">{content}</pre>
+      <div className="p-4">
+        <pre className="transcription-text font-mono text-xs bg-black/60 p-4 rounded-xl border border-white/10 text-zinc-300 overflow-x-auto m-0 max-h-[60vh] overscroll-contain">
+          {content}
+        </pre>
+      </div>
     </AppDialog>
   );
 }
-

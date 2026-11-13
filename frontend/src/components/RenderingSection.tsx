@@ -63,7 +63,7 @@ export function RenderingSection({
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-[clamp(0.75rem,2cqi,1.25rem)]">
           {renderOutputs.map((path) => {
             const url = buildRenderUrl(path);
             const fileName = path.split("/").pop() || "render.mp4";
@@ -72,10 +72,10 @@ export function RenderingSection({
             return (
               <GlassCard
                 key={path}
-                className="flex flex-col justify-between overflow-hidden p-3.5 space-y-3 border-white/[0.1] bg-[#0e0e12]/80 hover:border-white/20 transition-all duration-200"
+                className="row-span-3 grid grid-rows-[auto_1fr_auto] [grid-template-rows:subgrid] overflow-hidden p-3.5 gap-3 border-white/10 bg-[#0e0e14] hover:border-white/20 transition-all duration-200"
               >
                 {/* Video Player 9:16 Preview */}
-                <div className="w-full aspect-[9/14] bg-black/80 rounded-xl border border-white/10 overflow-hidden relative group">
+                <div className="w-full aspect-[9/14] bg-black/80 rounded-xl border border-white/10 overflow-hidden relative group contain-paint">
                   <video
                     controls
                     preload="metadata"
@@ -86,7 +86,7 @@ export function RenderingSection({
                     }}
                   />
                   <div className="absolute top-2 right-2 pointer-events-none">
-                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-md text-white border border-white/10">
+                    <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-white border border-white/15">
                       1080x1920
                     </span>
                   </div>
@@ -94,10 +94,10 @@ export function RenderingSection({
 
                 {/* Metadados e Titulo */}
                 <div className="space-y-1">
-                  <p className="text-xs font-semibold text-white leading-snug line-clamp-2">
+                  <p className="text-sm font-semibold text-white leading-snug line-clamp-2">
                     {suggestedTitle}
                   </p>
-                  <p className="text-[11px] font-mono text-text-3 truncate">
+                  <p className="text-xs font-mono text-zinc-400 truncate">
                     {fileName}
                   </p>
                 </div>

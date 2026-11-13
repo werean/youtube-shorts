@@ -389,6 +389,10 @@ async def run_job_pipeline(
                 message="Step 6/6: Rendering complete",
             )
 
+        if not include_render:
+            if _status_str(job.status) != JobStatus.WAITING_APPROVAL.value:
+                job = c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)
+
         c.runtime.log_stage_end(
             job_id,
             "orchestrator",
@@ -399,14 +403,26 @@ async def run_job_pipeline(
             },
             message="1-click pipeline completed successfully",
         )
-        _publish_step(
-            c,
-            job_id,
-            task="render" if include_render else "transcription",
-            status=job.status,
-            percent=100.0,
-            message="Pipeline 1-clique concluído com sucesso!",
-        )
+        if not include_render:
+            curation_msg = "Cortes prontos para curadoria — revise e aprove antes de renderizar"
+            _publish_step(
+                c,
+                job_id,
+                task="analysis",
+                status=JobStatus.WAITING_APPROVAL,
+                percent=100.0,
+                message=curation_msg,
+            )
+            c.runtime.publish_state_change(job_id, JobStatus.WAITING_APPROVAL, curation_msg)
+        else:
+            _publish_step(
+                c,
+                job_id,
+                task="render",
+                status=job.status,
+                percent=100.0,
+                message="Pipeline 1-clique concluído com sucesso!",
+            )
         return job
 
     except OperationCancelledError:

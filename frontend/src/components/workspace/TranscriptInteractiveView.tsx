@@ -10,6 +10,7 @@ export interface TranscriptInteractiveViewProps {
   activeCut?: Cut | null;
   onSeek: (seconds: number) => void;
   onCreateCutFromSelection?: (start: number, end: number, text?: string) => void;
+  onGenerateCuts?: () => void;
   isLoading?: boolean;
   onRequestTranscription?: () => void;
   isExpanded?: boolean;
@@ -23,6 +24,7 @@ export function TranscriptInteractiveView({
   activeCut,
   onSeek,
   onCreateCutFromSelection,
+  onGenerateCuts,
   isLoading = false,
   onRequestTranscription,
   isExpanded = true,
@@ -66,20 +68,47 @@ export function TranscriptInteractiveView({
       )}
     >
       {/* Cabecalho da Transcricao */}
-      <div className="flex flex-col gap-2.5 p-3.5 border-b border-white/[0.06]">
+      <div className="flex flex-col gap-2.5 p-3.5 border-b border-white/[0.08] bg-white/[0.015]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-3">
-              Transcricao Interativa
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+              Transcrição Interativa
             </span>
             {segments.length > 0 && (
-              <span className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-text-3">
+              <span className="rounded-full bg-white/[0.05] border border-white/10 px-2.5 py-0.5 font-sans font-medium text-xs text-zinc-400">
                 {segments.length} blocos
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Botao de Acao: Gerar Cortes com IA */}
+            {isExpanded && onGenerateCuts && segments.length > 0 && (
+              <GlassButton
+                variant="glass"
+                size="sm"
+                onClick={onGenerateCuts}
+                disabled={isLoading}
+                className="text-xs font-medium border-amber-400/25 hover:border-amber-400/50 text-amber-300 hover:bg-amber-400/10"
+                title="Minerar cortes e ganchos virais com IA (LLM)"
+                icon={
+                  <svg
+                    className="h-3.5 w-3.5 mr-1 text-amber-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3z" />
+                  </svg>
+                }
+              >
+                Gerar Cortes IA
+              </GlassButton>
+            )}
+
             {/* Botao de Acao: Criar Corte do Trecho */}
             {isExpanded && onCreateCutFromSelection && (
               <GlassButton
@@ -87,6 +116,7 @@ export function TranscriptInteractiveView({
                 size="sm"
                 onClick={handleCreateCut}
                 disabled={!activeSegment}
+                className="text-xs font-medium"
                 title={
                   activeSegment
                     ? `Criar corte do trecho selecionado (${formatTimestamp(activeSegment.start)} - ${formatTimestamp(activeSegment.end)})`
@@ -94,7 +124,7 @@ export function TranscriptInteractiveView({
                 }
                 icon={
                   <svg
-                    className="h-3 w-3 mr-1 text-text-1"
+                    className="h-3.5 w-3.5 mr-1 text-zinc-200"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -121,7 +151,7 @@ export function TranscriptInteractiveView({
                 type="button"
                 onClick={onToggleExpanded}
                 title={isExpanded ? "Ocultar / Recolher Transcrição" : "Exibir Transcrição"}
-                className="flex items-center gap-1 text-[11px] font-mono text-zinc-400 hover:text-white px-2 py-0.5 rounded border border-white/[0.08] hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.06] transition-all"
+                className="flex items-center gap-1.5 text-xs font-sans font-medium text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.08] transition-all"
               >
                 <span>{isExpanded ? "Ocultar" : "Exibir"}</span>
                 <svg
@@ -172,7 +202,7 @@ export function TranscriptInteractiveView({
 
       {/* Area de Conteudo / Transcricao continua sincronizada */}
       {isExpanded && (
-        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 scrollbar-thin scrollbar-thumb-white/10">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-stable">
           {isLoading ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-text-3">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
@@ -269,21 +299,21 @@ export function TranscriptInteractiveView({
                     }}
                     title="Pular para este segundo"
                     className={cn(
-                      "flex-shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[11px] transition-all",
+                      "flex-shrink-0 rounded-md border px-2 py-0.5 font-mono text-xs transition-all",
                       isInsideActiveCut
-                        ? "border-amber-400/30 bg-amber-400/10 text-amber-300"
-                        : "border-white/[0.08] bg-white/[0.04] text-text-3 group-hover:border-white/[0.18] group-hover:text-text-2",
+                        ? "border-amber-400/40 bg-amber-400/15 text-amber-300 font-semibold"
+                        : "border-white/10 bg-white/[0.04] text-zinc-300 group-hover:border-white/20 group-hover:text-white",
                     )}
                   >
                     {formatTimestamp(segment.start)}
                   </button>
 
                   {/* Texto da transcricao */}
-                  <p className="flex-1 text-body-sm leading-relaxed">{segment.text}</p>
+                  <p className="flex-1 text-sm leading-relaxed text-zinc-200 group-hover:text-white select-text">{segment.text}</p>
 
                   {/* Tag de Corte IA quando pertencer ao corte ativo */}
                   {isInsideActiveCut && (
-                    <span className="flex-shrink-0 rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-400/30">
+                    <span className="flex-shrink-0 rounded bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300 border border-amber-400/30">
                       Corte Ativo
                     </span>
                   )}

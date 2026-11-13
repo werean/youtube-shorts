@@ -2,16 +2,26 @@
  * Tipos e interfaces compartilhadas pela aplicação
  */
 
-import type { Job, Segment } from "./types";
+import type { Job } from "@youtube-shorts/contracts";
+
+export interface Segment {
+  segment_id: string;
+  start: number;
+  end: number;
+  text: string;
+}
 
 export interface VideoItem {
   job: Job;
   videoPath?: string;
+  hasTranscription?: boolean;
+  hasAnalysis?: boolean;
   transcription?: string;
   transcriptionSegments?: Segment[];
   transcriptionFormats?: { segments?: boolean; text?: boolean; vtt?: boolean };
   isTranscribing?: boolean;
   transcriptionLogs?: string[];
+  attemptsCount?: number;
 }
 
 export interface ActionState {

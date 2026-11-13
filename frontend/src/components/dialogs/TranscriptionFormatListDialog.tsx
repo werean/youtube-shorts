@@ -28,28 +28,26 @@ export function TranscriptionFormatListDialog({
       <AppDialog
         title="Transcrição"
         onClose={onClose}
+        className="max-w-md"
         footer={
-          <>
-            <AppButton variant="primary" onClick={onClose} disabled={deletingTranscription}>
-              Fechar
+          hasAnyFormat ? (
+            <AppButton
+              variant="default"
+              className="danger"
+              onClick={() => setShowDeleteConfirmDialog(true)}
+              disabled={deletingTranscription}
+            >
+              {deletingTranscription ? "Apagando..." : "Apagar transcrição completa"}
             </AppButton>
-            {hasAnyFormat ? (
-              <AppButton
-                variant="default"
-                className="danger primary"
-                onClick={() => setShowDeleteConfirmDialog(true)}
-                disabled={deletingTranscription}
-              >
-                {deletingTranscription ? "Apagando..." : "Apagar transcrição"}
-              </AppButton>
-            ) : null}
-          </>
+          ) : undefined
         }
       >
-        <div className="ds-dialog-stack">
-          <p className="muted">Escolha um formato para visualizar.</p>
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-zinc-400 m-0">
+            Escolha o formato da transcrição que deseja visualizar ou exportar:
+          </p>
           {hasAnyFormat ? (
-            <div className="ds-dialog-actions ds-dialog-actions--start">
+            <div className="grid grid-cols-3 gap-2.5">
               {activeVideoHasText ? (
                 <AppButton
                   variant="secondary"
@@ -57,6 +55,7 @@ export function TranscriptionFormatListDialog({
                     onSelectFormat("text");
                     onClose();
                   }}
+                  className="w-full text-center py-3"
                 >
                   TXT
                 </AppButton>
@@ -68,6 +67,7 @@ export function TranscriptionFormatListDialog({
                     onSelectFormat("vtt");
                     onClose();
                   }}
+                  className="w-full text-center py-3"
                 >
                   VTT
                 </AppButton>
@@ -79,46 +79,45 @@ export function TranscriptionFormatListDialog({
                     onSelectFormat("segments");
                     onClose();
                   }}
+                  className="w-full text-center py-3"
                 >
                   JSON
                 </AppButton>
               ) : null}
             </div>
-          ) : null}
-          {!hasAnyFormat ? (
-            <p className="muted">Nenhum formato de transcrição disponível.</p>
-          ) : null}
+          ) : (
+            <p className="text-xs text-zinc-500 m-0">Nenhum formato de transcrição disponível para este vídeo.</p>
+          )}
         </div>
       </AppDialog>
 
       {showDeleteConfirmDialog ? (
         <AppDialog
-          title="Confirmar exclusão"
+          title="Confirmar exclusão de transcrição"
           onClose={() => setShowDeleteConfirmDialog(false)}
-          showHeaderClose={false}
+          className="max-w-md"
           footer={
-            <>
-              <AppButton
-                variant="primary"
-                onClick={() => setShowDeleteConfirmDialog(false)}
-                disabled={deletingTranscription}
-              >
-                Não
-              </AppButton>
-              <AppButton
-                variant="secondary"
-                onClick={() => {
-                  onDeleteAll();
-                  setShowDeleteConfirmDialog(false);
-                }}
-                disabled={deletingTranscription}
-              >
-                Sim
-              </AppButton>
-            </>
+            <AppButton
+              variant="default"
+              className="danger"
+              onClick={() => {
+                onDeleteAll();
+                setShowDeleteConfirmDialog(false);
+              }}
+              disabled={deletingTranscription}
+            >
+              {deletingTranscription ? "Apagando..." : "Sim, confirmar exclusão"}
+            </AppButton>
           }
         >
-          <p>Tem certeza que deseja apagar essa transcrição?</p>
+          <div className="p-4 space-y-2">
+            <p className="text-sm text-zinc-300 m-0 leading-relaxed">
+              Tem certeza que deseja apagar todos os arquivos desta transcrição?
+            </p>
+            <p className="text-xs text-zinc-400 m-0">
+              O status do vídeo retornará para DOWNLOADED.
+            </p>
+          </div>
         </AppDialog>
       ) : null}
     </>

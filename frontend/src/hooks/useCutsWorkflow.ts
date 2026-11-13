@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { listCuts, updateCuts } from "../api/cuts";
+import {
+  approveAllCuts,
+  approveCut,
+  listCuts,
+  rejectAllCuts,
+  rejectCut,
+  updateCuts,
+} from "../api/cuts";
 import { saveSettings, type AppSettings } from "../api/config";
 import type { Cut } from "../types";
 
@@ -233,6 +240,90 @@ export function useCutsWorkflow({
     setHoveredCutAction(null);
   }
 
+  async function approveSingleCut(cutId: string) {
+    if (!activeJobId) return;
+    try {
+      const updated = await approveCut(activeJobId, cutId);
+      const merge = (cut: Cut): Cut =>
+        cut.cut_id === cutId
+          ? {
+              ...cut,
+              ...updated,
+              status: updated.status ?? "approved",
+              approved: updated.approved ?? true,
+              rejected: updated.rejected ?? false,
+            }
+          : cut;
+      setCuts((prev) => prev.map(merge));
+      setSuggestedCuts((prev) => prev.map(merge));
+    } catch (error) {
+      console.error("Failed to approve cut:", error);
+    }
+  }
+
+  async function rejectSingleCut(cutId: string) {
+    if (!activeJobId) return;
+    try {
+      const updated = await rejectCut(activeJobId, cutId);
+      const merge = (cut: Cut): Cut =>
+        cut.cut_id === cutId
+          ? {
+              ...cut,
+              ...updated,
+              status: updated.status ?? "rejected",
+              approved: updated.approved ?? false,
+              rejected: updated.rejected ?? true,
+            }
+          : cut;
+      setCuts((prev) => prev.map(merge));
+      setSuggestedCuts((prev) => prev.map(merge));
+    } catch (error) {
+      console.error("Failed to reject cut:", error);
+    }
+  }
+
+  async function approveAllSuggestedCuts() {
+    if (!activeJobId) return;
+    try {
+      const updatedCuts = await approveAllCuts(activeJobId);
+      if (Array.isArray(updatedCuts)) {
+        applyCuts(updatedCuts);
+      } else {
+        const markApproved = (cut: Cut): Cut => ({
+          ...cut,
+          status: "approved",
+          approved: true,
+          rejected: false,
+        });
+        setCuts((prev) => prev.map(markApproved));
+        setSuggestedCuts((prev) => prev.map(markApproved));
+      }
+    } catch (error) {
+      console.error("Failed to approve all cuts:", error);
+    }
+  }
+
+  async function rejectAllSuggestedCuts() {
+    if (!activeJobId) return;
+    try {
+      const updatedCuts = await rejectAllCuts(activeJobId);
+      if (Array.isArray(updatedCuts)) {
+        applyCuts(updatedCuts);
+      } else {
+        const markRejected = (cut: Cut): Cut => ({
+          ...cut,
+          status: "rejected",
+          approved: false,
+          rejected: true,
+        });
+        setCuts((prev) => prev.map(markRejected));
+        setSuggestedCuts((prev) => prev.map(markRejected));
+      }
+    } catch (error) {
+      console.error("Failed to reject all cuts:", error);
+    }
+  }
+
   return {
     cuts,
     setCuts,
@@ -261,5 +352,9 @@ export function useCutsWorkflow({
     selectSuggestedCut,
     setCutActionHover,
     clearCutActionHover,
+    approveSingleCut,
+    rejectSingleCut,
+    approveAllSuggestedCuts,
+    rejectAllSuggestedCuts,
   };
 }

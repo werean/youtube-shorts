@@ -180,3 +180,23 @@ class SourceVideoInfo(BaseModel):
     webpage_url: str | None = None
     chapters: list[ChapterAnchor] = Field(default_factory=list)
     raw_info: dict[str, Any] | None = None
+
+
+class AttemptSummary(BaseModel):
+    """Summary metadata for a nested archived attempt under `data/jobs/<job_id>/attempts/<attempt_id>/`."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    attempt_id: str
+    job_id: str
+    label: str
+    created_at: str
+    archived_at: str
+    status: JobStatus | str
+    video_duration_seconds: float | None = None
+    cuts_count: int = 0
+    approved_count: int = 0
+    rendered_count: int = 0
+    rendered_files: list[str] = Field(default_factory=list)
+    rendered_urls: list[str] = Field(default_factory=list)
+    has_transcription: bool = False

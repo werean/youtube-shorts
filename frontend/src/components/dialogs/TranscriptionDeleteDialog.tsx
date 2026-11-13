@@ -23,28 +23,27 @@ export function TranscriptionDeleteDialog({
     <AppDialog
       title="Confirmar exclusão"
       onClose={onCancel}
-      showHeaderClose={false}
+      className="max-w-md"
       footer={
-        <>
-          <AppButton variant="primary" onClick={onCancel} disabled={action.busy}>
-            Cancelar
-          </AppButton>
-          <AppButton
-            variant="default"
-            className="danger"
-            onClick={() => onConfirm(pendingDeleteFormat)}
-            disabled={action.busy}
-          >
-            {action.busy ? "Excluindo..." : "Confirmar"}
-          </AppButton>
-        </>
+        <AppButton
+          variant="default"
+          className="danger"
+          onClick={() => onConfirm(pendingDeleteFormat)}
+          disabled={action.busy}
+        >
+          {action.busy ? "Excluindo..." : "Confirmar exclusão"}
+        </AppButton>
       }
     >
-      <p>
-        Tem certeza que deseja deletar a transcrição em formato{" "}
-        <strong>{formatLabel(pendingDeleteFormat)}</strong>?
-      </p>
+      <div className="p-4 space-y-3">
+        <p className="text-sm text-zinc-300 leading-relaxed m-0">
+          Tem certeza que deseja deletar a transcrição em formato{" "}
+          <strong className="text-white">{formatLabel(pendingDeleteFormat)}</strong>?
+        </p>
+        <p className="text-xs text-zinc-400 m-0">
+          Esta operação removerá o arquivo correspondente no disco permanentemente.
+        </p>
+      </div>
     </AppDialog>
   );
 }
-

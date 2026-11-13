@@ -58,10 +58,7 @@ export function ConfigureAppDialog({
       wide
       scrollable
       footer={
-        <div className="flex items-center justify-end gap-3 w-full">
-          <GlassButton variant="glass" onClick={onCancel}>
-            Cancelar
-          </GlassButton>
+        <div className="flex items-center justify-end w-full">
           <GlassButton
             variant="primary"
             disabled={action.busy || !baseDir.trim()}
@@ -82,17 +79,17 @@ export function ConfigureAppDialog({
     >
       <div className="space-y-5">
         {/* Card: Diretorio de Armazenamento */}
-        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300">
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 flex-shrink-0">
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
               <div>
-                <h4 className="text-xs font-semibold text-white">Diretório de Armazenamento</h4>
-                <p className="text-[11px] text-zinc-400">
+                <h4 className="text-sm font-semibold text-white">Diretório de Armazenamento</h4>
+                <p className="text-xs text-zinc-400 leading-relaxed">
                   Onde os arquivos de vídeo, cortes renderizados e transcrições serão salvos.
                 </p>
               </div>
@@ -112,8 +109,8 @@ export function ConfigureAppDialog({
             </GlassButton>
           </div>
 
-          <div className="space-y-1.5 pt-1">
-            <label className="text-[11px] font-medium text-zinc-400">
+          <div className="space-y-2 pt-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
               Caminho no Computador
             </label>
             <input
@@ -121,29 +118,32 @@ export function ConfigureAppDialog({
               value={baseDir}
               onChange={(e) => setBaseDir(e.target.value)}
               placeholder="Ex: /home/usuario/Videos/YouTubeShorts"
-              className="w-full h-9 px-3 text-xs font-mono bg-black/40 border border-white/10 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              className="w-full h-10 px-3.5 text-sm font-sans bg-black/40 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
             />
-            <p className="text-[10px] text-zinc-500 font-mono">
-              Caminho ativo: {appSettings?.media.base_dir || baseDir}
-            </p>
+            <div className="space-y-1 pt-1">
+              <span className="text-xs font-medium text-zinc-400">Caminho ativo no sistema:</span>
+              <p className="text-xs text-zinc-200 font-sans bg-black/40 p-2.5 rounded-xl border border-white/[0.08] break-all select-all leading-relaxed m-0">
+                {appSettings?.media.base_dir || baseDir}
+              </p>
+            </div>
           </div>
 
           {/* Estrutura de Pastas Preview */}
-          <div className="p-3 rounded-xl bg-black/30 border border-white/[0.06] space-y-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          <div className="p-3.5 rounded-xl bg-black/30 border border-white/[0.06] space-y-2.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
               Estrutura Criada Automaticamente
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 font-mono text-[11px]">
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-0.5 font-sans font-medium text-xs">
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] text-zinc-200">
+                <span className="w-2 h-2 rounded-full bg-blue-400" />
                 <span>/videos/</span>
               </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] text-zinc-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
                 <span>/shorts/</span>
               </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-white/[0.02] border border-white/[0.05] text-zinc-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] text-zinc-200">
+                <span className="w-2 h-2 rounded-full bg-purple-400" />
                 <span>/transcrições/</span>
               </div>
             </div>
@@ -151,9 +151,9 @@ export function ConfigureAppDialog({
         </GlassCard>
 
         {/* Card: Resolução de Download */}
-        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300">
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3.5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 flex-shrink-0">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="2" y="3" width="20" height="14" rx="2" />
                 <line x1="8" y1="21" x2="16" y2="21" />
@@ -161,8 +161,8 @@ export function ConfigureAppDialog({
               </svg>
             </div>
             <div>
-              <h4 className="text-xs font-semibold text-white">Resolução de Download</h4>
-              <p className="text-[11px] text-zinc-400">
+              <h4 className="text-sm font-semibold text-white">Resolução de Download</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
                 Resolução padrão usada pelo pipeline yt-dlp ao baixar conteúdos do YouTube.
               </p>
             </div>
@@ -187,14 +187,14 @@ export function ConfigureAppDialog({
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className="text-xs font-semibold text-white">{item.label}</span>
+                    <span className="text-sm font-semibold text-white">{item.label}</span>
                     <span
                       className={`w-2 h-2 rounded-full ${
                         isSelected ? "bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" : "bg-zinc-700"
                       }`}
                     />
                   </div>
-                  <span className="text-[10px] text-zinc-400 mt-1 font-mono">{item.badge}</span>
+                  <span className="text-xs text-zinc-400 mt-1 font-sans font-medium">{item.badge}</span>
                 </button>
               );
             })}
@@ -202,11 +202,11 @@ export function ConfigureAppDialog({
         </GlassCard>
 
         {/* Card: Preferências do Usuário */}
-        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3">
-          <div className="flex items-center justify-between">
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3.5">
+          <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <h4 className="text-xs font-semibold text-white">Confirmação ao Excluir Cortes</h4>
-              <p className="text-[11px] text-zinc-400">
+              <h4 className="text-sm font-semibold text-white">Confirmação ao Excluir Cortes</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
                 Exibir diálogo de confirmação antes de apagar um corte gerado ou editado.
               </p>
             </div>
@@ -214,7 +214,7 @@ export function ConfigureAppDialog({
             <button
               type="button"
               onClick={() => setAskDeleteCutConfirm((prev) => !prev)}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none ${
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none flex-shrink-0 ${
                 askDeleteCutConfirm ? "bg-white justify-end" : "bg-zinc-800 justify-start"
               }`}
             >

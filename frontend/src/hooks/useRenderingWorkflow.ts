@@ -52,6 +52,22 @@ function toCatchyTitle(cut: Cut): string {
   return `${base.slice(0, 69).trimEnd()}...`;
 }
 
+function isCutApproved(cut: Cut): boolean {
+  return cut.approved === true || cut.status === "approved";
+}
+
+function isCutRejected(cut: Cut): boolean {
+  return cut.rejected === true || cut.status === "rejected";
+}
+
+function getExpectedRenderCutCount(cuts: Cut[]): number {
+  const approvedCount = cuts.filter(isCutApproved).length;
+  if (approvedCount > 0) {
+    return approvedCount;
+  }
+  return cuts.filter((cut) => !isCutRejected(cut)).length;
+}
+
 export function useRenderingWorkflow({
   activeJobId,
   cuts,
@@ -69,6 +85,7 @@ export function useRenderingWorkflow({
   const renderPollRef = useRef<number | null>(null);
   const renderPollStartTimeRef = useRef<number | null>(null);
   const renderOutputsKeyRef = useRef<string>("");
+  const expectedRenderCountRef = useRef<number>(0);
 
   const renderTitlesByFileName = useMemo(() => {
     const next: Record<string, string> = {};
@@ -81,7 +98,21 @@ export function useRenderingWorkflow({
     return next;
   }, [cuts]);
 
+  function applyRenderOutputs(outputs: string[], forceVersionBump = false) {
+    const outputsKey = outputs.join("|");
+    if (outputsKey !== renderOutputsKeyRef.current) {
+      renderOutputsKeyRef.current = outputsKey;
+      setRenderOutputs(outputs);
+      setRenderOutputsVersion((value) => value + 1);
+      return;
+    }
+    if (forceVersionBump) {
+      setRenderOutputsVersion((value) => value + 1);
+    }
+  }
+
   function clearRenderOutputs() {
+    renderOutputsKeyRef.current = "";
     setRenderOutputs([]);
   }
 
@@ -94,28 +125,43 @@ export function useRenderingWorkflow({
     setIsRendering(false);
   }
 
+  async function refreshRenderOutputs(jobId?: string) {
+    const targetJobId = jobId ?? activeJobId;
+    if (!targetJobId) return;
+    try {
+      const outputs = await listRenderOutputs(targetJobId);
+      applyRenderOutputs(outputs);
+    } catch (error) {
+      console.error("[render] Failed to refresh outputs:", error);
+    }
+  }
+
   async function pollRenderOutputs(jobId: string) {
     try {
       const outputs = await listRenderOutputs(jobId);
-      const outputsKey = outputs.join("|");
-      if (outputsKey !== renderOutputsKeyRef.current) {
-        renderOutputsKeyRef.current = outputsKey;
-        setRenderOutputs(outputs);
-        setRenderOutputsVersion((value) => value + 1);
-      }
+      applyRenderOutputs(outputs);
 
       const job = await getJob(jobId);
       updateVideo(jobId, { job });
 
-      if (expectedRenderCount > 0 && outputs.length >= expectedRenderCount) {
+      const currentExpectedCount = expectedRenderCountRef.current;
+      if (currentExpectedCount > 0 && outputs.length >= currentExpectedCount) {
         console.log(
-          `[render] All expected renders completed (${outputs.length}/${expectedRenderCount})`,
+          `[render] All expected renders completed (${outputs.length}/${currentExpectedCount})`,
         );
         stopRenderPolling();
         return;
       }
 
-      if (job.status === "DONE" || job.status === "ERROR") {
+      if (job.status === "DONE") {
+        const finalOutputs = await listRenderOutputs(jobId);
+        applyRenderOutputs(finalOutputs, true);
+        console.log(`[render] Job status is DONE, stopping polling`);
+        stopRenderPolling();
+        return;
+      }
+
+      if (job.status === "ERROR") {
         console.log(`[render] Job status is ${job.status}, stopping polling`);
         setRenderOutputsVersion((value) => value + 1);
         stopRenderPolling();
@@ -152,6 +198,7 @@ export function useRenderingWorkflow({
   }
 
   function startRenderPolling(jobId: string, totalCuts: number) {
+    expectedRenderCountRef.current = totalCuts;
     setExpectedRenderCount(totalCuts);
     setIsRendering(true);
     renderPollStartTimeRef.current = Date.now();
@@ -172,13 +219,14 @@ export function useRenderingWorkflow({
 
   function startRenderFlow() {
     if (!activeJobId) return undefined;
+    const expectedCutsToRender = getExpectedRenderCutCount(cuts);
 
     return runAction(async () => {
       console.log(`[UI] Renderização iniciada`);
       prepareRenderTaskLog();
       stopTaskLogsPolling();
       clearRenderOutputs();
-      startRenderPolling(activeJobId, cuts.length);
+      startRenderPolling(activeJobId, expectedCutsToRender);
 
       await updateCuts(activeJobId, cuts);
       try {
@@ -272,6 +320,7 @@ export function useRenderingWorkflow({
     renderTitlesByFileName,
     buildRenderUrl,
     clearRenderOutputs,
+    refreshRenderOutputs,
     startRenderFlow,
     cancelActiveRendering,
     openRenderOutputFolder,

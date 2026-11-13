@@ -45,7 +45,6 @@ export function BatchPipelineDialog({
           onClose();
         }
       }}
-      showHeaderClose={false}
       onOverlayClick={() => {
         if (!isBatchProcessing) {
           onClose();
@@ -56,9 +55,11 @@ export function BatchPipelineDialog({
       scrollable
       footer={
         <>
-          <AppButton variant="primary" onClick={onCancel}>
-            {isBatchProcessing ? "Cancelar Processamento" : "Fechar"}
-          </AppButton>
+          {isBatchProcessing && (
+            <AppButton variant="primary" onClick={onCancel}>
+              Cancelar Processamento
+            </AppButton>
+          )}
           <AppButton
             variant="secondary"
             onClick={onStart}

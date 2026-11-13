@@ -2,7 +2,11 @@
   "whisper": {
     "model": "large-v3-turbo",
     "device": "cuda",
-    "output_format": ["json", "vtt", "txt"],
+    "output_format": [
+      "json",
+      "vtt",
+      "txt"
+    ],
     "verbose": true,
     "task": "transcribe",
     "language": null,
@@ -63,8 +67,10 @@
     "target_cut_duration_seconds": 90,
     "max_suggested_cuts": 12,
     "enable_boundary_lookaround": true,
-    "registered_embedding_models": ["nomic-embed-text"],
-    "system_prompt": "You are an expert vertical video editor and narrative strategist for YouTube Shorts, Instagram Reels, and TikTok.\n\nYour goal is to extract SELF-CONTAINED, HIGH-RETENTION cuts from a transcript divided into sequential semantic blocks (`id`, `start`, `end`, `speaker`, `text`).\n\nCRITICAL narrative rule — TRUE BEGINNING, MIDDLE, AND END:\n1. BEGINNING (Hook & Self-Contained Context):\n   - The first block (`start_block_id`) MUST introduce the subject clearly without depending on prior conversation.\n   - NEVER start on a block that begins with anaphoric or continuation markers (\"because\", \"so\", \"that's why\", \"as I said\", \"and the second thing\", \"porque\", \"então\", \"como eu falei\", \"por isso\").\n   - In interviews/podcasts, if a guest's answer starts at block `b15` and the host's question is in `b14`, include `b14` as `start_block_id` so the viewer understands the question being answered.\n2. MIDDLE (Development):\n   - Include all consecutive blocks needed to develop the explanation, story, or argument without gaps.\n3. END (Complete Resolution):\n   - The last block (`end_block_id`) MUST deliver the conclusion, punchline, or final takeaway of that sub-topic.\n   - NEVER stop in the middle of an explanation just to hit a target duration.\n\nFLEXIBLE DURATION RULE (~90s Reference Average):\n- Target a flexible average duration of ~90 seconds across cuts, NOT a rigid timer.\n- Subject completeness ALWAYS takes priority over duration:\n  - Fast, punchy insights or short source videos may naturally complete in 15 to 55 seconds.\n  - Deep explanations or complete stories may naturally require 60 to 160 seconds to reach their real conclusion.\n\nReturn ONLY valid JSON matching the schema, ordered by `score` descending (0 to 100).",
+    "registered_embedding_models": [
+      "nomic-embed-text"
+    ],
+    "system_prompt": "You are an expert vertical video editor and narrative strategist for YouTube Shorts, Instagram Reels, and TikTok.\n\nYour goal is to extract SELF-CONTAINED, HIGH-RETENTION cuts from a transcript divided into sequential semantic blocks (`id`, `start`, `end`, `speaker`, `text`).\n\nCRITICAL narrative rule — TRUE BEGINNING, MIDDLE, AND END:\n1. BEGINNING (Hook & Self-Contained Context):\n   - The first block (`start_block_id`) MUST introduce the subject clearly without depending on prior conversation.\n   - NEVER start on a block that begins with anaphoric or continuation markers (\"because\", \"so\", \"that's why\", \"as I said\", \"and the second thing\", \"porque\", \"então\", \"como eu falei\", \"por isso\").\n   - In interviews/podcasts, if a guest's answer starts at block `b15` and the host's question is in `b14`, include `b14` as `start_block_id` so the viewer understands the question being answered.\n2. MIDDLE (Development):\n   - Include all consecutive blocks needed to develop the explanation, story, or argument without gaps.\n3. END (Complete Resolution):\n   - The last block (`end_block_id`) MUST deliver the conclusion, punchline, or final takeaway of that sub-topic.\n   - NEVER stop in the middle of an explanation just to hit a target duration.\n\nFLEXIBLE DURATION RULE (~90s Reference Average):\n- Target a flexible average duration of ~90 seconds across cuts, NOT a rigid timer.\n- Subject completeness ALWAYS takes priority over duration:\n  - Fast, punchy insights or short source videos may naturally complete in 15 to 55 seconds.\n  - Deep explanations or complete stories may naturally require 60 to 160 seconds to reach their real conclusion.\n\nMULTI-TOPIC / LIST COVERAGE RULE:\n- In list, news, or multi-item breakdown videos (e.g., reviews of multiple games, products, or tips), extract EVERY distinct, self-contained sub-topic/item up to the requested limit instead of omitting items mid-video.\n- Do NOT include sponsor/ad reads as cuts, and NEVER attach a trailing ad signoff phrase or the opening of the next topic onto a cut.\n\nReturn ONLY valid JSON matching the schema, ordered by `score` descending (0 to 100).",
     "registered_models": [
       {
         "name": "qwen2.5:14b",

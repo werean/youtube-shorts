@@ -72,7 +72,7 @@ export function StudioTopbar({
   return (
     <header
       className={cn(
-        "relative z-40 flex h-14 w-full select-none items-center justify-between border-b border-white/[0.08] bg-[#09090b]/90 px-4 backdrop-blur-2xl",
+        "relative z-40 flex h-14 w-full select-none items-center justify-between border-b border-white/[0.08] bg-[#09090b]/90 px-[clamp(0.75rem,2cqi,1.25rem)] backdrop-blur-2xl @container/topbar",
         "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
         className,
       )}
@@ -172,7 +172,7 @@ export function StudioTopbar({
                 gpuStatus === "offline" && "bg-zinc-600",
               )}
             />
-            <span className="text-[11px] font-mono tracking-wider text-text-2">
+            <span className="text-xs font-mono font-medium tracking-wider text-zinc-300">
               {gpuLabel}
             </span>
           </div>
@@ -207,15 +207,31 @@ export function StudioTopbar({
             </svg>
           </button>
 
-          {/* Menu Popover Liquid Glass */}
+          {/* Menu Popover Liquid Glass Opaco e Nítido */}
           {isSettingsOpen && (
-            <div className="absolute right-0 top-10 w-72 rounded-2xl border border-white/15 bg-[#0f0f14]/95 p-2 shadow-2xl backdrop-blur-2xl z-50 animate-in fade-in duration-200">
-              <div className="px-3 py-2 border-b border-white/[0.08]">
-                <p className="text-xs font-semibold text-white">Configuracoes do Sistema</p>
-                <p className="text-[10px] text-zinc-400">Ajustes globais do pipeline ClipFlow</p>
+            <div
+              className="absolute right-0 top-11 w-[380px] rounded-2xl border border-white/20 p-3.5 shadow-[0_24px_70px_rgba(0,0,0,0.95),inset_0_1px_0_0_rgba(255,255,255,0.15)] z-50 animate-in fade-in zoom-in-95 duration-150 select-none"
+              style={{ backgroundColor: "rgba(14, 14, 18, 0.98)" }}
+            >
+              <div className="px-3 py-2.5 border-b border-white/[0.08] mb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white leading-tight">Configurações do Sistema</p>
+                  <p className="text-xs text-zinc-400 mt-0.5">Ajustes globais do pipeline ClipFlow</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+                  aria-label="Fechar menu de configurações"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
               </div>
 
-              <div className="py-1 space-y-0.5">
+              <div className="py-1 space-y-1.5">
                 {/* 1. Configurar Aplicacao */}
                 {onConfigureApp && (
                   <button
@@ -224,16 +240,16 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onConfigureApp();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Configurar Aplicacao</p>
-                      <p className="text-[10px] text-zinc-400">Pastas de midia e resolucao</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Configurar Aplicação</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Pastas de mídia e resolução</p>
                     </div>
                   </button>
                 )}
@@ -246,16 +262,16 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onManageDependencies();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Gerenciar Dependencias</p>
-                      <p className="text-[10px] text-zinc-400">Python, Whisper, FFmpeg, CUDA</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Gerenciar Dependências</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Python, Whisper, FFmpeg, CUDA</p>
                     </div>
                   </button>
                 )}
@@ -268,10 +284,10 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onConfigureLLM();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <rect x="4" y="4" width="16" height="16" rx="2" />
                         <rect x="9" y="9" width="6" height="6" />
                         <line x1="9" y1="1" x2="9" y2="4" />
@@ -281,8 +297,8 @@ export function StudioTopbar({
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Configurar LLM (IA)</p>
-                      <p className="text-[10px] text-zinc-400">Modelos Ollama e prompts</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Configurar LLM (IA)</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Modelos Ollama e prompts</p>
                     </div>
                   </button>
                 )}
@@ -295,18 +311,18 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onConfigureWhisper();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                         <line x1="12" y1="19" x2="12" y2="22" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Configurar Whisper</p>
-                      <p className="text-[10px] text-zinc-400">Modelos e aceleracao GPU</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Configurar Whisper</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Modelos e aceleração GPU</p>
                     </div>
                   </button>
                 )}
@@ -319,17 +335,17 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onConfigureFFmpeg();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polygon points="23 7 16 12 23 17 23 7" />
                         <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Configurar FFmpeg</p>
-                      <p className="text-[10px] text-zinc-400">Codecs e presets de render</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Configurar FFmpeg</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Codecs e presets de render</p>
                     </div>
                   </button>
                 )}
@@ -342,18 +358,18 @@ export function StudioTopbar({
                       setIsSettingsOpen(false);
                       onShowHowToUse();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/[0.08] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left bg-white/[0.02] hover:bg-white/[0.08] border border-white/[0.04] hover:border-white/15 transition-all group"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-zinc-300 group-hover:text-white group-hover:bg-white/10 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-white">Como Utilizar</p>
-                      <p className="text-[10px] text-zinc-400">Guia passo a passo do fluxo</p>
+                      <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Como Utilizar</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Guia passo a passo do fluxo</p>
                     </div>
                   </button>
                 )}

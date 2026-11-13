@@ -23,13 +23,30 @@ export interface Job {
   video_duration_seconds?: number;
 }
 
+export interface NarrativeArc {
+  hook: string;
+  development: string;
+  climax: string;
+  resolution: string;
+}
+
 export interface Cut {
   cut_id: string;
+  id?: string;
   block_ids: string[];
   start: number;
   end: number;
+  duration?: number;
   title?: string | null;
   status: string;
+  summary?: string;
+  reasoning?: string;
+  score?: number;
+  approved?: boolean;
+  rejected?: boolean;
+  subtitle?: string;
+  narrative_arc?: NarrativeArc;
+  vertical_mode?: 'crop' | 'blur' | 'zoom' | 'split_podcast';
 }
 
 export interface VideoRecord {
@@ -39,6 +56,7 @@ export interface VideoRecord {
   archived: boolean;
   hasTranscription?: boolean;
   hasAnalysis?: boolean;
+  attempts_count?: number;
 }
 
 export interface BatchPipelineOptions {
@@ -215,4 +233,70 @@ export interface SavedLLMPrompt {
   prompt: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+  probability?: number;
+}
+
+export interface AttemptSummary {
+  attempt_id: string;
+  job_id: string;
+  label: string;
+  created_at: string;
+  archived_at: string;
+  status: JobStatus | string;
+  video_duration_seconds?: number | null;
+  cuts_count: number;
+  approved_count: number;
+  rendered_count: number;
+  rendered_files: string[];
+  rendered_urls: string[];
+  has_transcription: boolean;
+}
+
+export interface AttemptTranscriptionSegment {
+  segment_id?: string;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface AttemptTranscription {
+  text?: string | null;
+  segments: AttemptTranscriptionSegment[];
+  words?: WordTiming[];
+  vtt?: string | null;
+  available_formats?: {
+    segments?: boolean;
+    text?: boolean;
+    vtt?: boolean;
+  };
+}
+
+export interface AttemptDetail {
+  attempt: AttemptSummary;
+  cuts: Cut[];
+  transcription: AttemptTranscription | null;
+  renders: string[];
+}
+
+export interface ArchiveAttemptRequest {
+  label?: string;
+  reset_active?: boolean;
+}
+
+export interface ArchiveAttemptResponse {
+  attempt: AttemptSummary;
+  job: Job;
+  attempts: AttemptSummary[];
+}
+
+export interface DeleteAttemptResponse {
+  ok: boolean;
+  attempt_id: string;
+  attempts: AttemptSummary[];
 }

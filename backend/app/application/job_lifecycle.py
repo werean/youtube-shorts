@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 import uuid
@@ -28,6 +29,7 @@ from app.core.settings import (
 )
 from app.infrastructure.storage.atomic_store import AtomicJsonArtifactStore
 from app.models.domain import (
+    AttemptSummary,
     Cut,
     Job,
     JobStatus,
@@ -49,6 +51,54 @@ class JobNotFoundError(LookupError):
     def __init__(self, job_id: str) -> None:
         super().__init__(f"Job not found: {job_id}")
         self.job_id = job_id
+
+
+class AttemptNotFoundError(LookupError):
+    """Raised when an attempt_id does not exist on disk."""
+
+    def __init__(self, job_id: str, attempt_id: str) -> None:
+        super().__init__(f"Attempt not found: {job_id}/{attempt_id}")
+        self.job_id = job_id
+        self.attempt_id = attempt_id
+
+
+class JobActivelyProcessingError(RuntimeError):
+    """Raised when attempting to archive a job that is actively processing."""
+
+    def __init__(self, job_id: str, status: str) -> None:
+        super().__init__(f"Job {job_id} is actively processing ({status})")
+        self.job_id = job_id
+        self.status = status
+
+
+class EmptyAttemptError(ValueError):
+    """Raised when archiving a job that has no transcription, no cuts, and no renders."""
+
+
+ACTIVE_PROCESSING_STATUSES: frozenset[JobStatus] = frozenset(
+    {
+        JobStatus.DOWNLOADING,
+        JobStatus.TRANSCRIBING,
+        JobStatus.BUILDING_BLOCKS,
+        JobStatus.BUILDING_TOPICS,
+        JobStatus.ANALYZING,
+        JobStatus.RENDERING,
+    }
+)
+
+
+def _validate_safe_segment(value: str, label: str = "segment") -> str:
+    """Validate a single path segment against empty strings and path traversal."""
+    cleaned = (value or "").strip()
+    if (
+        not cleaned
+        or cleaned in {".", ".."}
+        or "/" in cleaned
+        or "\\" in cleaned
+        or "\x00" in cleaned
+    ):
+        raise ValueError(f"Invalid {label}")
+    return cleaned
 
 
 VALID_STATUS_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
@@ -626,3 +676,298 @@ class JobLifecycleService:
         sdir = self.shorts_dir_path(job_id, create=False)
         if sdir.exists():
             shutil.rmtree(sdir, ignore_errors=True)
+
+    # --- Archived Attempts ---
+
+    def attempts_dir_path(self, job_id: str, *, create: bool = False) -> Path:
+        _validate_safe_segment(job_id, "job_id")
+        d = job_dir(job_id) / "attempts"
+        if create:
+            d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def attempt_dir_path(
+        self,
+        job_id: str,
+        attempt_id: str,
+        *,
+        create: bool = False,
+    ) -> Path:
+        safe_attempt = _validate_safe_segment(attempt_id, "attempt_id")
+        base = self.attempts_dir_path(job_id, create=create)
+        target = base / safe_attempt
+        try:
+            target.resolve().relative_to(base.resolve())
+        except ValueError as exc:
+            raise ValueError("Invalid attempt_id") from exc
+        if create:
+            target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def attempt_shorts_dir_path(
+        self,
+        job_id: str,
+        attempt_id: str,
+        *,
+        create: bool = False,
+    ) -> Path:
+        d = self.attempt_dir_path(job_id, attempt_id, create=create) / "shorts"
+        if create:
+            d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def attempt_transcription_dir_path(
+        self,
+        job_id: str,
+        attempt_id: str,
+        *,
+        create: bool = False,
+    ) -> Path:
+        d = self.attempt_dir_path(job_id, attempt_id, create=create) / "transcription"
+        if create:
+            d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def count_attempts(self, job_id: str) -> int:
+        try:
+            adir = self.attempts_dir_path(job_id, create=False)
+        except ValueError:
+            return 0
+        if not adir.exists():
+            return 0
+        count = 0
+        for entry in adir.iterdir():
+            if entry.is_dir() and not entry.name.startswith(".") and (entry / "attempt.json").exists():
+                count += 1
+        return count
+
+    def list_attempts(self, job_id: str) -> list[AttemptSummary]:
+        self.load_job(job_id)
+        adir = self.attempts_dir_path(job_id, create=False)
+        if not adir.exists():
+            return []
+
+        attempts: list[AttemptSummary] = []
+        for entry in adir.iterdir():
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            meta_path = entry / "attempt.json"
+            if not meta_path.exists():
+                continue
+            try:
+                raw = self.store.read_json(meta_path)
+                attempts.append(AttemptSummary.model_validate(raw))
+            except Exception:
+                continue
+
+        attempts.sort(
+            key=lambda a: (a.archived_at or "", a.created_at or "", a.attempt_id),
+            reverse=True,
+        )
+        return attempts
+
+    def archive_attempt(
+        self,
+        job_id: str,
+        *,
+        label: str | None = None,
+        reset_active: bool = True,
+    ) -> tuple[AttemptSummary, Job, list[AttemptSummary]]:
+        job = self.load_job(job_id)
+        current_status = JobStatus(job.status)
+        if current_status in ACTIVE_PROCESSING_STATUSES:
+            raise JobActivelyProcessingError(job_id, current_status.value)
+
+        # Inspect active transcription artifacts
+        transcription_files: dict[str, Path] = {
+            "transcription.segments.json": self.transcription_segments_path(job_id, for_write=False),
+            "transcription.words.json": self.transcription_words_path(job_id, for_write=False),
+            "transcription.txt": self.transcription_text_path(job_id, for_write=False),
+            "transcription.vtt": self.transcription_vtt_path(job_id, for_write=False),
+        }
+        existing_transcription = {
+            name: path for name, path in transcription_files.items() if path.exists() and path.is_file()
+        }
+        has_transcription = bool(existing_transcription)
+
+        # Inspect active cuts & analysis artifacts
+        cuts = self.load_cuts(job_id)
+        cuts_count = len(cuts)
+        approved_count = sum(1 for c in cuts if c.approved or c.status == "approved")
+
+        # Inspect active rendered .mp4 shorts
+        shorts_dir = self.shorts_dir_path(job_id, create=False)
+        mp4_files = (
+            sorted(
+                [f for f in shorts_dir.iterdir() if f.is_file() and f.name.lower().endswith(".mp4")],
+                key=lambda p: p.name,
+            )
+            if shorts_dir.exists()
+            else []
+        )
+
+        if not has_transcription and cuts_count == 0 and len(mp4_files) == 0:
+            raise EmptyAttemptError(
+                "Cannot archive empty run: no transcription, cuts, or renders found"
+            )
+
+        now_dt = datetime.now(timezone.utc)
+        archived_at = now_dt.isoformat().replace("+00:00", "Z")
+        attempt_id = f"{now_dt.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        existing_attempts = self.list_attempts(job_id)
+        resolved_label = (label or "").strip() or f"Tentativa {len(existing_attempts) + 1}"
+
+        att_dir = self.attempt_dir_path(job_id, attempt_id, create=True)
+
+        # Copy analysis JSON artifacts
+        for artifact_path in (
+            self.semantic_blocks_path(job_id),
+            self.topic_segments_path(job_id),
+            self.cuts_path(job_id),
+        ):
+            if artifact_path.exists() and artifact_path.is_file():
+                shutil.copy2(str(artifact_path), str(att_dir / artifact_path.name))
+
+        # Copy transcription artifacts (never touch audio_16k.wav)
+        if existing_transcription:
+            att_trans_dir = self.attempt_transcription_dir_path(job_id, attempt_id, create=True)
+            for fname, src_path in existing_transcription.items():
+                shutil.copy2(str(src_path), str(att_trans_dir / fname))
+
+        # Copy or move rendered .mp4 shorts
+        rendered_files: list[str] = []
+        if mp4_files:
+            att_shorts_dir = self.attempt_shorts_dir_path(job_id, attempt_id, create=True)
+            for mp4_path in mp4_files:
+                dest_path = att_shorts_dir / mp4_path.name
+                if reset_active:
+                    shutil.move(str(mp4_path), str(dest_path))
+                else:
+                    shutil.copy2(str(mp4_path), str(dest_path))
+                rendered_files.append(mp4_path.name)
+
+        rendered_urls = [
+            f"/media/shorts/{job_id}/attempts/{attempt_id}/{fname}"
+            for fname in rendered_files
+        ]
+
+        summary = AttemptSummary(
+            attempt_id=attempt_id,
+            job_id=job_id,
+            label=resolved_label,
+            created_at=job.created_at,
+            archived_at=archived_at,
+            status=current_status.value,
+            video_duration_seconds=job.video_duration_seconds,
+            cuts_count=cuts_count,
+            approved_count=approved_count,
+            rendered_count=len(rendered_files),
+            rendered_files=rendered_files,
+            rendered_urls=rendered_urls,
+            has_transcription=has_transcription,
+        )
+        self.store.write_json(att_dir / "attempt.json", summary, job_id=job_id)
+
+        if reset_active:
+            self.invalidate_downstream_from_transcription(
+                job_id,
+                remove_analysis_artifacts=True,
+                reset_status=False,
+            )
+            self.delete_transcription_artifacts(job_id, fmt=None)
+            job = self.load_job(job_id)
+            if job.model_extra and "rendered_files" in job.model_extra:
+                job.model_extra["rendered_files"] = []
+            job.status = JobStatus.DOWNLOADED
+            job.updated_at = utc_now_iso()
+            self.save_job(job)
+
+        return summary, job, self.list_attempts(job_id)
+
+    def get_attempt_detail(self, job_id: str, attempt_id: str) -> dict[str, Any]:
+        self.load_job(job_id)
+        att_dir = self.attempt_dir_path(job_id, attempt_id, create=False)
+        meta_path = att_dir / "attempt.json"
+        if not meta_path.exists():
+            raise AttemptNotFoundError(job_id, attempt_id)
+
+        attempt = AttemptSummary.model_validate(self.store.read_json(meta_path))
+
+        cuts_file = att_dir / "cuts.suggested.json"
+        cuts: list[dict[str, Any]] = []
+        if cuts_file.exists():
+            raw_cuts = self.store.read_json(cuts_file) or []
+            cuts = [Cut.model_validate(item).model_dump() for item in raw_cuts]
+
+        t_dir = att_dir / "transcription"
+        seg_path = t_dir / "transcription.segments.json"
+        words_path = t_dir / "transcription.words.json"
+        txt_path = t_dir / "transcription.txt"
+        vtt_path = t_dir / "transcription.vtt"
+
+        has_seg = seg_path.exists()
+        has_words = words_path.exists()
+        has_txt = txt_path.exists()
+        has_vtt = vtt_path.exists()
+
+        transcription: dict[str, Any] | None = None
+        if has_seg or has_words or has_txt or has_vtt:
+            segments = (
+                [Segment.model_validate(item).model_dump() for item in (self.store.read_json(seg_path) or [])]
+                if has_seg
+                else []
+            )
+            words = (
+                [WordTiming.model_validate(item).model_dump() for item in (self.store.read_json(words_path) or [])]
+                if has_words
+                else []
+            )
+            text = (
+                self.store.read_text(txt_path)
+                if has_txt
+                else "\n".join(s["text"].strip() for s in segments if str(s.get("text", "")).strip())
+            )
+            vtt = self.store.read_text(vtt_path) if has_vtt else None
+            transcription = {
+                "text": text,
+                "segments": segments,
+                "words": words,
+                "vtt": vtt,
+                "available_formats": {
+                    "segments": has_seg,
+                    "text": has_txt,
+                    "vtt": has_vtt,
+                },
+            }
+
+        att_shorts_dir = att_dir / "shorts"
+        mp4_names = (
+            sorted(
+                f.name
+                for f in att_shorts_dir.iterdir()
+                if f.is_file() and f.name.lower().endswith(".mp4")
+            )
+            if att_shorts_dir.exists()
+            else []
+        )
+        renders = [f"/media/shorts/{job_id}/attempts/{attempt_id}/{name}" for name in mp4_names]
+
+        return {
+            "attempt": attempt.model_dump(),
+            "cuts": cuts,
+            "transcription": transcription,
+            "renders": renders,
+        }
+
+    def delete_attempt(self, job_id: str, attempt_id: str) -> list[AttemptSummary]:
+        self.load_job(job_id)
+        att_dir = self.attempt_dir_path(job_id, attempt_id, create=False)
+        meta_path = att_dir / "attempt.json"
+        if not att_dir.exists() or not meta_path.exists():
+            raise AttemptNotFoundError(job_id, attempt_id)
+
+        tombstone = att_dir.parent / f".deleting_{attempt_id}_{uuid.uuid4().hex}"
+        os.replace(att_dir, tombstone)
+        shutil.rmtree(tombstone, ignore_errors=True)
+        self.invalidate_caches(job_id)
+        return self.list_attempts(job_id)

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ActionState } from "../../hooks/useAppAction";
+import { AppButton, AppDialog, AppInput } from "../shared";
 
 interface CutEditDialogProps {
   editCutStartMinutes: string;
@@ -24,8 +25,10 @@ export function CutEditDialog({
   const [startSeconds, setStartSeconds] = useState(initialStartSeconds);
   const [endMinutes, setEndMinutes] = useState(initialEndMinutes);
   const [endSeconds, setEndSeconds] = useState(initialEndSeconds);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = () => {
+    setError(null);
     const startMin = Number(startMinutes);
     const startSec = Number(startSeconds);
     const endMin = Number(endMinutes);
@@ -37,12 +40,12 @@ export function CutEditDialog({
       !Number.isFinite(endMin) ||
       !Number.isFinite(endSec)
     ) {
-      alert("Todos os campos devem ser números.");
+      setError("Todos os campos devem ser números válidos.");
       return;
     }
 
     if (startMin < 0 || startSec < 0 || startSec > 59 || endMin < 0 || endSec < 0 || endSec > 59) {
-      alert("Minutos devem ser >= 0, segundos 0-59.");
+      setError("Minutos devem ser ≥ 0 e segundos entre 0 e 59.");
       return;
     }
 
@@ -50,7 +53,7 @@ export function CutEditDialog({
     const endValue = endMin * 60 + endSec;
 
     if (endValue <= startValue) {
-      alert("O fim precisa ser maior que o início.");
+      setError("O timestamp final precisa ser maior que o inicial.");
       return;
     }
 
@@ -58,81 +61,81 @@ export function CutEditDialog({
   };
 
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header">
-          <h3>Editar timestamp</h3>
-        </div>
-        <div className="dialog-content">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <label className="field">
-              Início - Minutos
-              <input
+    <AppDialog
+      title="Editar timestamp do corte"
+      onClose={onCancel}
+      className="max-w-md"
+      footer={
+        <AppButton variant="secondary" disabled={action.busy} onClick={handleSave}>
+          {action.busy ? "Salvando..." : "Salvar corte"}
+        </AppButton>
+      }
+    >
+      <div className="p-4 space-y-4">
+        {error && (
+          <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg m-0">
+            {error}
+          </p>
+        )}
+
+        <div className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            Ponto de Início
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-zinc-300 mb-1">Minutos</label>
+              <AppInput
                 type="number"
                 min="0"
                 value={startMinutes}
-                onChange={(event) => setStartMinutes(event.target.value)}
+                onChange={(e) => setStartMinutes(e.target.value)}
+                fullWidth
               />
-            </label>
-            <label className="field">
-              Início - Segundos
-              <input
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-300 mb-1">Segundos</label>
+              <AppInput
                 type="number"
                 min="0"
                 max="59"
                 value={startSeconds}
-                onChange={(event) => setStartSeconds(event.target.value)}
+                onChange={(e) => setStartSeconds(e.target.value)}
+                fullWidth
               />
-            </label>
+            </div>
           </div>
+        </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <label className="field">
-              Fim - Minutos
-              <input
+        <div className="space-y-3 pt-2">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            Ponto de Fim
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-zinc-300 mb-1">Minutos</label>
+              <AppInput
                 type="number"
                 min="0"
                 value={endMinutes}
-                onChange={(event) => setEndMinutes(event.target.value)}
+                onChange={(e) => setEndMinutes(e.target.value)}
+                fullWidth
               />
-            </label>
-            <label className="field">
-              Fim - Segundos
-              <input
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-300 mb-1">Segundos</label>
+              <AppInput
                 type="number"
                 min="0"
                 max="59"
                 value={endSeconds}
-                onChange={(event) => setEndSeconds(event.target.value)}
+                onChange={(e) => setEndSeconds(e.target.value)}
+                fullWidth
               />
-            </label>
-          </div>
-
-          <div className="dialog-actions" style={{ justifyContent: "flex-start" }}>
-            <button className="secondary" disabled={action.busy} onClick={handleSave}>
-              Salvar
-            </button>
-            <button className="primary" onClick={onCancel}>
-              Cancelar
-            </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </AppDialog>
   );
 }
-

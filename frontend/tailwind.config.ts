@@ -32,8 +32,23 @@ const config: Config = {
         "danger-bg": "var(--danger-bg)",
       },
       fontFamily: {
-        sans: ["Geist", "system-ui", "sans-serif"],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        sans: [
+          "Geist",
+          "Inter",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "'Segoe UI'",
+          "Roboto",
+          "sans-serif",
+        ],
+        mono: [
+          "'Geist Mono'",
+          "'JetBrains Mono'",
+          "'Cascadia Code'",
+          "'Fira Code'",
+          "Consolas",
+          "monospace",
+        ],
       },
       fontSize: {
         label: ["10px", { lineHeight: "1.2", letterSpacing: "0.06em" }],

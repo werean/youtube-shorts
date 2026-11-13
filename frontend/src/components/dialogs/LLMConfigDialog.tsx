@@ -6,7 +6,8 @@ import {
   saveLLMPrompt,
   type SavedLLMPrompt,
 } from "../../api";
-import { AppButton, AppInput, AppSelect } from "../shared";
+import { AppButton, AppDialog, AppInput, AppSelect } from "../shared";
+import { GlassButton, GlassCard } from "../ui/glass";
 
 interface OllamaModelCatalogItem {
   name: string;
@@ -503,16 +504,36 @@ export function LLMConfigDialog({
   }, [selectedEmbeddingModel, embeddingModelOptions]);
 
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div
-        className="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: "600px" }}
-      >
-        <div className="dialog-header">
-          <h3>Configurar LLM</h3>
+    <AppDialog
+      title="Configurar LLM & Embeddings"
+      description="Gerencie os modelos de linguagem locais (Ollama / LM Studio), catálogo de embeddings e prompt de análise."
+      onClose={onCancel}
+      wide
+      scrollable
+      footer={
+        <div className="flex items-center justify-end gap-3 w-full">
+          <GlassButton
+            variant="ghost"
+            onClick={() => {
+              setResetPromptError(null);
+              setShowResetPromptDialog(true);
+            }}
+            disabled={action.busy}
+          >
+            Resetar Prompt
+          </GlassButton>
+          <GlassButton
+            variant="primary"
+            onClick={() => onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels)}
+            disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
+            loading={action.busy}
+          >
+            Salvar Configurações
+          </GlassButton>
         </div>
-        <div className="dialog-content" style={{ padding: "20px" }}>
+      }
+    >
+      <div className="space-y-4">
           <div style={{ marginBottom: "14px" }}>
             <label
               style={{
@@ -992,123 +1013,70 @@ export function LLMConfigDialog({
               placeholder="Cole o system prompt aqui..."
             />
           </div>
-          <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-            <AppButton
-              onClick={onCancel}
-              variant="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
-            >
-              Cancelar
-            </AppButton>
-            <AppButton
-              onClick={() => {
-                setResetPromptError(null);
-                setShowResetPromptDialog(true);
-              }}
-              disabled={action.busy}
-              variant="primary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
-            >
-              Resetar prompt
-            </AppButton>
-            <AppButton
-              onClick={() => onSave(model, prompt, selectedEmbeddingModel, customEmbeddingModels)}
-              disabled={action.busy || !model || !selectedEmbeddingModel.trim()}
-              variant="secondary"
-              style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-              }}
-            >
-              Salvar
-            </AppButton>
-          </div>
 
           {showResetPromptDialog && (
-            <div className="dialog-overlay" onClick={() => setShowResetPromptDialog(false)}>
-              <div
-                className="dialog"
-                onClick={(event) => event.stopPropagation()}
-                style={{ maxWidth: "520px" }}
-              >
-                <div className="dialog-header">
-                  <h3>Resetar prompt</h3>
-                </div>
-                <div className="dialog-content" style={{ padding: "20px" }}>
-                  <p style={{ margin: 0, lineHeight: 1.6 }}>
-                    Isso vai substituir o prompt atual pela versão padrão recomendada do sistema.
-                    Deseja continuar?
-                  </p>
-                  {resetPromptError && (
-                    <p
-                      style={{
-                        margin: "12px 0 0 0",
-                        color: "var(--danger)",
-                        fontSize: "13px",
-                      }}
-                    >
-                      {resetPromptError}
-                    </p>
-                  )}
-                  <div
+            <AppDialog
+              title="Resetar prompt"
+              onClose={() => setShowResetPromptDialog(false)}
+              className="max-w-md"
+              footer={
+                <AppButton
+                  onClick={() => void handleResetPrompt()}
+                  disabled={isResettingPrompt}
+                  variant="secondary"
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                  }}
+                >
+                  {isResettingPrompt ? "Resetando..." : "Confirmar restauração"}
+                </AppButton>
+              }
+            >
+              <div className="p-4 space-y-3">
+                <p style={{ margin: 0, lineHeight: 1.6 }} className="text-sm text-zinc-300">
+                  Isso vai substituir o prompt atual pela versão padrão recomendada do sistema.
+                  Deseja continuar?
+                </p>
+                {resetPromptError && (
+                  <p
                     style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: "8px",
-                      marginTop: "16px",
+                      margin: "12px 0 0 0",
+                      color: "var(--danger)",
+                      fontSize: "13px",
                     }}
                   >
-                    <AppButton
-                      onClick={() => setShowResetPromptDialog(false)}
-                      disabled={isResettingPrompt}
-                      variant="primary"
-                      style={{
-                        padding: "10px 20px",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      Cancelar
-                    </AppButton>
-                    <AppButton
-                      onClick={() => void handleResetPrompt()}
-                      disabled={isResettingPrompt}
-                      variant="secondary"
-                      style={{
-                        padding: "10px 20px",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      {isResettingPrompt ? "Resetando..." : "Continuar"}
-                    </AppButton>
-                  </div>
-                </div>
+                    {resetPromptError}
+                  </p>
+                )}
               </div>
-            </div>
+            </AppDialog>
           )}
 
           {showSavePromptDialog && (
-            <div className="dialog-overlay" onClick={() => setShowSavePromptDialog(false)}>
-              <div
-                className="dialog"
-                onClick={(event) => event.stopPropagation()}
-                style={{ maxWidth: "700px", width: "90vw" }}
-              >
-                <div className="dialog-header">
-                  <h3>Salvar prompt atual</h3>
-                </div>
-                <div className="dialog-content" style={{ padding: "20px" }}>
+            <AppDialog
+              title="Salvar prompt atual"
+              onClose={() => setShowSavePromptDialog(false)}
+              className="max-w-xl"
+              footer={
+                <AppButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void handleSaveCurrentPrompt()}
+                  disabled={isSavingPrompt || !newPromptName.trim()}
+                >
+                  {isSavingPrompt ? "Salvando..." : "Salvar prompt"}
+                </AppButton>
+              }
+            >
+              <div className="p-4 space-y-4">
+                <div>
                   <label
                     style={{
                       display: "block",
-                      fontSize: "14px",
+                      fontSize: "13px",
                       fontWeight: "500",
-                      marginBottom: "8px",
+                      marginBottom: "6px",
                     }}
                   >
                     Nome do prompt
@@ -1119,14 +1087,15 @@ export function LLMConfigDialog({
                     placeholder="Ex: Entrevista longa com foco em storytelling"
                     fullWidth
                   />
+                </div>
 
+                <div>
                   <label
                     style={{
                       display: "block",
-                      fontSize: "14px",
+                      fontSize: "13px",
                       fontWeight: "500",
-                      marginTop: "14px",
-                      marginBottom: "8px",
+                      marginBottom: "6px",
                     }}
                   >
                     Prompt que será salvo
@@ -1134,205 +1103,160 @@ export function LLMConfigDialog({
                   <textarea
                     value={prompt}
                     readOnly
+                    className="code-font"
                     style={{
                       width: "100%",
-                      minHeight: "260px",
+                      minHeight: "220px",
                       padding: "12px",
                       borderRadius: "8px",
                       border: "1px solid var(--border)",
-                      fontFamily: "monospace",
                       fontSize: "12px",
                       resize: "vertical",
                       boxSizing: "border-box",
                       backgroundColor: "var(--bg-contrast)",
                     }}
                   />
-
-                  {savedPromptFeedback && (
-                    <p style={{ margin: "10px 0 0", color: "var(--danger)", fontSize: "13px" }}>
-                      {savedPromptFeedback}
-                    </p>
-                  )}
-
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: "8px",
-                      marginTop: "14px",
-                    }}
-                  >
-                    <AppButton
-                      type="button"
-                      variant="primary"
-                      onClick={() => setShowSavePromptDialog(false)}
-                      disabled={isSavingPrompt}
-                    >
-                      Cancelar
-                    </AppButton>
-                    <AppButton
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void handleSaveCurrentPrompt()}
-                      disabled={isSavingPrompt}
-                    >
-                      {isSavingPrompt ? "Salvando..." : "Salvar"}
-                    </AppButton>
-                  </div>
                 </div>
+
+                {savedPromptFeedback && (
+                  <p style={{ margin: 0, color: "var(--danger)", fontSize: "13px" }}>
+                    {savedPromptFeedback}
+                  </p>
+                )}
               </div>
-            </div>
+            </AppDialog>
           )}
 
           {showSavedPromptsDialog && (
-            <div className="dialog-overlay" onClick={() => setShowSavedPromptsDialog(false)}>
-              <div
-                className="dialog"
-                onClick={(event) => event.stopPropagation()}
-                style={{ maxWidth: "760px", width: "92vw" }}
-              >
-                <div className="dialog-header">
-                  <h3>Prompts salvos</h3>
-                </div>
-                <div className="dialog-content" style={{ padding: "20px" }}>
-                  {isLoadingSavedPrompts ? (
-                    <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
-                      Carregando prompts salvos...
-                    </p>
-                  ) : savedPrompts.length === 0 ? (
-                    <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
-                      Ainda não existem prompts salvos.
-                    </p>
-                  ) : (
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: "10px",
-                        maxHeight: "420px",
-                        overflowY: "auto",
-                        paddingRight: "4px",
-                      }}
-                    >
-                      {savedPrompts.map((savedPrompt) => {
-                        const isExpanded = expandedSavedPromptId === savedPrompt.id;
-                        const isChecked = selectedSavedPromptId === savedPrompt.id;
-                        return (
-                          <div
-                            key={savedPrompt.id}
-                            style={{
-                              border: "1px solid var(--border)",
-                              borderRadius: "8px",
-                              padding: "10px",
-                              backgroundColor: "var(--panel)",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: "10px",
-                              }}
-                            >
-                              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                <AppButton
-                                  type="button"
-                                  variant="primary"
-                                  style={{ padding: "6px 10px", fontSize: "12px" }}
-                                  onClick={() =>
-                                    setExpandedSavedPromptId((current) =>
-                                      current === savedPrompt.id ? null : savedPrompt.id,
-                                    )
-                                  }
-                                >
-                                  {isExpanded ? "Ocultar" : "Mostrar mais"}
-                                </AppButton>
-                                <label
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(event) => {
-                                      if (event.target.checked) {
-                                        setSelectedSavedPromptId(savedPrompt.id);
-                                      } else {
-                                        setSelectedSavedPromptId(null);
-                                      }
-                                    }}
-                                  />
-                                  <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                                    {savedPrompt.name}
-                                  </span>
-                                </label>
-                              </div>
-                            </div>
-                            {isExpanded && (
-                              <textarea
-                                readOnly
-                                value={savedPrompt.prompt}
-                                style={{
-                                  width: "100%",
-                                  minHeight: "180px",
-                                  marginTop: "10px",
-                                  padding: "10px",
-                                  borderRadius: "8px",
-                                  border: "1px solid var(--border)",
-                                  fontFamily: "monospace",
-                                  fontSize: "12px",
-                                  resize: "vertical",
-                                  boxSizing: "border-box",
-                                  backgroundColor: "var(--bg-contrast)",
-                                }}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {savedPromptFeedback && (
-                    <p style={{ margin: "10px 0 0", color: "var(--danger)", fontSize: "13px" }}>
-                      {savedPromptFeedback}
-                    </p>
-                  )}
-
+            <AppDialog
+              title="Prompts salvos"
+              onClose={() => setShowSavedPromptsDialog(false)}
+              className="max-w-2xl"
+              scrollable
+              footer={
+                <AppButton
+                  type="button"
+                  variant="secondary"
+                  disabled={savedPrompts.length === 0}
+                  onClick={handleApplySavedPrompt}
+                >
+                  Aplicar prompt selecionado
+                </AppButton>
+              }
+            >
+              <div className="p-4 space-y-4">
+                {isLoadingSavedPrompts ? (
+                  <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
+                    Carregando prompts salvos...
+                  </p>
+                ) : savedPrompts.length === 0 ? (
+                  <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
+                    Ainda não existem prompts salvos.
+                  </p>
+                ) : (
                   <div
                     style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: "8px",
-                      marginTop: "14px",
+                      display: "grid",
+                      gap: "10px",
+                      maxHeight: "420px",
+                      overflowY: "auto",
+                      paddingRight: "4px",
                     }}
                   >
-                    <AppButton
-                      type="button"
-                      variant="primary"
-                      onClick={() => setShowSavedPromptsDialog(false)}
-                    >
-                      Cancelar
-                    </AppButton>
-                    <AppButton
-                      type="button"
-                      variant="secondary"
-                      disabled={savedPrompts.length === 0}
-                      onClick={handleApplySavedPrompt}
-                    >
-                      Salvar
-                    </AppButton>
+                    {savedPrompts.map((savedPrompt) => {
+                      const isExpanded = expandedSavedPromptId === savedPrompt.id;
+                      const isChecked = selectedSavedPromptId === savedPrompt.id;
+                      return (
+                        <div
+                          key={savedPrompt.id}
+                          style={{
+                            border: "1px solid var(--border)",
+                            borderRadius: "8px",
+                            padding: "10px",
+                            backgroundColor: "var(--panel)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: "10px",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <AppButton
+                                type="button"
+                                variant="primary"
+                                style={{ padding: "6px 10px", fontSize: "12px" }}
+                                onClick={() =>
+                                  setExpandedSavedPromptId((current) =>
+                                    current === savedPrompt.id ? null : savedPrompt.id,
+                                  )
+                                }
+                              >
+                                {isExpanded ? "Ocultar" : "Mostrar mais"}
+                              </AppButton>
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  cursor: "pointer",
+                                  margin: 0,
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(event) => {
+                                    if (event.target.checked) {
+                                      setSelectedSavedPromptId(savedPrompt.id);
+                                    } else {
+                                      setSelectedSavedPromptId(null);
+                                    }
+                                  }}
+                                />
+                                <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                                  {savedPrompt.name}
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <textarea
+                              readOnly
+                              value={savedPrompt.prompt}
+                              className="code-font"
+                              style={{
+                                width: "100%",
+                                minHeight: "180px",
+                                marginTop: "10px",
+                                padding: "10px",
+                                borderRadius: "8px",
+                                border: "1px solid var(--border)",
+                                fontSize: "12px",
+                                resize: "vertical",
+                                boxSizing: "border-box",
+                                backgroundColor: "var(--bg-contrast)",
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
+                )}
+
+                {savedPromptFeedback && (
+                  <p style={{ margin: 0, color: "var(--danger)", fontSize: "13px" }}>
+                    {savedPromptFeedback}
+                  </p>
+                )}
               </div>
-            </div>
+            </AppDialog>
           )}
         </div>
-      </div>
-    </div>
+    </AppDialog>
   );
 }
