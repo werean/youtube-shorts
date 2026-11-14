@@ -88,8 +88,17 @@ def _find_matching_json_end(text: str, start_idx: int) -> int | None:
     return None
 
 
+def _is_trivial_scalar_list(value: Any) -> bool:
+    """Return True for non-empty JSON arrays containing only primitive scalars (e.g. `[1]`, `[2026]`)."""
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(isinstance(item, (int, float, bool, str, type(None))) for item in value)
+    )
+
+
 def extract_json_from_cli_output(raw: str) -> Any:
-    """Extract and parse the first valid JSON object/array from CLI output with leading/trailing noise."""
+    """Extract and parse the first meaningful JSON object/array from CLI output with leading/trailing noise."""
     cleaned = _ANSI_ESCAPE_RE.sub("", str(raw or "")).strip()
     if not cleaned:
         raise ValueError("CLI output is empty")
@@ -101,6 +110,7 @@ def extract_json_from_cli_output(raw: str) -> Any:
         except json.JSONDecodeError:
             pass
 
+    fallback_scalar_list: Any = None
     pos = 0
     while pos < len(cleaned):
         next_obj = cleaned.find("{", pos)
@@ -113,10 +123,18 @@ def extract_json_from_cli_output(raw: str) -> Any:
         if end_idx is not None:
             snippet = cleaned[start_idx : end_idx + 1]
             try:
-                return json.loads(snippet)
+                parsed = json.loads(snippet)
+                if _is_trivial_scalar_list(parsed):
+                    if fallback_scalar_list is None:
+                        fallback_scalar_list = parsed
+                else:
+                    return parsed
             except json.JSONDecodeError:
                 pass
         pos = start_idx + 1
+
+    if fallback_scalar_list is not None:
+        return fallback_scalar_list
 
     raise ValueError(f"Could not extract valid JSON from CLI output: {cleaned[:200]}")
 
@@ -136,10 +154,45 @@ def _extract_model_key(item: dict[str, Any]) -> str:
 def _item_matches_model_type(item: dict[str, Any], model_type: ModelType) -> bool:
     raw_type = str(item.get("type") or "").strip().lower()
     if raw_type:
+        if model_type == "llm":
+            return raw_type in ("llm", "vlm", "chat")
         return raw_type == model_type
     key = _extract_model_key(item).lower()
     is_emb = "embed" in key or "bge-" in key or "e5-" in key
     return is_emb if model_type == "embedding" else not is_emb
+
+
+_PARAM_SIZE_RE = re.compile(r"(?:^|[^a-z0-9])e?(\d+(?:\.\d+)?)b(?:[^a-z0-9]|$)")
+
+
+def resolve_lmstudio_context_length(
+    model_key: str | None,
+    llm_cfg: dict[str, Any] | None = None,
+) -> int:
+    """Resolve LM Studio context length: explicit override -> adaptive by parameter size -> default 8192."""
+    if isinstance(llm_cfg, dict):
+        raw_ctx = llm_cfg.get("context_length")
+        if raw_ctx is not None and not isinstance(raw_ctx, bool):
+            try:
+                parsed_ctx = int(raw_ctx)
+                if parsed_ctx > 0:
+                    return parsed_ctx
+            except (TypeError, ValueError):
+                pass
+
+    key_low = str(model_key or "").strip().lower()
+    if key_low:
+        match = _PARAM_SIZE_RE.search(key_low)
+        if match:
+            try:
+                params_b = float(match.group(1))
+                if params_b <= 9.5:
+                    return int(config.LMSTUDIO_SMALL_MODEL_CONTEXT_LENGTH)
+                return int(config.LMSTUDIO_CONTEXT_LENGTH)
+            except ValueError:
+                pass
+
+    return int(config.LMSTUDIO_CONTEXT_LENGTH)
 
 
 def _models_match(candidate_key: str, target_key: str) -> bool:
@@ -223,6 +276,7 @@ class LMStudioCLIManager:
         self._active_model_key: str | None = None
         self._active_model_type: ModelType | None = None
         self._active_gpu: str | None = None
+        self._active_context_length: int | None = None
 
     def _get_runner(self) -> LmsCommandRunner | None:
         if self._runner is not None:
@@ -260,18 +314,22 @@ class LMStudioCLIManager:
             return None
         return self._active_model_key
 
-    def _get_base_url(self) -> str:
-        if self._base_url:
-            return self._base_url.rstrip("/")
+    def _get_llm_config(self) -> dict[str, Any]:
         if self._container is not None:
             try:
                 active = self._container.load_active_tool_configs()
-                llm_cfg = active.get("llm") or {}
-                configured = str(llm_cfg.get("lmstudio_base_url") or "").strip()
-                if configured:
-                    return configured.rstrip("/")
+                return dict(active.get("llm") or {})
             except Exception:
                 pass
+        return {}
+
+    def _get_base_url(self) -> str:
+        if self._base_url:
+            return self._base_url.rstrip("/")
+        llm_cfg = self._get_llm_config()
+        configured = str(llm_cfg.get("lmstudio_base_url") or "").strip()
+        if configured:
+            return configured.rstrip("/")
         return config.LMSTUDIO_BASE_URL.rstrip("/")
 
     def _log(self, job_id: str | None, task_log: str, message: str) -> None:
@@ -432,6 +490,7 @@ class LMStudioCLIManager:
         *,
         model_type: ModelType = "llm",
         fallback_to_preferred_when_empty: bool = False,
+        strict: bool = False,
     ) -> str | None:
         """Resolve an installed LM Studio `modelKey` matching `preferred` or falling back to first installed."""
         installed = await self.list_installed_models(model_type=model_type)
@@ -479,6 +538,17 @@ class LMStudioCLIManager:
                     ):
                         return key
 
+            if strict:
+                return None
+
+            logger.warning(
+                "Preferred LM Studio %s model '%s' did not match installed models %s; falling back to '%s'.",
+                model_type,
+                pref,
+                [k for k, _ in keyed_items],
+                keyed_items[0][0],
+            )
+
         # 4. Clean fallback to the first installed model of `model_type`
         return keyed_items[0][0]
 
@@ -503,7 +573,28 @@ class LMStudioCLIManager:
             loaded_key = _extract_model_key(item)
             if loaded_key and _models_match(loaded_key, target_key):
                 item_gpu = item.get("gpu")
-                if gpu == "off" and item_gpu is not None and str(item_gpu).strip().lower() not in ("off", "0", "0.0"):
+                item_gpu_str = str(item_gpu).strip().lower() if item_gpu is not None else ""
+                is_item_gpu_off = item_gpu is not None and item_gpu_str in ("off", "0", "0.0", "false")
+                gpu_mismatch = (
+                    (gpu == "off" and item_gpu is not None and not is_item_gpu_off)
+                    or (gpu != "off" and is_item_gpu_off)
+                )
+
+                ctx_mismatch = False
+                if context_length is not None and int(context_length) > 0:
+                    raw_item_ctx = (
+                        item.get("contextLength")
+                        if item.get("contextLength") is not None
+                        else item.get("context_length")
+                    )
+                    if raw_item_ctx is not None:
+                        try:
+                            if int(raw_item_ctx) < int(context_length):
+                                ctx_mismatch = True
+                        except (TypeError, ValueError):
+                            pass
+
+                if gpu_mismatch or ctx_mismatch:
                     has_conflict = True
                 else:
                     compatible_loaded = True
@@ -543,6 +634,7 @@ class LMStudioCLIManager:
         self._active_model_key = None
         self._active_model_type = None
         self._active_gpu = None
+        self._active_context_length = None
 
     @asynccontextmanager
     async def pipeline_session(
@@ -607,11 +699,28 @@ class LMStudioCLIManager:
 
         is_nested_reuse = False
         async with self._state_lock:
+            pref_matches_active = (
+                preferred_model is None
+                or not str(preferred_model).strip()
+                or (
+                    self._active_model_key is not None
+                    and _models_match(self._active_model_key, str(preferred_model))
+                )
+            )
+            ctx_compatible = (
+                context_length is None
+                or (
+                    self._active_context_length is not None
+                    and self._active_context_length >= int(context_length)
+                )
+            )
             if (
                 self._stage_depth > 0
                 and self._active_model_type == model_type
                 and self._active_gpu == gpu
                 and self._active_model_key is not None
+                and pref_matches_active
+                and ctx_compatible
             ):
                 is_nested_reuse = True
             self._session_depth += 1
@@ -628,6 +737,7 @@ class LMStudioCLIManager:
             return
 
         resolved_key: str | None = None
+        yielded_key: str | None = None
         server_started_or_active = False
         try:
             self._log(
@@ -641,16 +751,26 @@ class LMStudioCLIManager:
                 model_type=model_type,
             )
             if resolved_key:
+                llm_cfg = self._get_llm_config()
+                effective_ctx: int | None
+                if context_length is not None:
+                    effective_ctx = int(context_length) if int(context_length) > 0 else None
+                elif model_type == "llm":
+                    effective_ctx = resolve_lmstudio_context_length(resolved_key, llm_cfg)
+                else:
+                    effective_ctx = None
+
                 gpu_tag = f" (--gpu {gpu})" if gpu else ""
+                ctx_tag = f" (-c {effective_ctx})" if effective_ctx else ""
                 self._log(
                     job_id,
                     task_log,
-                    f"[lmstudio] Carregando modelo '{resolved_key}'{gpu_tag}...",
+                    f"[lmstudio] Carregando modelo '{resolved_key}'{gpu_tag}{ctx_tag}...",
                 )
                 loaded_ok = await self.load_model(
                     resolved_key,
                     gpu=gpu,
-                    context_length=context_length,
+                    context_length=effective_ctx,
                     ttl_seconds=ttl_seconds,
                 )
                 if loaded_ok:
@@ -658,12 +778,16 @@ class LMStudioCLIManager:
                         self._active_model_key = resolved_key
                         self._active_model_type = model_type
                         self._active_gpu = gpu
+                        self._active_context_length = effective_ctx
+                    yielded_key = resolved_key
                 else:
+                    logger.error("LM Studio failed to load model '%s' via CLI.", resolved_key)
                     self._log(
                         job_id,
                         task_log,
                         f"[lmstudio] Falha ao carregar '{resolved_key}' via CLI.",
                     )
+                    yielded_key = None
             else:
                 self._log(
                     job_id,
@@ -671,7 +795,7 @@ class LMStudioCLIManager:
                     f"[lmstudio] Nenhum modelo '{model_type}' instalado no LM Studio.",
                 )
 
-            yield resolved_key
+            yield yielded_key
         finally:
             try:
                 if server_started_or_active or resolved_key is not None or self._active_model_key is not None:
@@ -737,5 +861,6 @@ __all__ = [
     "ModelType",
     "extract_json_from_cli_output",
     "resolve_lms_binary",
+    "resolve_lmstudio_context_length",
     "run_lms_subprocess",
 ]

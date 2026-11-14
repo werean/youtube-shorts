@@ -39,11 +39,13 @@ from app.domain.rendering.rendering_service import (
 )
 from app.domain.rendering.virtual_cameraman import (
     CameraKeyframe,
+    ShotCameraPlan,
     VirtualCameramanPlan,
     apply_deadband_15pct,
     apply_savgol_isolated_per_shot,
     build_virtual_cameraman_plan,
     center_x_to_crop_x,
+    coalesce_layout_spans,
     compute_9_16_crop_dimensions,
     ramer_douglas_peucker,
 )
@@ -671,3 +673,244 @@ async def test_render_api_endpoints(async_client: httpx.AsyncClient, container: 
     resp_cancel = await async_client.post(f"/jobs/{job.job_id}/render/cancel")
     # Might be 404 if background task didn't hold lock or 200 if active
     assert resp_cancel.status_code in (200, 404)
+
+
+# --- 16. Stage 5 P0: Shot Isolation, Dynamic Split-Screen, 4:5 Zoom, Mixed-Mode Overlay ---
+
+
+def _eval_ffmpeg_expr(expr: str, t_val: float) -> float:
+    """Safely evaluate FFmpeg piecewise-linear `if(lt(t,...),...)` expression at `t_val`."""
+    py_expr = expr.replace("if(", "_ff_if(").replace("lt(", "_ff_lt(")
+    env = {
+        "__builtins__": {},
+        "t": float(t_val),
+        "_ff_lt": lambda a, b: 1.0 if float(a) < float(b) else 0.0,
+        "_ff_if": lambda cond, a, b: float(a) if float(cond) != 0.0 else float(b),
+    }
+    return float(eval(py_expr, env, {}))
+
+
+def test_cross_shot_keyframes_step_hold_without_whip_pan() -> None:
+    kfs = [
+        CameraKeyframe(time=0.0, x=100.0, mode="crop_track", shot_id=0),
+        CameraKeyframe(time=3.0, x=300.0, mode="crop_track", shot_id=0),
+        CameraKeyframe(time=3.125, x=1100.0, mode="crop_track", shot_id=1),
+        CameraKeyframe(time=6.0, x=1200.0, mode="crop_track", shot_id=1),
+    ]
+    expr = build_piecewise_linear_crop_expression(kfs)
+
+    # Linear interpolation strictly inside shot 0 and shot 1
+    assert "(100.00+(200.00)*(t-0.000)/3.000)" in expr
+    assert "(1100.00+(100.00)*(t-3.125)/2.875)" in expr
+
+    # NO cross-shot whip-pan ramp between 300.00 -> 1100.00 across 0.125s
+    assert "300.00+(800.00)" not in expr
+    assert "if(lt(t,3.125),300.00," in expr
+
+    # Mathematical verification at interior & boundary timestamps
+    assert _eval_ffmpeg_expr(expr, 1.5) == pytest.approx(200.0, abs=0.5)
+    assert _eval_ffmpeg_expr(expr, 3.05) == pytest.approx(300.0, abs=1e-3)
+    assert _eval_ffmpeg_expr(expr, 3.125) == pytest.approx(1100.0, abs=1e-3)
+    assert _eval_ffmpeg_expr(expr, 4.5625) == pytest.approx(1150.0, abs=0.5)
+
+
+def test_split_screen_joint_rdp_preserves_secondary_speaker_motion_and_dynamic_filter() -> None:
+    # Speaker 1 (left) stands completely still while Speaker 2 (right) shifts significantly and returns
+    obs: list[FrameObservation] = []
+    right_xs = [1100, 1100, 1250, 1450, 1600, 1450, 1250, 1100, 1100]
+    for i, rx in enumerate(right_xs):
+        obs.append(
+            FrameObservation(
+                frame_index=i,
+                timestamp=i * 0.5,
+                faces=[
+                    FaceBoundingBox(face_id="L", x=250, y=200, width=220, height=220, mouth_openness=0.5),
+                    FaceBoundingBox(face_id="R", x=rx, y=200, width=220, height=220, mouth_openness=0.5),
+                ],
+            )
+        )
+
+    plan = build_virtual_cameraman_plan(
+        obs,
+        vertical_mode="split_podcast",
+        savgol_window=5,
+        savgol_polyorder=2,
+        rdp_epsilon=2.0,
+    )
+    assert plan.primary_mode == "split_screen"
+    # Joint RDP must preserve speaker 2's inflection points even though speaker 1 was stationary
+    assert len(plan.keyframes) >= 3
+    sec_vals = [k.secondary_x for k in plan.keyframes if k.secondary_x is not None]
+    assert max(sec_vals) - min(sec_vals) > 100.0
+
+    # Filter script must emit dynamic x(t) expressions for both [top] and [bottom]
+    script = build_filter_complex_script_content(
+        plan,
+        duration=4.5,
+        options=FilterScriptOptions(burn_subtitles=False, has_audio=True),
+    )
+    assert "[top]" in script
+    assert "[bottom]" in script
+    assert "vstack=inputs=2[v_base]" in script
+    assert script.count("crop=960:1080:'if(lt(t,") == 2
+
+    # Cross-shot split_screen keyframes also step-hold without cross-shot whip-pan
+    cross_split_plan = VirtualCameramanPlan(
+        source_width=1920,
+        source_height=1080,
+        target_width=1080,
+        target_height=1920,
+        crop_width=608,
+        crop_height=1080,
+        vertical_mode="split_podcast",
+        primary_mode="split_screen",
+        keyframes=[
+            CameraKeyframe(time=0.0, x=100.0, secondary_x=900.0, mode="split_screen", shot_id=0),
+            CameraKeyframe(time=2.0, x=150.0, secondary_x=850.0, mode="split_screen", shot_id=0),
+            CameraKeyframe(time=2.125, x=50.0, secondary_x=960.0, mode="split_screen", shot_id=1),
+            CameraKeyframe(time=4.0, x=80.0, secondary_x=920.0, mode="split_screen", shot_id=1),
+        ],
+    )
+    cross_script = build_filter_complex_script_content(
+        cross_split_plan,
+        duration=4.0,
+        options=FilterScriptOptions(burn_subtitles=False, has_audio=False),
+    )
+    assert "if(lt(t,2.125),150.00," in cross_script
+    assert "if(lt(t,2.125),850.00," in cross_script
+
+
+def test_zoom_layout_differs_from_blur_with_4_5_framing() -> None:
+    blur_plan = VirtualCameramanPlan(
+        source_width=1920,
+        source_height=1080,
+        target_width=1080,
+        target_height=1920,
+        crop_width=608,
+        crop_height=1080,
+        vertical_mode="blur",
+        primary_mode="blur",
+        keyframes=[CameraKeyframe(time=0.0, x=656.0, mode="blur", shot_id=0)],
+    )
+    zoom_plan = VirtualCameramanPlan(
+        source_width=1920,
+        source_height=1080,
+        target_width=1080,
+        target_height=1920,
+        crop_width=608,
+        crop_height=1080,
+        vertical_mode="zoom",
+        primary_mode="zoom",
+        keyframes=[CameraKeyframe(time=0.0, x=656.0, mode="zoom", shot_id=0)],
+    )
+
+    opts = FilterScriptOptions(target_width=1080, target_height=1920, burn_subtitles=False, has_audio=False)
+    blur_script = build_filter_complex_script_content(blur_plan, duration=5.0, options=opts)
+    zoom_script = build_filter_complex_script_content(zoom_plan, duration=5.0, options=opts)
+
+    assert blur_script != zoom_script
+    assert "scale=1080:-2:force_original_aspect_ratio=decrease" in blur_script
+    assert "scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350" in zoom_script
+    assert "overlay=(W-w)/2:(H-h)/2" in zoom_script
+
+
+def test_mixed_mode_cut_uses_coalesced_split_and_overlay_without_trim_concat() -> None:
+    # Build synthetic observations switching across 3 HSV shots:
+    # [0..8s] crop_track -> [8..14s] blur (0 faces) -> [14..22s] split_screen (2 active speakers)
+    hist_a = np.zeros(32, dtype=np.float32)
+    hist_a[0] = 1.0
+    hist_b = np.zeros(32, dtype=np.float32)
+    hist_b[10] = 1.0
+    hist_c = np.zeros(32, dtype=np.float32)
+    hist_c[20] = 1.0
+
+    obs: list[FrameObservation] = []
+    # Shot 0: 0..8s (1 face)
+    for i in range(16):
+        obs.append(
+            FrameObservation(
+                frame_index=i,
+                timestamp=i * 0.5,
+                faces=[FaceBoundingBox(face_id="A", x=700 + i * 5, y=200, width=250, height=250)],
+                hsv_histogram=hist_a,
+            )
+        )
+    # Shot 1: 8..14s (0 faces -> blur)
+    for i in range(16, 28):
+        obs.append(
+            FrameObservation(
+                frame_index=i,
+                timestamp=i * 0.5,
+                faces=[],
+                hsv_histogram=hist_b,
+            )
+        )
+    # Shot 2: 14..22s (2 active faces -> split_screen)
+    for i in range(28, 44):
+        obs.append(
+            FrameObservation(
+                frame_index=i,
+                timestamp=i * 0.5,
+                faces=[
+                    FaceBoundingBox(face_id="L", x=280, y=200, width=240, height=240, mouth_openness=0.6),
+                    FaceBoundingBox(face_id="R", x=1320, y=200, width=240, height=240, mouth_openness=0.6),
+                ],
+                hsv_histogram=hist_c,
+            )
+        )
+
+    plan = build_virtual_cameraman_plan(
+        obs,
+        vertical_mode="auto_reframe",
+        sample_fps=2.0,
+        hsv_cut_threshold=0.40,
+    )
+    spans = coalesce_layout_spans(plan, 22.0)
+    assert [(s, e, m) for s, e, m, _ in spans] == [
+        (0.0, 8.0, "crop_track"),
+        (8.0, 14.0, "blur"),
+        (14.0, 22.0, "split_screen"),
+    ]
+    assert plan.coalesce_layout_spans(22.0) == spans
+
+    script = build_filter_complex_script_content(
+        plan,
+        duration=22.0,
+        options=FilterScriptOptions(burn_subtitles=False, has_audio=True),
+    )
+
+    # Single split into 3 active mode streams + overlay compositing with between(t,...)
+    assert "[0:v]split=3[vin_0][vin_1][vin_2];" in script
+    assert "overlay=0:0:enable='between(t,8.000,14.000)':eof_action=pass:shortest=0" in script
+    assert "overlay=0:0:enable='between(t,14.000,22.000)':eof_action=pass:shortest=0" in script
+    # Zero per-shot trim/concat (prevents VFR A/V sync drift)
+    assert "trim=" not in script
+    assert "concat=" not in script
+
+    # Single-mode multi-shot plan coalesces to 1 span and emits simple direct filtergraph
+    single_mode_plan = VirtualCameramanPlan(
+        source_width=1920,
+        source_height=1080,
+        target_width=1080,
+        target_height=1920,
+        crop_width=608,
+        crop_height=1080,
+        vertical_mode="auto_reframe",
+        primary_mode="crop_track",
+        shots=[
+            ShotCameraPlan(shot_id=0, start_time=0.0, end_time=4.0, dominant_mode="crop_track"),
+            ShotCameraPlan(shot_id=1, start_time=4.0, end_time=10.0, dominant_mode="crop_track"),
+        ],
+        keyframes=[
+            CameraKeyframe(time=0.0, x=200.0, mode="crop_track", shot_id=0),
+            CameraKeyframe(time=4.0, x=800.0, mode="crop_track", shot_id=1),
+        ],
+    )
+    assert single_mode_plan.coalesce_layout_spans(10.0) == [(0.0, 10.0, "crop_track", [0, 1])]
+    single_script = build_filter_complex_script_content(
+        single_mode_plan,
+        duration=10.0,
+        options=FilterScriptOptions(burn_subtitles=False, has_audio=False),
+    )
+    assert "split=" not in single_script
+    assert "overlay=0:0:enable=" not in single_script

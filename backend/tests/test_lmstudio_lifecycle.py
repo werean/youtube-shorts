@@ -104,7 +104,18 @@ class FakeLmsHarness:
                 idx = args.index("--gpu")
                 if idx + 1 < len(args):
                     gpu_val = args[idx + 1]
-            self.loaded_models.append({"modelKey": model_key, "gpu": gpu_val})
+            ctx_val: int | None = None
+            if "-c" in args:
+                idx = args.index("-c")
+                if idx + 1 < len(args):
+                    try:
+                        ctx_val = int(args[idx + 1])
+                    except ValueError:
+                        ctx_val = None
+            entry: dict[str, Any] = {"modelKey": model_key, "gpu": gpu_val}
+            if ctx_val is not None:
+                entry["contextLength"] = ctx_val
+            self.loaded_models.append(entry)
             return 0, f"Loaded {model_key}", ""
 
         if args[:2] == ["unload", "--all"]:
@@ -624,3 +635,323 @@ async def test_config_llm_models_and_register_via_lms_cli_when_server_closed(
     assert ["server", "stop"] in harness.commands
     assert harness.server_running is False
     assert harness.loaded_models == []
+
+
+@pytest.mark.asyncio
+async def test_lms_context_length_flag_reload_and_vlm_discovery(
+    container: ServiceContainer,
+) -> None:
+    """Verify `-c <context_length>` resolution, reload when loaded contextLength is smaller, `vlm` discovery, and `[1]`/`[2026]` CLI JSON parsing."""
+    from app.infrastructure.llm.lmstudio_cli import resolve_lmstudio_context_length
+
+    # 1. Adaptive context length resolution
+    assert resolve_lmstudio_context_length("qwen2.5:14b") == 8192
+    assert resolve_lmstudio_context_length("google/gemma-4-e4b") == 16384
+    assert resolve_lmstudio_context_length("qwen2.5-7b-instruct") == 16384
+    assert resolve_lmstudio_context_length("qwen2.5:14b", {"context_length": 12288}) == 12288
+
+    # 2. Trivial scalar bracket fragments in noisy CLI output are skipped when real JSON follows
+    noisy_vlm = (
+        "[2026] Initializing LM Studio CLI\n"
+        "[1] Reading local models...\n"
+        '[{"modelKey": "google/gemma-4-e4b", "type": "vlm"}]\n'
+    )
+    assert extract_json_from_cli_output(noisy_vlm) == [
+        {"modelKey": "google/gemma-4-e4b", "type": "vlm"}
+    ]
+    assert extract_json_from_cli_output("[1] Checking ps...\n[]\n") == []
+
+    # 3. `vlm` type is accepted for model_type="llm" and excluded from model_type="embedding"
+    harness = FakeLmsHarness(
+        server_running=True,
+        installed_models=[
+            {"modelKey": "google/gemma-4-e4b", "type": "vlm"},
+            {"modelKey": "text-embedding-nomic-embed-text-v1.5", "type": "embedding"},
+        ],
+        loaded_models=[{"modelKey": "google/gemma-4-e4b", "gpu": "max", "contextLength": 4096}],
+    )
+    harness.attach(container)
+
+    llm_models = await container.lmstudio.list_installed_models(model_type="llm")
+    emb_models = await container.lmstudio.list_installed_models(model_type="embedding")
+    assert [m["modelKey"] for m in llm_models] == ["google/gemma-4-e4b"]
+    assert [m["modelKey"] for m in emb_models] == ["text-embedding-nomic-embed-text-v1.5"]
+
+    # 4. Loaded model with smaller contextLength (4096 < 16384) triggers unload + reload with `-c 16384`
+    async with container.lmstudio.stage(
+        model_type="llm",
+        preferred_model="google/gemma-4-e4b",
+        task_log="analysis",
+    ) as loaded_key:
+        assert loaded_key == "google/gemma-4-e4b"
+        assert harness.loaded_models[0]["contextLength"] == 16384
+
+    assert ["unload", "--all"] in harness.commands
+    load_cmds = [c for c in harness.commands if c and c[0] == "load"]
+    assert len(load_cmds) == 1
+    assert "-c" in load_cmds[0] and load_cmds[0][load_cmds[0].index("-c") + 1] == "16384"
+
+
+@pytest.mark.asyncio
+async def test_lms_load_failure_yields_none_and_wrong_model_triggers_stage_reload(
+    container: ServiceContainer,
+) -> None:
+    """Verify `load_model` failure yields `None` and a wrong loaded chat model triggers `stage()` reload."""
+    from app.infrastructure.llm.unified_adapter import UnifiedLocalLLMAdapter
+
+    # 1. load_model failure -> stage() yields None
+    fail_harness = FakeLmsHarness(server_running=False)
+
+    async def _failing_runner(args: list[str], timeout: float) -> tuple[int, str, str]:
+        if args and args[0] == "load":
+            fail_harness.commands.append(list(args))
+            return 1, "", "Out of memory"
+        return await fail_harness.runner(args, timeout)
+
+    container.lms_command_runner = _failing_runner
+    container.llm_http_fetcher = fail_harness.http_fetcher
+
+    async with container.lmstudio.stage(
+        model_type="llm",
+        preferred_model="google/gemma-4-e4b",
+        task_log="analysis",
+    ) as loaded_key:
+        assert loaded_key is None
+
+    assert ["unload", "--all"] in fail_harness.commands
+    assert ["server", "stop"] in fail_harness.commands
+
+    # 2. Wrong chat model loaded in /v1/models triggers stage() -> unload -> load configured_model
+    wrong_harness = FakeLmsHarness(
+        server_running=True,
+        installed_models=[
+            {"modelKey": "wrong/other-7b", "type": "llm"},
+            {"modelKey": "qwen2.5-14b-instruct", "type": "llm"},
+        ],
+        loaded_models=[{"modelKey": "wrong/other-7b", "gpu": "max", "contextLength": 8192}],
+    )
+    wrong_harness.attach(container)
+    container.update_tool_configs({"llm": {"model": "qwen2.5:14b", "provider": "lmstudio"}})
+
+    adapter = UnifiedLocalLLMAdapter(container=container)
+    parsed, _raw = await adapter.chat_json("sys", "user")
+    assert "cuts" in parsed
+    load_cmds = [c for c in wrong_harness.commands if c and c[0] == "load"]
+    assert len(load_cmds) == 1
+    assert load_cmds[0][1] == "qwen2.5-14b-instruct"
+    assert "-c" in load_cmds[0] and load_cmds[0][load_cmds[0].index("-c") + 1] == "8192"
+
+
+@pytest.mark.asyncio
+async def test_unified_adapter_thought_stripping_json_repair_and_context_overflow_400(
+    container: ServiceContainer,
+) -> None:
+    """Verify `<think>` / `<|channel>thought` stripping, 1 JSON-repair retry, and non-masked context-overflow HTTP 400."""
+    from app.infrastructure.llm.unified_adapter import (
+        InvalidLLMJsonResponseError,
+        UnifiedLocalLLMAdapter,
+    )
+
+    adapter = UnifiedLocalLLMAdapter(container=container, provider="lmstudio", model="google/gemma-4-e4b")
+
+    # 1. Strip <think>...</think> and Gemma 4 <|channel>thought...<channel|>
+    async def _thought_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "google/gemma-4-e4b"}]}
+        if url.endswith("/chat/completions"):
+            return 200, {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "<|channel>thought\nLet me plan the cuts carefully.\n<channel|>"
+                                "<think>Internal scratchpad</think>\n"
+                                '{"cuts": []}'
+                            )
+                        }
+                    }
+                ]
+            }
+        return 404, {}
+
+    container.llm_http_fetcher = _thought_fetcher
+    parsed, _raw = await adapter.chat_json("sys", "user")
+    assert parsed == {"cuts": []}
+
+    # 2. Automatic 1 JSON-repair retry on malformed JSON
+    attempts: list[dict[str, Any]] = []
+
+    async def _repair_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "google/gemma-4-e4b"}]}
+        if url.endswith("/chat/completions") and body is not None:
+            attempts.append(body)
+            if len(attempts) == 1:
+                return 200, {"choices": [{"message": {"content": "{broken json"}}]}
+            return 200, {"choices": [{"message": {"content": '{"cuts": []}'}}]}
+        return 404, {}
+
+    container.llm_http_fetcher = _repair_fetcher
+    parsed_repaired, _ = await adapter.chat_json("sys", "user")
+    assert parsed_repaired == {"cuts": []}
+    assert len(attempts) == 2
+    assert "JSON REPAIR INSTRUCTION" in attempts[1]["messages"][1]["content"]
+
+    # Persistent invalid JSON fails after 1 retry (2 total attempts)
+    attempts.clear()
+
+    async def _always_bad_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "google/gemma-4-e4b"}]}
+        if url.endswith("/chat/completions") and body is not None:
+            attempts.append(body)
+            return 200, {"choices": [{"message": {"content": "not json at all"}}]}
+        return 404, {}
+
+    container.llm_http_fetcher = _always_bad_fetcher
+    with pytest.raises(InvalidLLMJsonResponseError):
+        await adapter.chat_json("sys", "user")
+    assert len(attempts) == 2
+
+    # 3. Context-overflow HTTP 400 raises RuntimeError immediately WITHOUT masking via json_object retry
+    overflow_attempts: list[dict[str, Any]] = []
+
+    async def _overflow_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "google/gemma-4-e4b"}]}
+        if url.endswith("/chat/completions") and body is not None:
+            overflow_attempts.append(body)
+            return 400, {"error": "Context length exceeded (n_ctx=8192)"}
+        return 404, {}
+
+    container.llm_http_fetcher = _overflow_fetcher
+    with pytest.raises(RuntimeError, match="context/token limit exceeded"):
+        await adapter.chat_json("sys", "user")
+    assert len(overflow_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_matching_batching_and_nomic_prefix(
+    container: ServiceContainer,
+) -> None:
+    """Verify `_match_embedding_model_id` never falls back to chat models, batches >32 texts, and prefixes `clustering: ` only for nomic."""
+    from app.infrastructure.llm.unified_adapter import UnifiedLocalLLMAdapter
+
+    adapter = UnifiedLocalLLMAdapter(container=container)
+
+    # 1. Never falls back to chat models when no embedding model is loaded
+    assert adapter._match_embedding_model_id(["qwen2.5-14b-instruct", "google/gemma-4-e4b"], "nomic-embed-text") is None
+    assert (
+        adapter._match_embedding_model_id(
+            ["qwen2.5-14b-instruct", "text-embedding-nomic-embed-text-v1.5"],
+            "nomic-embed-text",
+        )
+        == "text-embedding-nomic-embed-text-v1.5"
+    )
+
+    # 2. Batching >32 texts (40 texts -> chunks of 32 and 8) with `clustering: ` prefix for nomic
+    emb_calls: list[dict[str, Any]] = []
+
+    async def _batch_emb_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "text-embedding-nomic-embed-text-v1.5"}]}
+        if url.endswith("/embeddings") and body is not None:
+            emb_calls.append(body)
+            inputs = body["input"]
+            return 200, {
+                "data": [{"embedding": [float(i), 1.0]} for i, _ in enumerate(inputs)]
+            }
+        return 404, {}
+
+    container.llm_http_fetcher = _batch_emb_fetcher
+    texts_40 = [f"block {i}" for i in range(40)]
+    vecs = await adapter.embed_texts(texts_40, model="nomic-embed-text")
+    assert len(vecs) == 40
+    assert len(emb_calls) == 2
+    assert len(emb_calls[0]["input"]) == 32
+    assert len(emb_calls[1]["input"]) == 8
+    assert all(t.startswith("clustering: ") for t in emb_calls[0]["input"])
+
+    # 3. Non-nomic model does NOT get `clustering: ` prefix
+    emb_calls.clear()
+
+    async def _bge_emb_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "bge-m3-embed"}]}
+        if url.endswith("/embeddings") and body is not None:
+            emb_calls.append(body)
+            return 200, {"data": [{"embedding": [0.5, 0.5]} for _ in body["input"]]}
+        return 404, {}
+
+    container.llm_http_fetcher = _bge_emb_fetcher
+    vecs_bge = await adapter.embed_texts(["hello world"], model="bge-m3-embed")
+    assert len(vecs_bge) == 1
+    assert emb_calls[0]["input"] == ["hello world"]
+
+
+@pytest.mark.asyncio
+async def test_gpu_mutex_does_not_bypass_across_concurrent_tasks(
+    container: ServiceContainer,
+) -> None:
+    """Verify Task B waits on GPUMutex while Task A holds it, while Task A can re-enter `_maybe_gpu_slot` without deadlocking."""
+    import asyncio
+    from app.infrastructure.llm.unified_adapter import UnifiedLocalLLMAdapter
+
+    async def _fast_fetcher(method: str, url: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+        if url.endswith("/models"):
+            return 200, {"data": [{"id": "qwen2.5-14b-instruct"}]}
+        if url.endswith("/chat/completions"):
+            return 200, {"choices": [{"message": {"content": '{"cuts": []}'}}]}
+        return 404, {}
+
+    container.llm_http_fetcher = _fast_fetcher
+    adapter = UnifiedLocalLLMAdapter(container=container)
+
+    timeline: list[str] = []
+    task_a_acquired = asyncio.Event()
+    release_task_a = asyncio.Event()
+
+    async def _task_a() -> None:
+        async with container.scheduler.gpu_slot("whisper"):
+            timeline.append("A_enter")
+            assert container.scheduler.gpu_mutex.current_task_holds_slot() is True
+            # Same task re-entering _maybe_gpu_slot must NOT deadlock
+            async with adapter._maybe_gpu_slot(True, holder="analysis"):
+                timeline.append("A_reenter")
+            task_a_acquired.set()
+            await release_task_a.wait()
+            timeline.append("A_exit")
+
+    async def _task_b() -> None:
+        await task_a_acquired.wait()
+        assert container.scheduler.gpu_mutex.current_task_holds_slot() is False
+        timeline.append("B_waiting")
+        async with adapter._maybe_gpu_slot(True, holder="analysis"):
+            timeline.append("B_acquired")
+
+    t_a = asyncio.create_task(_task_a())
+    t_b = asyncio.create_task(_task_b())
+
+    await task_a_acquired.wait()
+    await asyncio.sleep(0.03)
+    # Task B MUST still be blocked waiting on GPUMutex while Task A holds it
+    assert "B_acquired" not in timeline
+
+    release_task_a.set()
+    await asyncio.gather(t_a, t_b)
+
+    assert timeline == ["A_enter", "A_reenter", "B_waiting", "A_exit", "B_acquired"]
+
+
+def test_tool_configs_auto_upgrades_untouched_v3_prompt_to_v4(container: ServiceContainer) -> None:
+    """Verify untouched v3 `system_prompt` in custom_settings.json auto-upgrades to v4 while custom prompts stay intact."""
+    from app.core.config import PREVIOUS_DEFAULT_SYSTEM_PROMPT_V3, SYSTEM_PROMPT_TEMPLATE
+    from app.core.tool_configs import normalize_llm_config
+
+    upgraded = normalize_llm_config({"system_prompt": PREVIOUS_DEFAULT_SYSTEM_PROMPT_V3})
+    assert upgraded["system_prompt"] == SYSTEM_PROMPT_TEMPLATE
+
+    custom_prompt = "My custom user prompt for gaming shorts."
+    preserved = normalize_llm_config({"system_prompt": custom_prompt})
+    assert preserved["system_prompt"] == custom_prompt
+

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import gc
 import inspect
 import shutil
@@ -15,6 +16,13 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Literal
 import httpx
 
 from app.core.config import config
+
+_TASK_IN_GPU_SLOT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_TASK_IN_GPU_SLOT", default=False
+)
+_TASK_GPU_MUTEX_IDS: contextvars.ContextVar[tuple[int, ...]] = contextvars.ContextVar(
+    "_TASK_GPU_MUTEX_IDS", default=()
+)
 
 
 @dataclass
@@ -71,7 +79,7 @@ async def default_ollama_unloader(base_url: str | None = None) -> list[str]:
     url = (base_url or config.OLLAMA_BASE_URL).rstrip("/")
     unloaded: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(f"{url}/api/ps")
             if resp.status_code != 200:
                 return []
@@ -160,6 +168,7 @@ class ActiveVRAMBudgetManager:
         cuda_cache_clear: CudaCacheClearFn | None = None,
         http_client: httpx.AsyncClient | None = None,
         ollama_base_url: str | None = None,
+        lmstudio_manager: Any | None = None,
     ) -> None:
         self.min_free_vram_gb = min_free_vram_gb
         self._vram_probe = vram_probe or default_vram_probe
@@ -169,6 +178,7 @@ class ActiveVRAMBudgetManager:
         self._cuda_cache_clear = cuda_cache_clear or default_cuda_cache_clear
         self._http_client = http_client
         self._ollama_base_url = (ollama_base_url or config.OLLAMA_BASE_URL).rstrip("/")
+        self._lmstudio_manager = lmstudio_manager
         self.cleanup_count: int = 0
 
     async def probe_free_vram_gb(self) -> float:
@@ -206,6 +216,17 @@ class ActiveVRAMBudgetManager:
         return await default_ollama_unloader(self._ollama_base_url)
 
     async def unload_lms_models(self) -> bool:
+        if self._lms_unloader is not default_lms_unloader:
+            res = self._lms_unloader()
+            if inspect.isawaitable(res):
+                return bool(await res)
+            return bool(res)
+        if self._lmstudio_manager is not None and hasattr(self._lmstudio_manager, "ensure_idle_vram_released"):
+            try:
+                if await self._lmstudio_manager.ensure_idle_vram_released(task_log="transcription"):
+                    return True
+            except Exception:
+                pass
         res = self._lms_unloader()
         if inspect.isawaitable(res):
             return bool(await res)
@@ -266,8 +287,8 @@ class ActiveVRAMBudgetManager:
                 fell_back_to_cpu=False,
             )
 
-        unloaded = await self.unload_idle_ollama_models()
         lms_unloaded = await self.unload_lms_models()
+        unloaded = await self.unload_idle_ollama_models()
         free_after = await self.probe_free_vram_gb()
 
         if free_after >= self.min_free_vram_gb:
@@ -335,18 +356,31 @@ class GPUMutex:
         self._lock = asyncio.Lock()
         self.vram_manager = vram_manager or ActiveVRAMBudgetManager()
         self.active_holder: str | None = None
+        self._enter_tokens: list[tuple[contextvars.Token[bool], contextvars.Token[tuple[int, ...]]]] = []
 
     @property
     def locked(self) -> bool:
         return self._lock.locked()
 
+    def current_task_holds_slot(self) -> bool:
+        """Return True only if the current asyncio task/context holds this GPUMutex."""
+        return bool(
+            self._lock.locked()
+            and _TASK_IN_GPU_SLOT.get()
+            and id(self) in _TASK_GPU_MUTEX_IDS.get()
+        )
+
     @asynccontextmanager
     async def acquire(self, holder: str = "gpu_task") -> AsyncIterator[ActiveVRAMBudgetManager]:
         async with self._lock:
             self.active_holder = holder
+            slot_tok = _TASK_IN_GPU_SLOT.set(True)
+            ids_tok = _TASK_GPU_MUTEX_IDS.set((*_TASK_GPU_MUTEX_IDS.get(), id(self)))
             try:
                 yield self.vram_manager
             finally:
+                _TASK_GPU_MUTEX_IDS.reset(ids_tok)
+                _TASK_IN_GPU_SLOT.reset(slot_tok)
                 self.active_holder = None
 
     @asynccontextmanager
@@ -359,6 +393,8 @@ class GPUMutex:
         """Acquire GPU lock, negotiate VRAM budget, and guarantee VRAM cleanup on exit."""
         async with self._lock:
             self.active_holder = holder
+            slot_tok = _TASK_IN_GPU_SLOT.set(True)
+            ids_tok = _TASK_GPU_MUTEX_IDS.set((*_TASK_GPU_MUTEX_IDS.get(), id(self)))
             try:
                 decision = await self.vram_manager.prepare_for_whisper(
                     requested_device=requested_device
@@ -366,14 +402,23 @@ class GPUMutex:
                 yield decision
             finally:
                 self.vram_manager.cleanup_whisper_vram()
+                _TASK_GPU_MUTEX_IDS.reset(ids_tok)
+                _TASK_IN_GPU_SLOT.reset(slot_tok)
                 self.active_holder = None
 
     async def __aenter__(self) -> ActiveVRAMBudgetManager:
         await self._lock.acquire()
         self.active_holder = "gpu_task"
+        slot_tok = _TASK_IN_GPU_SLOT.set(True)
+        ids_tok = _TASK_GPU_MUTEX_IDS.set((*_TASK_GPU_MUTEX_IDS.get(), id(self)))
+        self._enter_tokens.append((slot_tok, ids_tok))
         return self.vram_manager
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._enter_tokens:
+            slot_tok, ids_tok = self._enter_tokens.pop()
+            _TASK_GPU_MUTEX_IDS.reset(ids_tok)
+            _TASK_IN_GPU_SLOT.reset(slot_tok)
         self.active_holder = None
         self._lock.release()
 

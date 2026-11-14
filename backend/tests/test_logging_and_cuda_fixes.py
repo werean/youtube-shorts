@@ -383,13 +383,13 @@ def test_cuda_dll_discovery_probe_and_error_classification(
     def _raise_dll(name: str) -> Any:
         raise FileNotFoundError(f"Could not find module '{name}'")
 
-    monkeypatch.setattr(cuda_env.ctypes, "WinDLL", _raise_dll)
+    monkeypatch.setattr(cuda_env.ctypes, "WinDLL", _raise_dll, raising=False)
     ok, reason = cuda_env.probe_cuda_whisper_runtime()
     assert ok is False
     assert reason is not None and "cublas64_12.dll" in reason
 
     # Probe succeeds when WinDLL loads
-    monkeypatch.setattr(cuda_env.ctypes, "WinDLL", lambda name: object())
+    monkeypatch.setattr(cuda_env.ctypes, "WinDLL", lambda name: object(), raising=False)
     ok2, reason2 = cuda_env.probe_cuda_whisper_runtime()
     assert ok2 is True
     assert reason2 is None

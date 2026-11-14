@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 from app.application.runtime_service import CancelToken, ServiceContainer, get_container
 from app.core.config import CUTS_RESPONSE_JSON_SCHEMA, config
+from app.infrastructure.llm.lmstudio_cli import _models_match
 
 HttpFetcherFn = Callable[[str, str, dict[str, Any] | None], Awaitable[tuple[int, Any]]]
 
@@ -147,14 +148,46 @@ def _match_best_model(available: Sequence[str], configured: str) -> str:
     return pool[0]
 
 
+_REASONING_BLOCK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"<think>[\s\S]*?</think>", flags=re.IGNORECASE),
+    re.compile(r"<\|channel>thought[\s\S]*?<channel\|>", flags=re.IGNORECASE),
+    re.compile(r"<\|thought\|>[\s\S]*?</\|thought\|>", flags=re.IGNORECASE),
+)
+
+
+def _strip_reasoning_tokens(text: str) -> str:
+    """Strip `<think>...</think>` and Gemma 4 thought markers before JSON parsing."""
+    cleaned = str(text or "")
+    for pat in _REASONING_BLOCK_PATTERNS:
+        cleaned = pat.sub("", cleaned)
+    # Strip unclosed thought preamble immediately preceding JSON fences or objects/arrays
+    cleaned = re.sub(
+        r"(?:<think>|<\|channel>thought|<\|thought\|>)[\s\S]*?(?=\s*(?:```|\{|\[))",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"</?(?:think|\|thought\|)>|<\|channel>thought|<channel\|>",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
 def _extract_json_payload(raw_content: Any) -> tuple[dict[str, Any] | list[Any], str]:
     """Parse JSON object or array from LLM content string or structured dict."""
     if isinstance(raw_content, (dict, list)):
         return raw_content, json.dumps(raw_content, ensure_ascii=False)
 
-    text = str(raw_content or "").strip()
+    original_text = str(raw_content or "").strip()
+    if not original_text:
+        raise InvalidLLMJsonResponseError(original_text, "LLM returned empty response")
+
+    text = _strip_reasoning_tokens(original_text)
     if not text:
-        raise InvalidLLMJsonResponseError(text, "LLM returned empty response")
+        raise InvalidLLMJsonResponseError(original_text, "LLM returned empty response after stripping thoughts")
 
     # Strip optional markdown code fences
     fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
@@ -163,7 +196,7 @@ def _extract_json_payload(raw_content: Any) -> tuple[dict[str, Any] | list[Any],
     try:
         parsed = json.loads(candidate)
         if isinstance(parsed, (dict, list)):
-            return parsed, text
+            return parsed, original_text
     except json.JSONDecodeError:
         pass
 
@@ -176,11 +209,11 @@ def _extract_json_payload(raw_content: Any) -> tuple[dict[str, Any] | list[Any],
             try:
                 parsed = json.loads(snippet)
                 if isinstance(parsed, (dict, list)):
-                    return parsed, text
+                    return parsed, original_text
             except json.JSONDecodeError:
                 continue
 
-    raise InvalidLLMJsonResponseError(text)
+    raise InvalidLLMJsonResponseError(original_text)
 
 
 class UnifiedLocalLLMAdapter:
@@ -288,8 +321,8 @@ class UnifiedLocalLLMAdapter:
     @asynccontextmanager
     async def _maybe_gpu_slot(self, acquire: bool, holder: str = "analysis") -> AsyncIterator[None]:
         sched = self.container.scheduler
-        # Avoid deadlocking if the current task already holds GPUMutex
-        if not acquire or sched.gpu_mutex.locked:
+        # Avoid deadlocking ONLY if the current asyncio task already holds this GPUMutex slot
+        if not acquire or sched.gpu_mutex.current_task_holds_slot():
             yield
             return
         async with sched.gpu_slot(holder=holder):
@@ -431,26 +464,33 @@ class UnifiedLocalLLMAdapter:
         lms_models: Sequence[str],
         preferred: str,
         stage_key: str | None = None,
-    ) -> str:
-        emb_candidates = [m for m in lms_models if _is_embedding_model_name(m)]
-        pool = emb_candidates or list(lms_models)
-        if not pool:
-            return stage_key or preferred
+    ) -> str | None:
+        emb_candidates = [m for m in lms_models if m and _is_embedding_model_name(m)]
+        if not emb_candidates:
+            if stage_key and _is_embedding_model_name(stage_key):
+                return stage_key
+            return None
 
         for hint in (stage_key, preferred):
             if not hint:
                 continue
             hint_low = hint.strip().lower()
             hint_norm = re.sub(r"[^a-z0-9]+", "-", hint_low).strip("-")
-            for m in pool:
+            for m in emb_candidates:
                 if m.lower() == hint_low:
                     return m
             if hint_norm:
-                for m in pool:
+                for m in emb_candidates:
                     m_norm = re.sub(r"[^a-z0-9]+", "-", m.lower()).strip("-")
                     if m_norm == hint_norm or hint_norm in m_norm or m_norm in hint_norm:
                         return m
-        return emb_candidates[0] if emb_candidates else (stage_key or preferred)
+        return emb_candidates[0]
+
+    @staticmethod
+    def _prepare_embedding_inputs(clean_texts: Sequence[str], model_name: str) -> list[str]:
+        if "nomic" in (model_name or "").lower():
+            return [f"clustering: {t}" for t in clean_texts]
+        return list(clean_texts)
 
     async def _request_lmstudio_embeddings(
         self,
@@ -460,6 +500,7 @@ class UnifiedLocalLLMAdapter:
         *,
         stage_key: str | None = None,
         lms_models: Sequence[str] | None = None,
+        batch_size: int = 32,
     ) -> list[list[float]] | None:
         try:
             models = list(lms_models) if lms_models is not None else []
@@ -468,29 +509,47 @@ class UnifiedLocalLLMAdapter:
                 if lms_ok:
                     models = probed
             lms_emb_model = self._match_embedding_model_id(models, emb_model, stage_key=stage_key)
-            status, payload = await self._request_json(
-                "POST",
-                f"{lms_url}/embeddings",
-                {
-                    "model": lms_emb_model,
-                    "input": list(clean_texts),
-                },
-                timeout=30.0,
+            if not lms_emb_model:
+                logger.warning(
+                    "No embedding model found in LM Studio loaded models %s (preferred=%s).",
+                    models,
+                    emb_model,
+                )
+                return None
+
+            prepared_texts = self._prepare_embedding_inputs(
+                clean_texts,
+                lms_emb_model if "nomic" in lms_emb_model.lower() else emb_model,
             )
-            if status == 200 and isinstance(payload, dict):
-                data = payload.get("data")
-                if isinstance(data, list) and len(data) == len(clean_texts):
-                    return [
-                        [float(x) for x in item.get("embedding", [])]
-                        for item in data
-                        if isinstance(item, dict)
-                    ]
-            else:
+            all_vectors: list[list[float]] = []
+            step = max(1, int(batch_size))
+            for i in range(0, len(prepared_texts), step):
+                chunk = prepared_texts[i : i + step]
+                status, payload = await self._request_json(
+                    "POST",
+                    f"{lms_url}/embeddings",
+                    {
+                        "model": lms_emb_model,
+                        "input": chunk,
+                    },
+                    timeout=60.0,
+                )
+                if status == 200 and isinstance(payload, dict):
+                    data = payload.get("data")
+                    if isinstance(data, list) and len(data) == len(chunk):
+                        all_vectors.extend(
+                            [float(x) for x in item.get("embedding", [])]
+                            for item in data
+                            if isinstance(item, dict)
+                        )
+                        continue
                 logger.warning(
                     "LM Studio embedding request returned HTTP %s for model=%s",
                     status,
                     lms_emb_model,
                 )
+                return None
+            return all_vectors if len(all_vectors) == len(clean_texts) else None
         except Exception as exc:
             logger.warning("LM Studio embedding request failed (%s): %s", emb_model, exc)
         return None
@@ -500,32 +559,42 @@ class UnifiedLocalLLMAdapter:
         ollama_url: str,
         clean_texts: Sequence[str],
         emb_model: str,
+        *,
+        batch_size: int = 32,
     ) -> list[list[float]] | None:
         try:
-            status, payload = await self._request_json(
-                "POST",
-                f"{ollama_url}/api/embed",
-                {
-                    "model": emb_model,
-                    "input": list(clean_texts),
-                    "options": {"num_gpu": 0},
-                    "keep_alive": 0,
-                },
-                timeout=30.0,
-            )
-            if status == 200 and isinstance(payload, dict):
-                embeddings = payload.get("embeddings")
-                if isinstance(embeddings, list) and len(embeddings) == len(clean_texts):
-                    return [[float(x) for x in vec] for vec in embeddings]
-                single = payload.get("embedding")
-                if isinstance(single, list) and len(clean_texts) == 1:
-                    return [[float(x) for x in single]]
-            else:
+            prepared_texts = self._prepare_embedding_inputs(clean_texts, emb_model)
+            all_vectors: list[list[float]] = []
+            step = max(1, int(batch_size))
+            for i in range(0, len(prepared_texts), step):
+                chunk = prepared_texts[i : i + step]
+                status, payload = await self._request_json(
+                    "POST",
+                    f"{ollama_url}/api/embed",
+                    {
+                        "model": emb_model,
+                        "input": chunk,
+                        "options": {"num_gpu": 0},
+                        "keep_alive": 0,
+                    },
+                    timeout=60.0,
+                )
+                if status == 200 and isinstance(payload, dict):
+                    embeddings = payload.get("embeddings")
+                    if isinstance(embeddings, list) and len(embeddings) == len(chunk):
+                        all_vectors.extend([[float(x) for x in vec] for vec in embeddings])
+                        continue
+                    single = payload.get("embedding")
+                    if isinstance(single, list) and len(chunk) == 1:
+                        all_vectors.append([float(x) for x in single])
+                        continue
                 logger.warning(
                     "Ollama embedding request returned HTTP %s for model=%s",
                     status,
                     emb_model,
                 )
+                return None
+            return all_vectors if len(all_vectors) == len(clean_texts) else None
         except Exception as exc:
             logger.warning("Ollama embedding request failed (%s): %s", emb_model, exc)
         return None
@@ -594,10 +663,7 @@ class UnifiedLocalLLMAdapter:
             # HTTP-only path (e.g. Ollama pinned, or HTTP-mocked unit tests without CLI runner)
             if provider_pref in ("auto", "lmstudio"):
                 lms_ok, lms_models = await self._probe_lmstudio(lms_url)
-                if lms_ok and (
-                    provider_pref == "lmstudio"
-                    or any(_is_embedding_model_name(m) for m in lms_models)
-                ):
+                if lms_ok and any(_is_embedding_model_name(m) for m in lms_models):
                     vecs = await self._request_lmstudio_embeddings(
                         lms_url, clean_texts, emb_model, lms_models=lms_models
                     )
@@ -651,10 +717,17 @@ class UnifiedLocalLLMAdapter:
         json_schema: dict[str, Any],
         schema_name: str,
         temperature: float,
+        max_tokens: int | None = None,
         cancel_token: CancelToken | None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
+
+        effective_max_tokens = (
+            int(max_tokens)
+            if (max_tokens is not None and int(max_tokens) > 0)
+            else int(config.LLM_MAX_TOKENS_MINER)
+        )
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -667,6 +740,7 @@ class UnifiedLocalLLMAdapter:
                     "model": resolution.model,
                     "messages": messages,
                     "temperature": temperature,
+                    "max_tokens": effective_max_tokens,
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
@@ -682,6 +756,24 @@ class UnifiedLocalLLMAdapter:
                     req_body,
                 )
                 if status == 400:
+                    err_text = (
+                        json.dumps(payload, ensure_ascii=False)
+                        if isinstance(payload, (dict, list))
+                        else str(payload or "")
+                    ).lower()
+                    if any(
+                        kw in err_text
+                        for kw in ("context", "ctx", "n_ctx", "too long", "overflow", "exceeds")
+                    ):
+                        detail = (
+                            payload.get("detail") or payload.get("error")
+                            if isinstance(payload, dict)
+                            else str(payload)
+                        )
+                        raise RuntimeError(
+                            f"LLM context/token limit exceeded (HTTP 400): {detail}"
+                        )
+
                     logger.warning(
                         "LM Studio returned HTTP 400 for json_schema response_format; retrying with json_object."
                     )
@@ -700,7 +792,8 @@ class UnifiedLocalLLMAdapter:
                     "format": json_schema,
                     "options": {
                         "temperature": temperature,
-                        "num_ctx": 8192,
+                        "num_ctx": int(config.LMSTUDIO_CONTEXT_LENGTH),
+                        "num_predict": effective_max_tokens,
                     },
                 }
                 status, payload = await self._request_json(
@@ -729,24 +822,96 @@ class UnifiedLocalLLMAdapter:
             raise RuntimeError(f"LLM request failed with HTTP {status}: {detail}")
 
         raw_content: Any = None
+        reasoning_fallback: Any = None
         if isinstance(payload, dict):
             choices = payload.get("choices")
             if isinstance(choices, list) and choices:
                 first_choice = choices[0]
                 if isinstance(first_choice, dict):
                     msg = first_choice.get("message")
-                    if isinstance(msg, dict) and "content" in msg:
-                        raw_content = msg["content"]
+                    if isinstance(msg, dict):
+                        content_val = msg.get("content")
+                        if content_val is not None and str(content_val).strip():
+                            raw_content = content_val
+                        elif msg.get("reasoning_content") is not None and str(msg.get("reasoning_content")).strip():
+                            reasoning_fallback = msg.get("reasoning_content")
             if raw_content is None:
                 msg = payload.get("message")
-                if isinstance(msg, dict) and "content" in msg:
-                    raw_content = msg["content"]
-            if raw_content is None and ("cuts" in payload or "adjustments" in payload):
+                if isinstance(msg, dict):
+                    content_val = msg.get("content")
+                    if content_val is not None and str(content_val).strip():
+                        raw_content = content_val
+                    elif msg.get("reasoning_content") is not None and str(msg.get("reasoning_content")).strip():
+                        reasoning_fallback = msg.get("reasoning_content")
+            if raw_content is None and reasoning_fallback is None and ("cuts" in payload or "adjustments" in payload):
                 raw_content = payload
         elif isinstance(payload, (list, str)):
             raw_content = payload
 
-        return _extract_json_payload(raw_content)
+        if raw_content is not None:
+            return _extract_json_payload(raw_content)
+
+        if reasoning_fallback is not None:
+            try:
+                return _extract_json_payload(reasoning_fallback)
+            except InvalidLLMJsonResponseError as exc:
+                raise InvalidLLMJsonResponseError(
+                    str(reasoning_fallback),
+                    "LLM returned empty content and reasoning_content did not contain valid JSON",
+                ) from exc
+
+        return _extract_json_payload("")
+
+    async def _execute_chat_json_with_repair(
+        self,
+        resolution: ProviderResolution,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_schema: dict[str, Any],
+        schema_name: str,
+        temperature: float,
+        max_tokens: int | None,
+        cancel_token: CancelToken | None,
+    ) -> tuple[dict[str, Any] | list[Any], str]:
+        try:
+            return await self._execute_chat_json(
+                resolution,
+                system_prompt,
+                user_prompt,
+                json_schema=json_schema,
+                schema_name=schema_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                cancel_token=cancel_token,
+            )
+        except InvalidLLMJsonResponseError as exc:
+            if exc.raw_text.strip() == "ok":
+                raise
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+
+            logger.warning(
+                "LLM returned invalid JSON (%s); attempting 1 automatic JSON-repair retry.",
+                exc,
+            )
+            repair_user_prompt = (
+                f"{user_prompt}\n\n"
+                "=== JSON REPAIR INSTRUCTION ===\n"
+                "Your previous response was NOT valid JSON matching the required schema. "
+                "Return ONLY valid JSON matching the schema with no markdown fences, no commentary, and no thinking tags.\n"
+                f"Malformed output snippet:\n{exc.raw_text[:1200]}"
+            )
+            return await self._execute_chat_json(
+                resolution,
+                system_prompt,
+                repair_user_prompt,
+                json_schema=json_schema,
+                schema_name=schema_name,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                cancel_token=cancel_token,
+            )
 
     async def chat_json(
         self,
@@ -756,6 +921,7 @@ class UnifiedLocalLLMAdapter:
         json_schema: dict[str, Any] = CUTS_RESPONSE_JSON_SCHEMA,
         schema_name: str = "narrative_cuts",
         temperature: float = 0.2,
+        max_tokens: int | None = None,
         acquire_gpu_slot: bool = True,
         cancel_token: CancelToken | None = None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
@@ -778,44 +944,51 @@ class UnifiedLocalLLMAdapter:
                     resolution = await self._resolve_chat_provider(
                         lms_url=lms_url, stage_key=active_llm
                     )
-                    return await self._execute_chat_json(
+                    return await self._execute_chat_json_with_repair(
                         resolution,
                         system_prompt,
                         user_prompt,
                         json_schema=json_schema,
                         schema_name=schema_name,
                         temperature=temperature,
+                        max_tokens=max_tokens,
                         cancel_token=cancel_token,
                     )
 
                 lms_ok, lms_models = await self._probe_lmstudio(lms_url)
-                has_chat_model = lms_ok and any(not _is_embedding_model_name(m) for m in lms_models)
-                if not has_chat_model:
+                chat_models = [m for m in lms_models if m and not _is_embedding_model_name(m)]
+                has_matching_chat_model = lms_ok and any(
+                    _models_match(m, configured_model) for m in chat_models
+                )
+                if not has_matching_chat_model:
                     async with lmstudio_cli.stage(
                         model_type="llm",
                         preferred_model=configured_model,
                         task_log="analysis",
                     ) as loaded_key:
-                        resolution = await self._resolve_chat_provider(
-                            lms_url=lms_url, stage_key=loaded_key
-                        )
-                        return await self._execute_chat_json(
-                            resolution,
-                            system_prompt,
-                            user_prompt,
-                            json_schema=json_schema,
-                            schema_name=schema_name,
-                            temperature=temperature,
-                            cancel_token=cancel_token,
-                        )
+                        if loaded_key:
+                            resolution = await self._resolve_chat_provider(
+                                lms_url=lms_url, stage_key=loaded_key
+                            )
+                            return await self._execute_chat_json_with_repair(
+                                resolution,
+                                system_prompt,
+                                user_prompt,
+                                json_schema=json_schema,
+                                schema_name=schema_name,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                cancel_token=cancel_token,
+                            )
 
             resolution = await self.detect_provider_and_model()
-            return await self._execute_chat_json(
+            return await self._execute_chat_json_with_repair(
                 resolution,
                 system_prompt,
                 user_prompt,
                 json_schema=json_schema,
                 schema_name=schema_name,
                 temperature=temperature,
+                max_tokens=max_tokens,
                 cancel_token=cancel_token,
             )

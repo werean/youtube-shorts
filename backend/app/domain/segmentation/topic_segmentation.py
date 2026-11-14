@@ -20,7 +20,8 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from typing import Any, Sequence
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Callable, Sequence
 
 import numpy as np
 
@@ -30,6 +31,9 @@ from app.application.runtime_service import (
     get_container,
 )
 from app.domain.segmentation.semantic_blocks import (
+    compute_token_jaccard,
+    ends_sentence,
+    is_news_or_list_transition_text,
     is_topic_opener_text,
     starts_with_blocking_connective,
 )
@@ -41,6 +45,8 @@ MIN_TOPIC_DURATION_SECONDS: float = 25.0
 WINDOW_K: int = 3
 DEFAULT_DEPTH_SIGMA_FACTOR: float = 0.5
 LONG_PAUSE_BOUNDARY_SECONDS: float = 2.2
+NEURAL_MIN_DEPTH: float = 0.06
+TFIDF_MIN_DEPTH: float = 0.12
 
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ0-9]{2,}")
 
@@ -148,6 +154,38 @@ def compute_lexical_tfidf_embeddings(texts: Sequence[str]) -> list[list[float]]:
     return embeddings
 
 
+def center_embeddings_anisotropic(
+    embeddings: Sequence[Sequence[float]],
+    *,
+    min_blocks: int = 10,
+) -> list[list[float]]:
+    """Subtract per-video mean embedding and L2-renormalize when `len(embeddings) >= min_blocks`.
+
+    Skipping when `< min_blocks` preserves small orthogonal unit fixtures; guarding tiny
+    residual variance avoids magnifying floating-point jitter on uniform videos.
+    """
+    if len(embeddings) < min_blocks:
+        return [[float(x) for x in vec] for vec in embeddings]
+
+    mat = np.asarray(embeddings, dtype=np.float64)
+    if mat.ndim != 2 or mat.shape[1] == 0:
+        return [[float(x) for x in vec] for vec in embeddings]
+
+    orig_norms = np.linalg.norm(mat, axis=1)
+    mean_vec = np.mean(mat, axis=0, keepdims=True)
+    centered = mat - mean_vec
+    norms = np.linalg.norm(centered, axis=1, keepdims=True)
+    mean_orig = float(np.mean(orig_norms)) if orig_norms.size > 0 else 0.0
+    mean_res = float(np.mean(norms)) if norms.size > 0 else 0.0
+
+    if np.all(norms <= 1e-12) or (mean_orig > 1e-12 and mean_res < 0.05 * mean_orig):
+        return [[float(x) for x in vec] for vec in embeddings]
+
+    safe_norms = np.where(norms > 1e-12, norms, 1.0)
+    normalized = centered / safe_norms
+    return normalized.tolist()
+
+
 def build_sliding_windows(
     blocks: Sequence[SemanticBlock],
     k: int = WINDOW_K,
@@ -172,6 +210,7 @@ def compute_window_similarities(
     *,
     k: int = WINDOW_K,
     smooth: bool = False,
+    block_durations: Sequence[float] | None = None,
 ) -> list[float]:
     """Compute cosine similarity between sliding windows `[i-k+1..i]` and `[i+1..i+k]` for each gap `i`."""
     n = len(block_embeddings)
@@ -180,13 +219,28 @@ def compute_window_similarities(
 
     mat = np.asarray(block_embeddings, dtype=np.float64)
     win_size = max(1, int(k))
-    raw_sims: list[float] = []
 
+    weights: np.ndarray | None = None
+    if block_durations is not None and len(block_durations) == n:
+        weights = np.array(
+            [math.sqrt(max(3.0, min(30.0, float(d)))) for d in block_durations],
+            dtype=np.float64,
+        )
+
+    raw_sims: list[float] = []
     for i in range(n - 1):
-        left_vecs = mat[max(0, i - win_size + 1) : i + 1]
-        right_vecs = mat[i + 1 : min(n, i + 1 + win_size)]
-        left_mean = np.mean(left_vecs, axis=0)
-        right_mean = np.mean(right_vecs, axis=0)
+        l_lo = max(0, i - win_size + 1)
+        l_hi = i + 1
+        r_lo = i + 1
+        r_hi = min(n, i + 1 + win_size)
+        left_vecs = mat[l_lo:l_hi]
+        right_vecs = mat[r_lo:r_hi]
+        if weights is not None:
+            left_mean = np.average(left_vecs, axis=0, weights=weights[l_lo:l_hi])
+            right_mean = np.average(right_vecs, axis=0, weights=weights[r_lo:r_hi])
+        else:
+            left_mean = np.mean(left_vecs, axis=0)
+            right_mean = np.mean(right_vecs, axis=0)
         raw_sims.append(cosine_similarity(left_mean, right_mean))
 
     if not smooth or len(raw_sims) < 3:
@@ -250,21 +304,30 @@ def select_boundaries_by_depth(
     depth_scores: Sequence[float],
     *,
     sigma_factor: float = DEFAULT_DEPTH_SIGMA_FACTOR,
+    min_depth: float = 0.0,
 ) -> set[str]:
-    """Select topic-opening `block_id`s where `Depth(i) > mu_d + sigma_factor * sigma_d`."""
+    """Select topic-opening `block_id`s using adaptive mean/std + MAD fallback and `min_depth` floor."""
     if len(blocks) < 2 or not depth_scores:
         return set()
 
     arr = np.asarray(depth_scores, dtype=np.float64)
     mu_d = float(np.mean(arr))
     sigma_d = float(np.std(arr))
-    threshold = mu_d + float(sigma_factor) * sigma_d
+    med_d = float(np.median(arr))
+    mad_d = float(np.median(np.abs(arr - med_d))) * 1.4826
+
+    stat_threshold = mu_d + float(sigma_factor) * sigma_d
+    if mad_d > 1e-6 and sigma_d > 1.5 * mad_d:
+        robust_threshold = med_d + max(float(sigma_factor), 1.5) * mad_d
+        stat_threshold = min(stat_threshold, robust_threshold)
+
+    threshold = max(float(min_depth), stat_threshold)
 
     boundaries: set[str] = set()
     limit = min(len(depth_scores), len(blocks) - 1)
     for i in range(limit):
         d = float(depth_scores[i])
-        if d <= 0.0:
+        if d <= 0.0 or d < float(min_depth):
             continue
         is_local_max = True
         if i > 0 and depth_scores[i - 1] > d:
@@ -276,6 +339,59 @@ def select_boundaries_by_depth(
             next_block = blocks[i + 1]
             if not starts_with_blocking_connective(next_block.text):
                 boundaries.add(next_block.block_id)
+
+    return boundaries
+
+
+def detect_adjacent_transition_spikes(
+    blocks: Sequence[SemanticBlock],
+    embeddings: Sequence[Sequence[float]],
+    *,
+    embedding_backend: str = "neural",
+) -> set[str]:
+    """Detect sharp 1-block topic switches via unsmoothed `k=1` curve `delta_1(i) = 1 - cos(e_i, e_{i+1})`."""
+    n = min(len(blocks), len(embeddings))
+    if n < 2:
+        return set()
+
+    deltas = [
+        max(0.0, 1.0 - cosine_similarity(embeddings[i], embeddings[i + 1]))
+        for i in range(n - 1)
+    ]
+    if not deltas:
+        return set()
+
+    arr = np.asarray(deltas, dtype=np.float64)
+    mu_1 = float(np.mean(arr))
+    sigma_1 = float(np.std(arr))
+    med_1 = float(np.median(arr))
+    mad_1 = float(np.median(np.abs(arr - med_1))) * 1.4826
+
+    min_delta = 0.50 if embedding_backend == "neural" else 0.72
+    extreme_delta = 0.75 if embedding_backend == "neural" else 0.90
+
+    boundaries: set[str] = set()
+    for i, d_val in enumerate(deltas):
+        nxt = blocks[i + 1]
+        if starts_with_blocking_connective(nxt.text):
+            continue
+
+        curr = blocks[i]
+        curr_tags = set(curr.signal_tags or [])
+        nxt_tags = set(nxt.signal_tags or [])
+        has_corroboration = bool(
+            ("AD_CUE" in curr_tags) != ("AD_CUE" in nxt_tags)
+            or "NEWS_TRANSITION" in nxt_tags
+            or "LOW_OVERLAP" in nxt_tags
+            or "TOPIC_SHIFT" in nxt_tags
+            or ends_sentence(curr.text)
+        )
+
+        stat_spike = (d_val >= mu_1 + 1.25 * sigma_1) or (
+            mad_1 > 1e-6 and d_val >= med_1 + 2.5 * mad_1
+        )
+        if d_val >= extreme_delta or (d_val >= min_delta and stat_spike and has_corroboration):
+            boundaries.add(nxt.block_id)
 
     return boundaries
 
@@ -308,7 +424,7 @@ def detect_heuristic_and_chapter_boundaries(
                 if ch_title:
                     chapter_titles[best_block.block_id] = ch_title
 
-    # 2. Acoustic pauses >= 2.2s, explicit topic openers, and Q&A shifts
+    # 2. Corroborated acoustic pauses, explicit topic/news openers, and AdCTA transitions
     for i in range(len(blocks) - 1):
         curr = blocks[i]
         nxt = blocks[i + 1]
@@ -316,14 +432,63 @@ def detect_heuristic_and_chapter_boundaries(
             continue
 
         pause = max(0.0, float(nxt.start) - float(curr.end))
-        if pause >= LONG_PAUSE_BOUNDARY_SECONDS:
+        curr_ended = ends_sentence(curr.text)
+        next_is_opener = is_topic_opener_text(nxt.text) or (
+            curr_ended and is_news_or_list_transition_text(nxt.text)
+        )
+        curr_tags = set(curr.signal_tags or [])
+        nxt_tags = set(nxt.signal_tags or [])
+        ad_shift = ("AD_CUE" in curr_tags) != ("AD_CUE" in nxt_tags)
+        low_overlap = (
+            "LOW_OVERLAP" in nxt_tags
+            or compute_token_jaccard(curr.text, nxt.text) <= 0.12
+        )
+        strong_pause = pause >= 3.0
+
+        if ad_shift and (curr_ended or pause >= 1.0 or "AD_CUE" in nxt_tags):
             boundaries.add(nxt.block_id)
-        elif is_topic_opener_text(nxt.text):
+        elif pause >= LONG_PAUSE_BOUNDARY_SECONDS and (
+            (curr_ended and (next_is_opener or low_overlap or strong_pause))
+            or ad_shift
+        ):
             boundaries.add(nxt.block_id)
-        elif nxt.is_topic_opener and pause >= 1.0:
+        elif next_is_opener:
+            boundaries.add(nxt.block_id)
+        elif nxt.is_topic_opener and pause >= 1.0 and (curr_ended or low_overlap):
             boundaries.add(nxt.block_id)
 
     return boundaries, chapter_titles
+
+
+def _is_ad_group(grp: Sequence[SemanticBlock]) -> bool:
+    if not grp:
+        return False
+    ad_count = sum(1 for b in grp if "AD_CUE" in (b.signal_tags or []))
+    return ad_count >= max(1, (len(grp) + 1) // 2)
+
+
+def _group_affinity(
+    grp_a: Sequence[SemanticBlock],
+    grp_b: Sequence[SemanticBlock],
+    *,
+    emb_by_block_id: dict[str, np.ndarray] | None = None,
+) -> float:
+    if emb_by_block_id:
+        vecs_a = [emb_by_block_id[b.block_id] for b in grp_a if b.block_id in emb_by_block_id]
+        vecs_b = [emb_by_block_id[b.block_id] for b in grp_b if b.block_id in emb_by_block_id]
+        if vecs_a and vecs_b:
+            mean_a = np.mean(np.stack(vecs_a, axis=0), axis=0)
+            mean_b = np.mean(np.stack(vecs_b, axis=0), axis=0)
+            return cosine_similarity(mean_a, mean_b)
+
+    text_a = " ".join(b.text for b in grp_a if b.text)
+    text_b = " ".join(b.text for b in grp_b if b.text)
+    score = compute_token_jaccard(text_a, text_b)
+    spk_a = grp_a[-1].speaker if grp_a else None
+    spk_b = grp_b[0].speaker if grp_b else None
+    if spk_a and spk_b and spk_a == spk_b:
+        score += 0.15
+    return score
 
 
 def build_topics_from_boundaries(
@@ -332,14 +497,17 @@ def build_topics_from_boundaries(
     *,
     chapter_titles: dict[str, str] | None = None,
     min_topic_duration: float = MIN_TOPIC_DURATION_SECONDS,
+    block_embeddings: Sequence[Sequence[float]] | None = None,
+    embedding_backend: str | None = None,
 ) -> list[TopicSegment]:
-    """Assemble `TopicSegment` items from boundary `block_id`s and merge topics shorter than `min_topic_duration`."""
+    """Assemble `TopicSegment` items from boundary `block_id`s with ad-span isolation and bidirectional affinity merge."""
     if not blocks:
         return []
 
     total_span = float(blocks[-1].end) - float(blocks[0].start)
     if total_span < min_topic_duration or len(blocks) == 1:
         title = (chapter_titles or {}).get(blocks[0].block_id)
+        topic_type = "ad_span" if _is_ad_group(blocks) else "content"
         return [
             TopicSegment(
                 topic_id="t1",
@@ -349,6 +517,8 @@ def build_topics_from_boundaries(
                 blockCount=len(blocks),
                 durationSeconds=round(max(0.0, float(blocks[-1].end) - float(blocks[0].start)), 3),
                 title=title,
+                embedding_backend=embedding_backend,
+                topic_type=topic_type,
             )
         ]
 
@@ -366,17 +536,47 @@ def build_topics_from_boundaries(
     if current_group:
         groups.append(current_group)
 
-    # Merge any group shorter than min_topic_duration into an adjacent group
+    emb_by_block_id: dict[str, np.ndarray] | None = None
+    if block_embeddings is not None and len(block_embeddings) == len(blocks):
+        emb_by_block_id = {
+            blk.block_id: np.asarray(vec, dtype=np.float64)
+            for blk, vec in zip(blocks, block_embeddings)
+        }
+
+    # Merge short fragments (< min_topic_duration) using ad-span isolation + bidirectional affinity
     merged_groups: list[list[SemanticBlock]] = []
     i = 0
     while i < len(groups):
         grp = groups[i]
         grp_dur = float(grp[-1].end) - float(grp[0].start)
-        if grp_dur < min_topic_duration and (len(merged_groups) > 0 or i + 1 < len(groups)):
-            if merged_groups:
+        grp_is_ad = _is_ad_group(grp)
+
+        if grp_is_ad:
+            if merged_groups and _is_ad_group(merged_groups[-1]):
                 merged_groups[-1].extend(grp)
             else:
+                merged_groups.append(grp)
+            i += 1
+            continue
+
+        if grp_dur < min_topic_duration and (len(merged_groups) > 0 or i + 1 < len(groups)):
+            left_valid = bool(merged_groups) and not _is_ad_group(merged_groups[-1])
+            right_valid = (i + 1 < len(groups)) and not _is_ad_group(groups[i + 1])
+
+            if left_valid and right_valid:
+                aff_left = _group_affinity(merged_groups[-1], grp, emb_by_block_id=emb_by_block_id)
+                aff_right = _group_affinity(grp, groups[i + 1], emb_by_block_id=emb_by_block_id)
+                if aff_right > aff_left + 1e-6:
+                    groups[i + 1] = grp + groups[i + 1]
+                else:
+                    merged_groups[-1].extend(grp)
+            elif left_valid:
+                merged_groups[-1].extend(grp)
+            elif right_valid:
                 groups[i + 1] = grp + groups[i + 1]
+            else:
+                # Flanked only by ad spans: keep content fragment isolated rather than gluing into an ad
+                merged_groups.append(grp)
         else:
             merged_groups.append(grp)
         i += 1
@@ -404,10 +604,23 @@ def build_topics_from_boundaries(
                 blockCount=len(grp),
                 durationSeconds=t_dur,
                 title=title,
+                embedding_backend=embedding_backend,
+                topic_type="ad_span" if _is_ad_group(grp) else "content",
             )
         )
 
     return topics
+
+
+@asynccontextmanager
+async def _maybe_topics_gpu_slot(c_ref: Any) -> AsyncIterator[None]:
+    sched = getattr(c_ref, "scheduler", None)
+    gpu_mutex = getattr(sched, "gpu_mutex", None) if sched is not None else None
+    if sched is None or (gpu_mutex is not None and gpu_mutex.current_task_holds_slot()):
+        yield
+        return
+    async with sched.gpu_slot(holder="topics"):
+        yield
 
 
 async def segment_blocks_into_topics(
@@ -418,7 +631,7 @@ async def segment_blocks_into_topics(
     use_embeddings: bool = True,
     embedding_model: str | None = None,
     sigma_factor: float = DEFAULT_DEPTH_SIGMA_FACTOR,
-    window_k: int = WINDOW_K,
+    window_k: int | None = None,
     min_topic_duration: float = MIN_TOPIC_DURATION_SECONDS,
     llm_adapter: UnifiedLocalLLMAdapter | None = None,
     block_embeddings_override: Sequence[Sequence[float]] | None = None,
@@ -453,6 +666,8 @@ async def segment_blocks_into_topics(
                 blockCount=len(blocks),
                 durationSeconds=round(max(0.0, float(blocks[-1].end) - float(blocks[0].start)), 3),
                 title=first_title,
+                embedding_backend="none",
+                topic_type="ad_span" if _is_ad_group(blocks) else "content",
             )
         ]
 
@@ -460,6 +675,8 @@ async def segment_blocks_into_topics(
         blocks, chapters=chapters
     )
     all_boundaries = set(heuristic_boundaries)
+    embedding_backend = "none"
+    centered_embeddings: list[list[float]] | None = None
 
     if use_embeddings and len(blocks) >= 2:
         embeddings: list[list[float]] = []
@@ -489,24 +706,25 @@ async def segment_blocks_into_topics(
                 and lmstudio.cli_enabled()
             ):
                 try:
-                    async with lmstudio.stage(
-                        model_type="embedding",
-                        preferred_model=pref_emb_model,
-                        gpu="off",
-                        job_id=job_id,
-                        task_log="topics",
-                    ) as loaded_emb_key:
-                        if loaded_emb_key:
-                            embeddings = await adapter.embed_texts(texts, model=loaded_emb_key)
-                        elif provider_pref == "auto" and hasattr(adapter, "_request_ollama_embeddings"):
-                            embeddings = (
-                                await adapter._request_ollama_embeddings(
-                                    str(cfg.get("ollama_base_url") or ""),
-                                    texts,
-                                    pref_emb_model or "",
+                    async with _maybe_topics_gpu_slot(c_ref):
+                        async with lmstudio.stage(
+                            model_type="embedding",
+                            preferred_model=pref_emb_model,
+                            gpu="off",
+                            job_id=job_id,
+                            task_log="topics",
+                        ) as loaded_emb_key:
+                            if loaded_emb_key:
+                                embeddings = await adapter.embed_texts(texts, model=loaded_emb_key)
+                            elif provider_pref == "auto" and hasattr(adapter, "_request_ollama_embeddings"):
+                                embeddings = (
+                                    await adapter._request_ollama_embeddings(
+                                        str(cfg.get("ollama_base_url") or ""),
+                                        texts,
+                                        pref_emb_model or "",
+                                    )
+                                    or []
                                 )
-                                or []
-                            )
                 except OperationCancelledError:
                     raise
                 except Exception as exc:
@@ -531,7 +749,9 @@ async def segment_blocks_into_topics(
                         on_embedding_fallback(msg)
                     embeddings = []
 
-        if not embeddings or len(embeddings) != len(blocks):
+        if embeddings and len(embeddings) == len(blocks):
+            embedding_backend = "neural"
+        else:
             msg = (
                 f"Embeddings indisponíveis ou incompletos ({len(embeddings)}/{len(blocks)}); "
                 "usando fallback TF-IDF léxico para TextTiling"
@@ -539,21 +759,44 @@ async def segment_blocks_into_topics(
             if on_embedding_fallback is not None:
                 on_embedding_fallback(msg)
             embeddings = compute_lexical_tfidf_embeddings([b.text for b in blocks])
+            embedding_backend = "tfidf_fallback"
 
-        similarities = compute_window_similarities(embeddings, k=window_k)
+        centered_embeddings = center_embeddings_anisotropic(embeddings, min_blocks=10)
+        effective_k = (
+            (2 if len(blocks) < 12 else WINDOW_K)
+            if window_k is None
+            else max(1, int(window_k))
+        )
+        block_durations = [max(0.5, float(b.end) - float(b.start)) for b in blocks]
+        similarities = compute_window_similarities(
+            centered_embeddings,
+            k=effective_k,
+            smooth=True,
+            block_durations=block_durations,
+        )
         depth_scores = compute_depth_scores(similarities)
+        d_min = NEURAL_MIN_DEPTH if embedding_backend == "neural" else TFIDF_MIN_DEPTH
         depth_boundaries = select_boundaries_by_depth(
             blocks,
             depth_scores,
             sigma_factor=sigma_factor,
+            min_depth=d_min,
+        )
+        spike_boundaries = detect_adjacent_transition_spikes(
+            blocks,
+            centered_embeddings,
+            embedding_backend=embedding_backend,
         )
         all_boundaries.update(depth_boundaries)
+        all_boundaries.update(spike_boundaries)
 
     return build_topics_from_boundaries(
         blocks,
         all_boundaries,
         chapter_titles=chapter_titles,
         min_topic_duration=min_topic_duration,
+        block_embeddings=centered_embeddings,
+        embedding_backend=embedding_backend,
     )
 
 

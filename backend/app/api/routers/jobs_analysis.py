@@ -33,7 +33,13 @@ router = APIRouter(prefix="/jobs", tags=["jobs-analysis"])
 async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
     """Run Stage 3 discourse-aware semantic blocks + contextual TextTiling topic segmentation."""
     container = get_container()
+    lmstudio = getattr(container, "lmstudio", None)
     try:
+        if lmstudio is not None and lmstudio.cli_enabled():
+            async with lmstudio.pipeline_session(job_id=job_id, task_log="topics"):
+                blocks = build_semantic_blocks(job_id, container=container)
+                await build_topic_segments(job_id, container=container)
+                return blocks
         blocks = build_semantic_blocks(job_id, container=container)
         await build_topic_segments(job_id, container=container)
         return blocks
@@ -45,7 +51,11 @@ async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
 async def analyze_job_cuts(job_id: str) -> Any:
     """Auto-prepare blocks/topics if missing, run 3-phase narrative arc mining, and save `cuts.suggested.json`."""
     container = get_container()
+    lmstudio = getattr(container, "lmstudio", None)
     try:
+        if lmstudio is not None and lmstudio.cli_enabled():
+            async with lmstudio.pipeline_session(job_id=job_id, task_log="analysis"):
+                return await analyze_job(job_id, container=container)
         return await analyze_job(job_id, container=container)
     except LocalLLMUnavailableError as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.to_dict())

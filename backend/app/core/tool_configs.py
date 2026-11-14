@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from app.core.config import SYSTEM_PROMPT_TEMPLATE, config
+from app.core.config import PREVIOUS_DEFAULT_SYSTEM_PROMPT_V3, SYSTEM_PROMPT_TEMPLATE, config
 from app.core.paths import custom_configs_file_path, default_configs_file_path
 from app.infrastructure.storage.atomic_store import atomic_write_json, read_json
 
@@ -127,6 +127,7 @@ def default_tool_configs() -> dict[str, Any]:
             "lmstudio_base_url": config.LMSTUDIO_BASE_URL,
             "ollama_base_url": config.OLLAMA_BASE_URL,
             "embedding_model": config.EMBEDDING_MODEL,
+            "context_length": None,
             "target_cut_duration_seconds": config.TARGET_CUT_DURATION_SECONDS,
             "max_suggested_cuts": config.MAX_SUGGESTED_CUTS,
             "enable_boundary_lookaround": config.ENABLE_BOUNDARY_LOOKAROUND,
@@ -277,12 +278,17 @@ def normalize_llm_config(raw: dict[str, Any] | None) -> dict[str, Any]:
         str(merged.get("embedding_model") or config.EMBEDDING_MODEL).strip() or config.EMBEDDING_MODEL
     )
     prompt = str(merged.get("system_prompt") or SYSTEM_PROMPT_TEMPLATE)
+    if not prompt.strip() or prompt.strip() == PREVIOUS_DEFAULT_SYSTEM_PROMPT_V3.strip():
+        prompt = SYSTEM_PROMPT_TEMPLATE
     provider = merged.get("provider")
     if provider not in ("auto", "lmstudio", "ollama"):
         provider = "auto"
 
     lmstudio_url = str(merged.get("lmstudio_base_url") or config.LMSTUDIO_BASE_URL).strip() or config.LMSTUDIO_BASE_URL
     ollama_url = str(merged.get("ollama_base_url") or config.OLLAMA_BASE_URL).strip() or config.OLLAMA_BASE_URL
+
+    ctx_len_raw = _to_number_or_none(merged.get("context_length"))
+    context_length = int(ctx_len_raw) if (ctx_len_raw is not None and int(ctx_len_raw) > 0) else None
 
     target_dur = _to_number_or_none(merged.get("target_cut_duration_seconds"))
     if target_dur is None or target_dur <= 0:
@@ -316,6 +322,7 @@ def normalize_llm_config(raw: dict[str, Any] | None) -> dict[str, Any]:
         "lmstudio_base_url": lmstudio_url,
         "ollama_base_url": ollama_url,
         "embedding_model": embedding_model,
+        "context_length": context_length,
         "target_cut_duration_seconds": target_dur,
         "max_suggested_cuts": int(max_cuts),
         "enable_boundary_lookaround": enable_lookaround,

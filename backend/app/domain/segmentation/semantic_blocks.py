@@ -12,9 +12,10 @@ while enforcing:
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from typing import Any, Sequence
 
 from app.application.runtime_service import ServiceContainer, get_container
+from app.infrastructure.audio.acoustic_dsp import compute_block_acoustic_signals
 from app.models.domain import JobStatus, Segment, SemanticBlock, WordTiming
 
 TARGET_MIN_SECONDS: float = 5.0
@@ -122,11 +123,165 @@ TOPIC_OPENER_MARKERS_PT_EN: tuple[str, ...] = (
     "the big question is",
 )
 
+# News / list / bulletin transition phrases (only treated as topic openers after terminal sentence punctuation)
+NEWS_TRANSITION_OPENERS_PT_EN: tuple[str, ...] = (
+    "agora,",
+    "e agora",
+    "já em",
+    "ja em",
+    "já no",
+    "ja no",
+    "já na",
+    "ja na",
+    "enquanto isso",
+    "passando para",
+    "outro destaque",
+    "outra notícia",
+    "outra noticia",
+    "próxima notícia",
+    "proxima noticia",
+    "próximo assunto",
+    "proximo assunto",
+    "por outro lado",
+    "next up",
+    "moving on",
+    "meanwhile",
+    "in other news",
+    "turning to",
+    "on the other hand",
+)
+
+EXPLICIT_AD_CTA_PATTERNS: tuple[str, ...] = (
+    "cupom",
+    "link na descrição",
+    "link na descricao",
+    "link in description",
+    "link in the description",
+    "sponsor",
+    "patrocin",
+    "use o código",
+    "use o codigo",
+    "use code",
+    "promo code",
+    "código promocional",
+    "codigo promocional",
+    "apoiador",
+    "oferecimento",
+    "parceria paga",
+    "paid partnership",
+)
+
+SOFT_AD_CUE_PATTERNS: tuple[str, ...] = (
+    "desconto",
+    "acesse",
+    "discount",
+    "promoção",
+    "promocao",
+    "oferta",
+    "clique no link",
+    "click the link",
+    "check out",
+    "sign up",
+    "cadastre-se",
+    "garanta",
+)
+
+ANALOGY_MARKERS_PT_EN: tuple[str, ...] = (
+    "por exemplo",
+    "imagina que",
+    "imagine que",
+    "digamos que",
+    "suponha que",
+    "for example",
+    "imagine if",
+    "let's say",
+    "suppose that",
+)
+
+_SIGNAL_TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ0-9]{3,}")
+_WORD_RE = re.compile(r"\b[\wÀ-ÿ]+\b")
+_PROPER_NOUN_RE = re.compile(r"\b[A-ZÀ-Ý][a-zA-ZÀ-ÿ0-9]{2,}\b")
+
+_SIGNAL_STOPWORDS_PT_EN: frozenset[str] = frozenset(
+    {
+        "que",
+        "para",
+        "com",
+        "uma",
+        "por",
+        "mais",
+        "como",
+        "mas",
+        "foi",
+        "são",
+        "sao",
+        "tem",
+        "seu",
+        "sua",
+        "dos",
+        "das",
+        "nos",
+        "nas",
+        "ele",
+        "ela",
+        "isso",
+        "esse",
+        "essa",
+        "aqui",
+        "muito",
+        "agora",
+        "então",
+        "entao",
+        "também",
+        "tambem",
+        "sobre",
+        "quando",
+        "porque",
+        "the",
+        "and",
+        "for",
+        "that",
+        "this",
+        "with",
+        "you",
+        "are",
+        "was",
+        "from",
+        "have",
+        "not",
+        "but",
+        "what",
+        "all",
+        "were",
+        "when",
+        "can",
+        "there",
+        "your",
+        "which",
+        "their",
+        "will",
+        "about",
+    }
+)
+
 _LEADING_PUNCT_RE = re.compile(r"^[\s\"'“”‘’«»\-–—….,;:()\[\]]+")
 
 
 def _strip_leading_punctuation(text: str) -> str:
     return _LEADING_PUNCT_RE.sub("", (text or "").strip())
+
+
+def _matches_phrase_prefix(cleaned_lower: str, phrase: str) -> bool:
+    if not cleaned_lower or not phrase:
+        return False
+    if phrase.endswith(","):
+        return cleaned_lower.startswith(phrase)
+    if cleaned_lower == phrase:
+        return True
+    if cleaned_lower.startswith(phrase):
+        rest = cleaned_lower[len(phrase) :]
+        return bool(rest and rest[0] in (" ", ",", ";", ":", ".", "!", "?", "—", "-"))
+    return False
 
 
 def ends_sentence(text: str) -> bool:
@@ -135,6 +290,14 @@ def ends_sentence(text: str) -> bool:
     if not trimmed:
         return False
     return trimmed.endswith(SENTENCE_BOUNDARIES)
+
+
+def is_news_or_list_transition_text(text: str) -> bool:
+    """Return True if `text` starts with a news/bulletin/list transition opener."""
+    cleaned = _strip_leading_punctuation(text).lower()
+    if not cleaned:
+        return False
+    return any(_matches_phrase_prefix(cleaned, marker) for marker in NEWS_TRANSITION_OPENERS_PT_EN)
 
 
 def starts_with_blocking_connective(text: str) -> bool:
@@ -156,12 +319,8 @@ def starts_with_blocking_connective(text: str) -> bool:
 
     low = cleaned.lower()
     for conn in BLOCKING_OPENING_CONNECTIVES_PT_EN:
-        if low == conn:
+        if _matches_phrase_prefix(low, conn):
             return True
-        if low.startswith(conn):
-            rest = low[len(conn) :]
-            if not rest or rest[0] in (" ", ",", ";", ":", ".", "!", "?", "—", "-"):
-                return True
 
     return False
 
@@ -175,6 +334,178 @@ def is_topic_opener_text(text: str) -> bool:
         if cleaned.startswith(marker):
             return True
     return False
+
+
+def has_analogy_marker(text: str) -> bool:
+    """Return True if `text` contains a didactic analogy marker (PT/EN)."""
+    low = (text or "").lower()
+    return any(marker in low for marker in ANALOGY_MARKERS_PT_EN)
+
+
+def _extract_signal_tokens(text: str) -> set[str]:
+    """Extract meaningful content tokens + proper-noun tags for lexical overlap tracking."""
+    tokens = {
+        tok
+        for tok in _SIGNAL_TOKEN_RE.findall((text or "").lower())
+        if tok not in _SIGNAL_STOPWORDS_PT_EN
+    }
+    proper = {f"pn:{m.lower()}" for m in _PROPER_NOUN_RE.findall(text or "")}
+    return tokens | proper
+
+
+def compute_token_jaccard(text_a: str, text_b: str) -> float:
+    """Compute Jaccard similarity over content/proper-noun tokens between two texts."""
+    a = _extract_signal_tokens(text_a)
+    b = _extract_signal_tokens(text_b)
+    if not a or not b:
+        return 0.0
+    union = a | b
+    return float(len(a & b)) / float(len(union)) if union else 0.0
+
+
+def _compute_block_wpm(
+    block: SemanticBlock,
+    words: Sequence[WordTiming] | None = None,
+) -> float:
+    duration_sec = max(0.5, float(block.end) - float(block.start))
+    word_count = 0
+    if words:
+        seg_ids = set(block.segment_ids or [])
+        matched = [
+            w
+            for w in words
+            if (w.segment_id and w.segment_id in seg_ids)
+            or (w.start >= float(block.start) - 0.15 and w.end <= float(block.end) + 0.15)
+        ]
+        word_count = sum(1 for w in matched if _WORD_RE.search(w.word or ""))
+    if word_count <= 0:
+        word_count = len(_WORD_RE.findall(block.text or ""))
+    if word_count <= 0:
+        return 0.0
+    return round((float(word_count) / duration_sec) * 60.0, 2)
+
+
+def enrich_blocks_with_signals(
+    blocks: Sequence[SemanticBlock],
+    *,
+    words: Sequence[WordTiming] | None = None,
+    acoustic_signals: dict[str, dict[str, float]] | None = None,
+) -> list[SemanticBlock]:
+    """Populate 0-GPU lexical, WPM, overlap, AdCTA, and optional acoustic signals on SemanticBlocks."""
+    if not blocks:
+        return []
+
+    block_list = list(blocks)
+    wpms: list[float] = []
+    jaccards: list[float] = []
+    p10_values: list[float | None] = []
+
+    for idx, blk in enumerate(block_list):
+        tags: list[str] = []
+
+        def _add_tag(tag: str) -> None:
+            if tag not in tags:
+                tags.append(tag)
+
+        # 1. WPM & WPM_SHIFT (>= 35% change vs preceding rolling mean)
+        wpm_val = _compute_block_wpm(blk, words=words)
+        blk.wpm = wpm_val
+        if idx > 0 and wpm_val > 0.0:
+            prev_valid = [w for w in wpms[-4:] if w > 0.0]
+            if prev_valid:
+                rolling_mean = sum(prev_valid) / float(len(prev_valid))
+                if rolling_mean > 0.0 and abs(wpm_val - rolling_mean) / rolling_mean >= 0.35:
+                    _add_tag("WPM_SHIFT")
+        wpms.append(wpm_val)
+
+        # 2. Acoustic P10 noise floor & prosody shift (when audio signals provided)
+        curr_p10: float | None = None
+        if acoustic_signals and blk.block_id in acoustic_signals:
+            sig_map = acoustic_signals[blk.block_id]
+            if "noise_floor_p10" in sig_map:
+                curr_p10 = float(sig_map["noise_floor_p10"])
+                blk.noise_floor_p10 = curr_p10
+            prosody_score = float(sig_map.get("prosody_shift_score") or 0.0)
+            if idx > 0 and prosody_score >= 0.28:
+                _add_tag("PROSODY_SHIFT")
+            prev_p10 = p10_values[-1] if p10_values else None
+            if (
+                idx > 0
+                and curr_p10 is not None
+                and prev_p10 is not None
+                and min(curr_p10, prev_p10) > 1e-6
+            ):
+                ratio = max(curr_p10, prev_p10) / min(curr_p10, prev_p10)
+                if ratio >= 1.8:
+                    _add_tag("NOISE_FLOOR_SHIFT")
+        p10_values.append(curr_p10)
+
+        # 3. Adjacent lexical/proper-noun overlap & news/topic shift
+        if idx > 0:
+            prev_blk = block_list[idx - 1]
+            prev_ended = ends_sentence(prev_blk.text)
+            prev_tokens = _extract_signal_tokens(prev_blk.text)
+            curr_tokens = _extract_signal_tokens(blk.text)
+            jaccard = compute_token_jaccard(prev_blk.text, blk.text)
+            prev_jaccards = [j for j in jaccards[-3:] if j > 0.0]
+            rolling_jaccard = sum(prev_jaccards) / float(len(prev_jaccards)) if prev_jaccards else 0.0
+            jaccards.append(jaccard)
+
+            sharp_drop = (
+                len(prev_tokens) >= 2
+                and len(curr_tokens) >= 2
+                and (
+                    jaccard <= 0.08
+                    or (rolling_jaccard > 0.15 and jaccard < rolling_jaccard * 0.4 and jaccard <= 0.12)
+                )
+            )
+            if prev_ended and sharp_drop:
+                _add_tag("LOW_OVERLAP")
+                if (
+                    jaccard <= 0.05
+                    or is_topic_opener_text(blk.text)
+                    or is_news_or_list_transition_text(blk.text)
+                    or bool(blk.is_topic_opener)
+                ) and not starts_with_blocking_connective(blk.text):
+                    _add_tag("TOPIC_SHIFT")
+
+            if prev_ended and is_news_or_list_transition_text(blk.text):
+                _add_tag("NEWS_TRANSITION")
+                _add_tag("TOPIC_SHIFT")
+
+        # 4. Lexical Ad/Sponsor CTA vs Analogy + Multi-Signal Agreement
+        low_text = (blk.text or "").lower()
+        is_analogy = has_analogy_marker(low_text)
+        explicit_hits = [p for p in EXPLICIT_AD_CTA_PATTERNS if p in low_text]
+        soft_hits = [p for p in SOFT_AD_CUE_PATTERNS if p in low_text]
+
+        hard_sponsor_markers = (
+            "sponsor",
+            "patrocin",
+            "apoiador",
+            "oferecimento",
+            "parceria paga",
+            "paid partnership",
+            "link na descrição",
+            "link na descricao",
+            "link in description",
+            "link in the description",
+        )
+        has_hard_sponsor = any(m in low_text for m in hard_sponsor_markers)
+        corroborating_signals = [
+            t for t in tags if t in ("WPM_SHIFT", "PROSODY_SHIFT", "LOW_OVERLAP", "NOISE_FLOOR_SHIFT")
+        ]
+
+        if has_hard_sponsor:
+            _add_tag("AD_CUE")
+        elif explicit_hits and not is_analogy:
+            _add_tag("AD_CUE")
+        elif soft_hits and not is_analogy and (corroborating_signals or len(soft_hits) >= 2):
+            _add_tag("AD_CUE")
+
+        blk.signal_tags = tags
+
+    return block_list
 
 
 def align_block_bounds_with_words(
@@ -268,8 +599,9 @@ def group_segments_into_semantic_blocks(
         speaker_changed = bool(
             seg.speaker and prev.speaker and seg.speaker.strip() != prev.speaker.strip()
         )
-        has_topic_marker = is_topic_opener_text(seg.text)
-        blocked_opening = starts_with_blocking_connective(seg.text)
+        has_news_transition = prev_ended_sentence and is_news_or_list_transition_text(seg.text)
+        has_topic_marker = is_topic_opener_text(seg.text) or has_news_transition
+        blocked_opening = False if has_news_transition else starts_with_blocking_connective(seg.text)
 
         should_close = False
         next_is_opener = False
@@ -281,6 +613,9 @@ def group_segments_into_semantic_blocks(
                 next_is_opener = False
         else:
             if speaker_changed and current_duration >= 1.5:
+                should_close = True
+                next_is_opener = True
+            elif has_news_transition and current_duration >= 1.5:
                 should_close = True
                 next_is_opener = True
             elif has_topic_marker and current_duration >= 2.0:
@@ -316,7 +651,7 @@ def group_segments_into_semantic_blocks(
             current_segments.append(seg)
 
     _finalize_current()
-    return blocks
+    return enrich_blocks_with_signals(blocks, words=words)
 
 
 def build_semantic_blocks(
@@ -346,6 +681,20 @@ def build_semantic_blocks(
 
         words = c.jobs.load_transcription_words(job_id)
         blocks = group_segments_into_semantic_blocks(segments, words=words)
+
+        try:
+            audio_wav_path = c.jobs.audio_16k_path(job_id)
+            if audio_wav_path.exists() and audio_wav_path.stat().st_size > 44:
+                acoustic_signals = compute_block_acoustic_signals(
+                    blocks, audio_wav_path=audio_wav_path
+                )
+                if acoustic_signals:
+                    blocks = enrich_blocks_with_signals(
+                        blocks, words=words, acoustic_signals=acoustic_signals
+                    )
+        except Exception:
+            pass
+
         c.jobs.save_semantic_blocks(job_id, blocks)
         c.jobs.update_job_status(job_id, JobStatus.BUILDING_TOPICS)
         c.runtime.log_stage_end(

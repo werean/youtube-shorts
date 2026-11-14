@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import wave
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 from scipy.fft import dct
@@ -584,3 +584,123 @@ class AcousticSpeakerDiarizer:
             sample_rate=sample_rate,
             chunk_duration_sec=self.chunk_duration_sec,
         )
+
+
+def compute_p10_noise_floor(rms_10ms_slice: np.ndarray) -> float:
+    """Compute the 10th-percentile background noise floor over a 10ms RMS energy slice."""
+    if rms_10ms_slice is None:
+        return 0.0
+    arr = np.asarray(rms_10ms_slice, dtype=np.float32).ravel()
+    if arr.size == 0:
+        return 0.0
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return 0.0
+    return round(float(np.percentile(finite, 10.0)), 6)
+
+
+def compute_block_acoustic_signals(
+    blocks: Sequence[Any],
+    *,
+    rms_10ms: np.ndarray | None = None,
+    audio_wav_path: str | Path | None = None,
+    samples: np.ndarray | None = None,
+    sample_rate: int = SAMPLE_RATE_16K,
+    window_ms: float = DEFAULT_RMS_WINDOW_MS,
+    chunk_duration_sec: float = DEFAULT_CHUNK_DURATION_SEC,
+) -> dict[str, dict[str, float]]:
+    """Compute per-block acoustic signals (`noise_floor_p10`, `rms_mean`, `prosody_shift_score`).
+
+    Reads WAV files strictly in bounded 5-minute chunks and returns `{}` gracefully when no audio is available.
+    """
+    if not blocks:
+        return {}
+
+    mono_all: np.ndarray | None = _to_float32_mono(samples) if samples is not None else None
+    wav_exists = audio_wav_path is not None and Path(audio_wav_path).exists()
+
+    rms_arr: np.ndarray | None = (
+        np.asarray(rms_10ms, dtype=np.float32).ravel() if rms_10ms is not None else None
+    )
+    sr = int(sample_rate) if sample_rate > 0 else SAMPLE_RATE_16K
+
+    if rms_arr is None:
+        if mono_all is not None and mono_all.size > 0:
+            rms_arr = compute_rms_energy_10ms(mono_all, sample_rate=sr, window_ms=window_ms)
+        elif wav_exists and audio_wav_path is not None:
+            rms_arr, sr = compute_rms_energy_from_wav(
+                audio_wav_path,
+                chunk_duration_sec=chunk_duration_sec,
+                window_ms=window_ms,
+            )
+        else:
+            return {}
+
+    if rms_arr is None or rms_arr.size == 0:
+        return {}
+
+    n_blocks = len(blocks)
+    features: list[np.ndarray] = [np.zeros(16, dtype=np.float32) for _ in range(n_blocks)]
+    has_audio_samples = False
+
+    if mono_all is not None and mono_all.size > 0:
+        has_audio_samples = True
+        for idx, blk in enumerate(blocks):
+            b_start = max(0.0, float(blk.start))
+            b_end = max(b_start, float(blk.end))
+            s_lo = max(0, min(mono_all.size, int(math.floor(b_start * sr))))
+            s_hi = max(s_lo, min(mono_all.size, int(math.ceil(min(b_end, b_start + 5.0) * sr))))
+            if s_hi > s_lo:
+                features[idx] = extract_prosodic_feature_vector(
+                    mono_all[s_lo:s_hi], sample_rate=sr
+                )
+    elif wav_exists and audio_wav_path is not None:
+        has_audio_samples = True
+        max_end = max(float(blk.end) for blk in blocks)
+        chunk_start = 0.0
+        while chunk_start <= max_end + 1e-3:
+            chunk_end = chunk_start + chunk_duration_sec
+            chunk_samples, chunk_sr = read_wav_chunk_float32(
+                audio_wav_path, chunk_start, chunk_end + 5.0
+            )
+            if chunk_samples.size > 0:
+                for idx, blk in enumerate(blocks):
+                    b_start = max(0.0, float(blk.start))
+                    b_end = max(b_start, float(blk.end))
+                    if b_start >= chunk_start and b_start < chunk_end:
+                        s_lo = max(0, int(math.floor((b_start - chunk_start) * chunk_sr)))
+                        s_hi = min(
+                            chunk_samples.size,
+                            int(math.ceil((min(b_end, b_start + 5.0) - chunk_start) * chunk_sr)),
+                        )
+                        if s_hi > s_lo:
+                            features[idx] = extract_prosodic_feature_vector(
+                                chunk_samples[s_lo:s_hi], sample_rate=chunk_sr
+                            )
+            chunk_start = chunk_end
+
+    step_sec = max(1e-4, float(window_ms) / 1000.0)
+    signals: dict[str, dict[str, float]] = {}
+
+    for idx, blk in enumerate(blocks):
+        b_start = max(0.0, float(blk.start))
+        b_end = max(b_start, float(blk.end))
+        lo = max(0, min(rms_arr.size - 1, int(math.floor(b_start / step_sec))))
+        hi = max(lo + 1, min(rms_arr.size, int(math.ceil(b_end / step_sec))))
+        rms_slice = rms_arr[lo:hi]
+        noise_p10 = compute_p10_noise_floor(rms_slice)
+        finite_slice = rms_slice[np.isfinite(rms_slice)]
+        rms_mean = round(float(np.mean(finite_slice)), 6) if finite_slice.size > 0 else 0.0
+
+        prosody_shift = 0.0
+        if idx > 0 and has_audio_samples:
+            prosody_shift = round(float(_acoustic_distance(features[idx - 1], features[idx])), 4)
+
+        signals[str(blk.block_id)] = {
+            "noise_floor_p10": noise_p10,
+            "rms_mean": rms_mean,
+            "prosody_shift_score": prosody_shift,
+        }
+
+    return signals
+

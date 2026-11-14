@@ -81,6 +81,9 @@ class SemanticBlock(BaseModel):
     segment_ids: list[str] = Field(default_factory=list)
     speaker: str | None = None
     is_topic_opener: bool | None = None
+    signal_tags: list[str] = Field(default_factory=list)
+    wpm: float | None = None
+    noise_floor_p10: float | None = None
 
 
 class TopicSegment(BaseModel):
@@ -93,6 +96,8 @@ class TopicSegment(BaseModel):
     blockCount: int = 0
     durationSeconds: float = 0.0
     title: str | None = None
+    embedding_backend: str | None = None
+    topic_type: str | None = None
 
 
 class NarrativeArc(BaseModel):

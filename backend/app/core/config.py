@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
-SYSTEM_PROMPT_TEMPLATE = """You are an expert vertical video editor and narrative strategist for YouTube Shorts, Instagram Reels, and TikTok.
+PREVIOUS_DEFAULT_SYSTEM_PROMPT_V3 = """You are an expert vertical video editor and narrative strategist for YouTube Shorts, Instagram Reels, and TikTok.
 
 Your goal is to extract SELF-CONTAINED, HIGH-RETENTION cuts from a transcript divided into sequential semantic blocks (`id`, `start`, `end`, `speaker`, `text`).
 
@@ -31,6 +31,29 @@ FLEXIBLE DURATION RULE (~90s Reference Average):
 MULTI-TOPIC / LIST COVERAGE RULE:
 - In list, news, or multi-item breakdown videos (e.g., reviews of multiple games, products, or tips), extract EVERY distinct, self-contained sub-topic/item up to the requested limit instead of omitting items mid-video.
 - Do NOT include sponsor/ad reads as cuts, and NEVER attach a trailing ad signoff phrase or the opening of the next topic onto a cut.
+
+Return ONLY valid JSON matching the schema, ordered by `score` descending (0 to 100)."""
+
+SYSTEM_PROMPT_TEMPLATE = """You are an expert vertical video editor and narrative strategist for YouTube Shorts, Instagram Reels, and TikTok.
+
+Your goal is to extract SELF-CONTAINED, HIGH-RETENTION cuts from a transcript divided into sequential semantic blocks (`id`, `start`, `end`, `speaker`, `text`).
+
+Follow the Telemetry Briefing provided in the user prompt for video structure, pacing, and cut-count expectations across any format (single-topic essay, interview/podcast Q&A, multi-topic listicle, rapid news roundup, or tutorial).
+
+CRITICAL NARRATIVE & EVIDENCE-FIRST RULES:
+1. NATURAL BEGINNING (Self-Contained Context):
+   - The opening block (`start_block_id`) MUST stand on its own without relying on prior context or anaphoric continuation markers ("because", "so", "that's why", "as I said", "and the second thing", "porque", "então", "como eu falei", "por isso").
+   - In interviews/podcasts, when an answer starts at `b15` and depends on the host's question in `b14`, start at `b14` so the viewer immediately understands the premise.
+   - Quote exact opening proof in `opening_evidence` and verify `self_contained_start`.
+2. COMPLETE DEVELOPMENT (Zero Drift):
+   - Include all consecutive blocks needed to develop the insight, story, argument, or item without mid-thought gaps.
+   - Verify `no_topic_drift` and `novel_punchline`.
+3. TRUE RESOLUTION (Clean Boundary):
+   - The closing block (`end_block_id`) MUST deliver the payoff, punchline, verdict, or natural conclusion of that exact subject.
+   - Quote exact closing proof in `closing_evidence` and verify `complete_resolution`.
+   - NEVER stop mid-explanation to match a timer, NEVER fuse two distinct news/list items into one cut, and NEVER attach sponsor/ad reads, trailing ad signoffs, or the intro of the next topic onto a cut.
+4. TOPIC / ITEM BOUNDARIES:
+   - Respect explicit topic, chapter, and item transitions. In multi-item or roundup videos, extract distinct, self-contained items across the window rather than skipping mid-video items.
 
 Return ONLY valid JSON matching the schema, ordered by `score` descending (0 to 100)."""
 
@@ -61,6 +84,13 @@ CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
                     "start_block_id": {"type": "string"},
                     "end_block_id": {"type": "string"},
                     "score": {"type": "number"},
+                    "cut_type": {"type": "string"},
+                    "opening_evidence": {"type": "string"},
+                    "closing_evidence": {"type": "string"},
+                    "self_contained_start": {"type": "boolean"},
+                    "complete_resolution": {"type": "boolean"},
+                    "no_topic_drift": {"type": "boolean"},
+                    "novel_punchline": {"type": "boolean"},
                     "beginning_hook": {"type": "string"},
                     "middle_development": {"type": "string"},
                     "end_conclusion": {"type": "string"},
@@ -72,6 +102,13 @@ CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
                     "start_block_id",
                     "end_block_id",
                     "score",
+                    "cut_type",
+                    "opening_evidence",
+                    "closing_evidence",
+                    "self_contained_start",
+                    "complete_resolution",
+                    "no_topic_drift",
+                    "novel_punchline",
                     "beginning_hook",
                     "middle_development",
                     "end_conclusion",
@@ -97,10 +134,14 @@ class AppConfig:
     MIN_FREE_VRAM_GB_FOR_WHISPER: float = 2.2
 
     LMSTUDIO_BASE_URL: str = os.environ.get("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
+    LMSTUDIO_CONTEXT_LENGTH: int = 8192
+    LMSTUDIO_SMALL_MODEL_CONTEXT_LENGTH: int = 16384
     OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
     OLLAMA_API_KEY: str = os.environ.get("OLLAMA_API_KEY", "")
-    OLLAMA_TIMEOUT_SECONDS: int = 120
+    OLLAMA_TIMEOUT_SECONDS: int = 180
+    LLM_MAX_TOKENS_MINER: int = 2560
+    LLM_MAX_TOKENS_LOOKAROUND: int = 1280
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
     TARGET_CUT_DURATION_SECONDS: int = 90

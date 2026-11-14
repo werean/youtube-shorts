@@ -17,8 +17,8 @@ from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
-from app.application.runtime_service import CancelToken
-from app.core.config import BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE
+from app.application.runtime_service import CancelToken, OperationCancelledError
+from app.core.config import BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE, config
 from app.domain.segmentation.semantic_blocks import (
     ends_sentence,
     is_topic_opener_text,
@@ -33,6 +33,8 @@ from app.models.domain import SemanticBlock
 TOP_K_PREFILTER: int = 18
 LOOKAROUND_NEIGHBOR_COUNT: int = 3
 DEFAULT_IOU_THRESHOLD: float = 0.35
+LOOKAROUND_BATCH_MAX_CANDIDATES: int = 4
+LOOKAROUND_BATCH_MAX_CHARS: int = 7500
 
 ANAPHORIC_OPENING_MARKERS_PT_EN: tuple[str, ...] = (
     "isso acontece",
@@ -114,6 +116,56 @@ class CandidateCut:
     start: float = 0.0
     end: float = 0.0
     is_complete_story: bool = True
+    cut_type: str = ""
+    opening_evidence: str = ""
+    closing_evidence: str = ""
+    self_contained_start: bool | None = None
+    complete_resolution: bool | None = None
+    no_topic_drift: bool | None = None
+    novel_punchline: bool | None = None
+    topic_id: str | None = None
+    predicates: dict[str, bool] = field(default_factory=dict)
+
+
+def _has_ad_cue(block: SemanticBlock) -> bool:
+    tags = getattr(block, "signal_tags", None) or []
+    return any(str(t).strip().upper() == "AD_CUE" for t in tags)
+
+
+def _clone_candidate_with_span(
+    cand: CandidateCut,
+    start_block_id: str,
+    end_block_id: str,
+    block_ids: list[str],
+    start: float,
+    end: float,
+) -> CandidateCut:
+    return CandidateCut(
+        title=cand.title,
+        start_block_id=start_block_id,
+        end_block_id=end_block_id,
+        score=float(cand.score),
+        beginning_hook=cand.beginning_hook,
+        middle_development=cand.middle_development,
+        climax=getattr(cand, "climax", ""),
+        end_conclusion=cand.end_conclusion,
+        hook_reason=cand.hook_reason,
+        content_reason=cand.content_reason,
+        reasoning=getattr(cand, "reasoning", ""),
+        block_ids=block_ids,
+        start=start,
+        end=end,
+        is_complete_story=cand.is_complete_story,
+        cut_type=getattr(cand, "cut_type", ""),
+        opening_evidence=getattr(cand, "opening_evidence", ""),
+        closing_evidence=getattr(cand, "closing_evidence", ""),
+        self_contained_start=getattr(cand, "self_contained_start", None),
+        complete_resolution=getattr(cand, "complete_resolution", None),
+        no_topic_drift=getattr(cand, "no_topic_drift", None),
+        novel_punchline=getattr(cand, "novel_punchline", None),
+        topic_id=getattr(cand, "topic_id", None),
+        predicates=dict(getattr(cand, "predicates", None) or {}),
+    )
 
 
 def expand_block_range(
@@ -169,24 +221,16 @@ def deduplicate_candidates_by_iou(
         )
         if not span or e_time <= s_time:
             continue
-        copy_cand = CandidateCut(
-            title=cand.title,
-            start_block_id=span[0].block_id,
-            end_block_id=span[-1].block_id,
-            score=float(cand.score),
-            beginning_hook=cand.beginning_hook,
-            middle_development=cand.middle_development,
-            climax=getattr(cand, "climax", ""),
-            end_conclusion=cand.end_conclusion,
-            hook_reason=cand.hook_reason,
-            content_reason=cand.content_reason,
-            reasoning=getattr(cand, "reasoning", ""),
-            block_ids=ids,
-            start=s_time,
-            end=e_time,
-            is_complete_story=cand.is_complete_story,
+        hydrated.append(
+            _clone_candidate_with_span(
+                cand,
+                span[0].block_id,
+                span[-1].block_id,
+                ids,
+                s_time,
+                e_time,
+            )
         )
-        hydrated.append(copy_cand)
 
     # Sort by score descending, then earlier start time
     hydrated.sort(key=lambda c: (-float(c.score), float(c.start)))
@@ -282,13 +326,17 @@ def apply_deterministic_lookaround_single(
         break
 
     # 2. Look-Ahead [+1, +3]: extend if closing block lacks terminal punctuation or neighbor has conclusion marker
-    # First, if closing block doesn't end a sentence, advance until sentence ends (within +3)
+    # First, if closing block doesn't end a sentence, advance until sentence ends (within +3, avoiding [AD_CUE])
     while e_idx < max_e and not ends_sentence(blocks[e_idx].text):
+        if _has_ad_cue(blocks[e_idx + 1]):
+            break
         e_idx += 1
 
     # Second, check if any block in [e_idx + 1 .. max_e] has an explicit conclusion marker for the same thought
     for fwd_idx in range(e_idx + 1, max_e + 1):
         fwd_blk = blocks[fwd_idx]
+        if _has_ad_cue(fwd_blk):
+            break
         # Stop if a completely new topic explicitly opens
         if is_topic_opener_text(fwd_blk.text) and not _has_conclusion_marker(fwd_blk.text):
             break
@@ -296,27 +344,20 @@ def apply_deterministic_lookaround_single(
             e_idx = fwd_idx
             # If the conclusion block itself doesn't end with punctuation, include its completion within max_e
             while e_idx < max_e and not ends_sentence(blocks[e_idx].text):
+                if _has_ad_cue(blocks[e_idx + 1]):
+                    break
                 e_idx += 1
 
     span, ids, s_time, e_time = expand_block_range(
         blocks, blocks[s_idx].block_id, blocks[e_idx].block_id
     )
-    return CandidateCut(
-        title=candidate.title,
-        start_block_id=blocks[s_idx].block_id,
-        end_block_id=blocks[e_idx].block_id,
-        score=candidate.score,
-        beginning_hook=candidate.beginning_hook,
-        middle_development=candidate.middle_development,
-        climax=getattr(candidate, "climax", ""),
-        end_conclusion=candidate.end_conclusion,
-        hook_reason=candidate.hook_reason,
-        content_reason=candidate.content_reason,
-        reasoning=getattr(candidate, "reasoning", ""),
-        block_ids=ids,
-        start=s_time,
-        end=e_time,
-        is_complete_story=candidate.is_complete_story,
+    return _clone_candidate_with_span(
+        candidate,
+        blocks[s_idx].block_id,
+        blocks[e_idx].block_id,
+        ids,
+        s_time,
+        e_time,
     )
 
 
@@ -367,6 +408,57 @@ def build_lookaround_user_payload(
     return {"candidates": items}
 
 
+def _build_lookaround_micro_batches(
+    candidates: Sequence[CandidateCut],
+    blocks: Sequence[SemanticBlock],
+    *,
+    neighbor_k: int = LOOKAROUND_NEIGHBOR_COUNT,
+    max_candidates: int = LOOKAROUND_BATCH_MAX_CANDIDATES,
+    max_chars: int = LOOKAROUND_BATCH_MAX_CHARS,
+) -> list[tuple[list[int], dict[str, Any]]]:
+    """Partition `candidates` into micro-batches bounded by candidate count and serialized payload chars."""
+    if not candidates:
+        return []
+
+    batches: list[tuple[list[int], dict[str, Any]]] = []
+    cur_indices: list[int] = []
+
+    for idx in range(len(candidates)):
+        if not cur_indices:
+            cur_indices.append(idx)
+            continue
+
+        if len(cur_indices) >= max_candidates:
+            payload = build_lookaround_user_payload(
+                [candidates[i] for i in cur_indices], blocks, neighbor_k=neighbor_k
+            )
+            batches.append((cur_indices, payload))
+            cur_indices = [idx]
+            continue
+
+        trial_indices = cur_indices + [idx]
+        trial_payload = build_lookaround_user_payload(
+            [candidates[i] for i in trial_indices], blocks, neighbor_k=neighbor_k
+        )
+        trial_chars = len(json.dumps(trial_payload, ensure_ascii=False))
+        if trial_chars > max_chars:
+            payload = build_lookaround_user_payload(
+                [candidates[i] for i in cur_indices], blocks, neighbor_k=neighbor_k
+            )
+            batches.append((cur_indices, payload))
+            cur_indices = [idx]
+        else:
+            cur_indices = trial_indices
+
+    if cur_indices:
+        payload = build_lookaround_user_payload(
+            [candidates[i] for i in cur_indices], blocks, neighbor_k=neighbor_k
+        )
+        batches.append((cur_indices, payload))
+
+    return batches
+
+
 async def run_phase_4b_top_k_lookaround(
     raw_candidates: Sequence[CandidateCut],
     blocks: Sequence[SemanticBlock],
@@ -406,28 +498,43 @@ async def run_phase_4b_top_k_lookaround(
         for cand in top_candidates
     ]
 
-    # Step 2b: Optional batched LLM Lookaround refinement
+    # Step 2b: Optional micro-batched LLM Lookaround refinement (fed from `det_adjusted`)
     if use_llm_lookaround and llm_adapter is not None and det_adjusted:
-        try:
-            payload = build_lookaround_user_payload(
-                top_candidates, blocks, neighbor_k=neighbor_k
-            )
-            parsed, _raw = await llm_adapter.chat_json(
-                BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE,
-                json.dumps(payload, ensure_ascii=False),
-                json_schema=BOUNDARY_LOOKAROUND_JSON_SCHEMA,
-                schema_name="boundary_lookaround",
-                acquire_gpu_slot=False,
-                cancel_token=cancel_token,
-            )
-            adjustments = parsed.get("adjustments") if isinstance(parsed, dict) else None
-            if isinstance(adjustments, list):
+        micro_batches = _build_lookaround_micro_batches(
+            det_adjusted,
+            blocks,
+            neighbor_k=neighbor_k,
+            max_candidates=LOOKAROUND_BATCH_MAX_CANDIDATES,
+            max_chars=LOOKAROUND_BATCH_MAX_CHARS,
+        )
+        for batch_indices, payload in micro_batches:
+            try:
+                parsed, _raw = await llm_adapter.chat_json(
+                    BOUNDARY_LOOKAROUND_PROMPT_TEMPLATE,
+                    json.dumps(payload, ensure_ascii=False),
+                    json_schema=BOUNDARY_LOOKAROUND_JSON_SCHEMA,
+                    schema_name="boundary_lookaround",
+                    max_tokens=config.LLM_MAX_TOKENS_LOOKAROUND,
+                    acquire_gpu_slot=False,
+                    cancel_token=cancel_token,
+                )
+                adjustments = parsed.get("adjustments") if isinstance(parsed, dict) else None
+                if not isinstance(adjustments, list):
+                    continue
+
                 for adj in adjustments:
                     if not isinstance(adj, dict):
                         continue
-                    c_idx = adj.get("candidate_index")
-                    if not isinstance(c_idx, int) or c_idx < 0 or c_idx >= len(det_adjusted):
+                    local_idx = adj.get("candidate_index")
+                    if (
+                        isinstance(local_idx, bool)
+                        or not isinstance(local_idx, int)
+                        or local_idx < 0
+                        or local_idx >= len(batch_indices)
+                    ):
                         continue
+
+                    c_idx = batch_indices[local_idx]
                     if adj.get("is_complete_story") is False:
                         det_adjusted[c_idx].is_complete_story = False
                         continue
@@ -445,14 +552,34 @@ async def run_phase_4b_top_k_lookaround(
 
                     if adj_s_id in idx_map:
                         cand_s = idx_map[adj_s_id]
-                        if min_allowed_s <= cand_s <= min(orig_e, cur_e) and not _has_anaphoric_or_dependent_opening(
-                            blocks[cand_s].text
+                        backed_up_question = (
+                            cur_s < orig_s
+                            and blocks[cur_s].text.strip().endswith("?")
+                            and cur_s + 1 < len(blocks)
+                            and _has_anaphoric_or_dependent_opening(blocks[cur_s + 1].text)
+                        )
+                        if (
+                            min_allowed_s <= cand_s <= min(orig_e, cur_e)
+                            and not (backed_up_question and cand_s > cur_s)
+                            and not _has_anaphoric_or_dependent_opening(blocks[cand_s].text)
                         ):
                             cur_s = cand_s
 
                     if adj_e_id in idx_map:
                         cand_e = idx_map[adj_e_id]
-                        if cur_s <= cand_e <= max_allowed_e:
+                        truncates_incomplete = (
+                            cand_e < cur_e
+                            and ends_sentence(blocks[cur_e].text)
+                            and not ends_sentence(blocks[cand_e].text)
+                        )
+                        extends_onto_ad = cand_e > cur_e and any(
+                            _has_ad_cue(blocks[k]) for k in range(cur_e + 1, cand_e + 1)
+                        )
+                        if (
+                            cur_s <= cand_e <= max_allowed_e
+                            and not truncates_incomplete
+                            and not extends_onto_ad
+                        ):
                             cur_e = cand_e
 
                     span, ids, s_time, e_time = expand_block_range(
@@ -464,11 +591,13 @@ async def run_phase_4b_top_k_lookaround(
                         cur_cand.block_ids = ids
                         cur_cand.start = s_time
                         cur_cand.end = e_time
-        except Exception as exc:
-            # Graceful fallback to deterministic lookaround results when LLM lookaround response fails
-            logger.warning(
-                "LLM boundary lookaround failed; falling back to deterministic lookaround: %s",
-                exc,
-            )
+            except OperationCancelledError:
+                raise
+            except Exception as exc:
+                # Graceful fallback to deterministic lookaround results when LLM lookaround batch fails
+                logger.warning(
+                    "LLM boundary lookaround batch failed; falling back to deterministic lookaround: %s",
+                    exc,
+                )
 
     return [c for c in det_adjusted if c.is_complete_story]

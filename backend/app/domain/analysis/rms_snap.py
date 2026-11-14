@@ -173,8 +173,14 @@ def snap_cut_boundaries(
     sample_rate: int = DEFAULT_SAMPLE_RATE,
 ) -> tuple[float, float]:
     """Align `(start_time, end_time)` to word boundaries and snap to 10ms RMS energy valleys + zero-crossing."""
-    t_start = max(0.0, float(start_time))
+    orig_start = max(0.0, float(start_time))
+    t_start = orig_start
     t_end = max(t_start + 0.1, float(end_time))
+
+    start_lookback = START_LOOKBACK_SEC
+    effective_start_lookahead = START_LOOKAHEAD_SEC
+    min_safe_start: float | None = None
+    max_safe_start: float | None = None
 
     # 1. Word-level anchor refinement if word timings are available
     end_lookback = END_LOOKBACK_SEC
@@ -183,14 +189,43 @@ def snap_cut_boundaries(
         cut_words = [
             w
             for w in words
-            if (0.5 * (float(w.start) + float(w.end)) >= t_start - 0.12)
-            and (0.5 * (float(w.start) + float(w.end)) <= t_end + 0.12)
+            if (0.5 * (float(w.start) + float(w.end)) >= t_start - 0.06)
+            and (0.5 * (float(w.start) + float(w.end)) <= t_end + 0.06)
         ]
         if cut_words:
-            first_w = float(cut_words[0].start)
+            first_word_obj = cut_words[0]
+            first_w = float(first_word_obj.start)
             last_w = float(cut_words[-1].end)
+
+            # Find latest word ending BEFORE first_w so lookback never pulls into the prior speaker/word
+            prev_word_end: float | None = None
+            for w in words:
+                if w is first_word_obj:
+                    continue
+                we = float(w.end)
+                if we <= first_w + 0.02 and float(w.start) < first_w:
+                    if prev_word_end is None or we > prev_word_end:
+                        prev_word_end = we
+
             if abs(first_w - t_start) <= 1.0:
                 t_start = first_w
+                # Eliminate +50ms opening consonant clipping whenever words & first_w are known
+                effective_start_lookahead = 0.0
+
+                if prev_word_end is not None and (first_w - 0.6) <= prev_word_end <= first_w + 0.02:
+                    min_safe_start = min(first_w, prev_word_end + 0.03)
+                    start_lookback = min(START_LOOKBACK_SEC, max(0.0, t_start - min_safe_start))
+
+                if prev_word_end is not None:
+                    pre_speech_gap = first_w - prev_word_end
+                else:
+                    pre_speech_gap = first_w - max(0.0, orig_start - START_LOOKBACK_SEC)
+
+                if pre_speech_gap >= 0.05:
+                    # Preserve a 20ms pre-onset margin so 30ms afade=in never attenuates the first consonant
+                    max_safe_start = max(0.0, first_w - 0.02)
+                    if min_safe_start is not None and min_safe_start > max_safe_start:
+                        min_safe_start = max_safe_start
 
             # Find the earliest subsequent word after the cut's final word to avoid cutting into next speaker/topic
             next_word_start: float | None = None
@@ -216,16 +251,33 @@ def snap_cut_boundaries(
                 end_lookback = max(0.0, t_end - min_snap_end)
                 end_lookahead = max(0.0, safe_max_end - t_end)
 
+    start_search_target = min(t_start, max_safe_start) if max_safe_start is not None else t_start
+    start_search_min = max(0.0, t_start - start_lookback)
+    if min_safe_start is not None:
+        start_search_min = max(start_search_min, min_safe_start)
+    start_search_max = max(start_search_min, start_search_target + effective_start_lookahead)
+    eff_start_before = max(0.0, start_search_target - start_search_min)
+    eff_start_after = max(0.0, start_search_max - start_search_target)
+
+    def _clamp_start(val: float) -> float:
+        out = max(0.0, val)
+        if min_safe_start is not None:
+            out = max(min_safe_start, out)
+        if max_safe_start is not None:
+            out = min(max_safe_start, out)
+        return out
+
     # 2. If in-memory PCM or RMS arrays are provided, snap directly against them
     if pcm_samples is not None or rms_10ms is not None:
         snapped_start = snap_timestamp_to_rms_valley(
-            t_start,
-            window_before_sec=START_LOOKBACK_SEC,
-            window_after_sec=START_LOOKAHEAD_SEC,
+            start_search_target,
+            window_before_sec=eff_start_before,
+            window_after_sec=eff_start_after,
             pcm_samples=pcm_samples,
             rms_10ms=rms_10ms,
             sample_rate=sample_rate,
         )
+        snapped_start = _clamp_start(snapped_start)
         snapped_end = snap_timestamp_to_rms_valley(
             t_end,
             window_before_sec=end_lookback,
@@ -235,26 +287,28 @@ def snap_cut_boundaries(
             sample_rate=sample_rate,
         )
         if snapped_end <= snapped_start:
-            return round(t_start, 3), round(t_end, 3)
+            return round(_clamp_start(t_start), 3), round(t_end, 3)
         return round(snapped_start, 4), round(snapped_end, 4)
 
     # 3. Otherwise, if `audio_16k.wav` exists on disk, read bounded slices around t_start and t_end
     if audio_wav_path is not None and audio_wav_path.exists():
         start_slice = _read_wav_slice_float32(
             audio_wav_path,
-            max(0.0, t_start - START_LOOKBACK_SEC - 0.05),
-            t_start + START_LOOKAHEAD_SEC + 0.05,
+            max(0.0, start_search_min - 0.05),
+            start_search_max + 0.05,
         )
         if start_slice is not None:
             slice_pcm, sr, offset_sec = start_slice
             rel_snapped = snap_timestamp_to_rms_valley(
-                t_start - offset_sec,
-                window_before_sec=START_LOOKBACK_SEC,
-                window_after_sec=START_LOOKAHEAD_SEC,
+                max(0.0, start_search_target - offset_sec),
+                window_before_sec=eff_start_before,
+                window_after_sec=eff_start_after,
                 pcm_samples=slice_pcm,
                 sample_rate=sr,
             )
-            t_start = offset_sec + rel_snapped
+            t_start = _clamp_start(offset_sec + rel_snapped)
+        else:
+            t_start = _clamp_start(t_start)
 
         end_slice = _read_wav_slice_float32(
             audio_wav_path,
@@ -274,4 +328,7 @@ def snap_cut_boundaries(
             if candidate_end > t_start:
                 t_end = candidate_end
 
+        return round(t_start, 4), round(t_end, 4)
+
+    t_start = _clamp_start(t_start)
     return round(t_start, 4), round(t_end, 4)

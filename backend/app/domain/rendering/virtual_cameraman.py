@@ -105,6 +105,127 @@ class VirtualCameramanPlan:
     samples: list[FrameCameraSample] = field(default_factory=list)
     keyframes: list[CameraKeyframe] = field(default_factory=list)
 
+    def coalesce_layout_spans(
+        self,
+        duration: float,
+    ) -> list[tuple[float, float, CameraLayoutMode, list[int]]]:
+        """Return contiguous coalesced layout intervals `[(start_t, end_t, mode, shot_ids)]` across `[0.0, duration]`."""
+        return coalesce_layout_spans(self, duration)
+
+
+def _group_mode_runs(items: Sequence[tuple[float, CameraLayoutMode, int]]) -> list[list[tuple[float, CameraLayoutMode, int]]]:
+    """Group `(time, mode, shot_id)` tuples into contiguous runs sharing the same `mode`."""
+    runs: list[list[tuple[float, CameraLayoutMode, int]]] = []
+    for item in items:
+        if not runs or runs[-1][0][1] != item[1]:
+            runs.append([item])
+        else:
+            runs[-1].append(item)
+    return runs
+
+
+def coalesce_layout_spans(
+    plan: VirtualCameramanPlan,
+    duration: float,
+) -> list[tuple[float, float, CameraLayoutMode, list[int]]]:
+    """Build contiguous coalesced layout spans `[(start_t, end_t, mode, shot_ids)]` across `[0.0, duration]`.
+
+    - When `plan.shots` is empty (or all shots/keyframes share a single mode), returns 1 interval
+      `[(0.0, dur, plan.primary_mode, ...)]`.
+    - Supports mode transitions both across distinct `ShotCameraPlan` shots and within a single shot
+      (via `shot.keyframes` / `shot.samples`).
+    """
+    dur = max(0.1, float(duration))
+    raw_spans: list[tuple[float, float, CameraLayoutMode, list[int]]] = []
+
+    if plan.shots:
+        for shot in plan.shots:
+            if shot.keyframes:
+                pts = [(float(k.time), k.mode, int(shot.shot_id)) for k in shot.keyframes]
+            elif shot.samples:
+                pts = [(float(s.timestamp), s.mode, int(shot.shot_id)) for s in shot.samples]
+            else:
+                pts = []
+
+            if pts:
+                runs = _group_mode_runs(pts)
+                if len(runs) == 1:
+                    raw_spans.append(
+                        (float(shot.start_time), float(shot.end_time), runs[0][0][1], [int(shot.shot_id)])
+                    )
+                else:
+                    for idx, run in enumerate(runs):
+                        r_start = float(shot.start_time) if idx == 0 else float(run[0][0])
+                        r_end = float(shot.end_time) if idx == len(runs) - 1 else float(runs[idx + 1][0][0])
+                        raw_spans.append((r_start, r_end, run[0][1], [int(shot.shot_id)]))
+            else:
+                raw_spans.append(
+                    (float(shot.start_time), float(shot.end_time), shot.dominant_mode, [int(shot.shot_id)])
+                )
+    elif plan.keyframes:
+        sorted_kfs = sorted(plan.keyframes, key=lambda k: float(k.time))
+        pts = [(float(k.time), k.mode, int(k.shot_id)) for k in sorted_kfs]
+        runs = _group_mode_runs(pts)
+        if len(runs) <= 1:
+            shot_ids = list(dict.fromkeys(int(k.shot_id) for k in sorted_kfs))
+            return [(0.0, dur, plan.primary_mode, shot_ids)]
+        for idx, run in enumerate(runs):
+            r_start = 0.0 if idx == 0 else float(run[0][0])
+            r_end = dur if idx == len(runs) - 1 else float(runs[idx + 1][0][0])
+            sids = list(dict.fromkeys(item[2] for item in run))
+            raw_spans.append((r_start, r_end, run[0][1], sids))
+    else:
+        return [(0.0, dur, plan.primary_mode, [])]
+
+    if not raw_spans:
+        return [(0.0, dur, plan.primary_mode, [])]
+
+    # Normalize & tile [0.0, dur] cleanly without gaps or overlaps
+    normalized: list[list[object]] = []
+    for s_t, e_t, mode, sids in raw_spans:
+        cs = max(0.0, min(dur, float(s_t)))
+        ce = max(0.0, min(dur, float(e_t)))
+        if ce > cs + 1e-6:
+            normalized.append([cs, ce, mode, list(dict.fromkeys(sids))])
+
+    if not normalized:
+        all_sids = list(dict.fromkeys(sid for _, _, _, sids in raw_spans for sid in sids))
+        return [(0.0, dur, plan.primary_mode, all_sids)]
+
+    normalized[0][0] = 0.0
+    for i in range(len(normalized) - 1):
+        cur_end = float(normalized[i][1])
+        next_start = float(normalized[i + 1][0])
+        if next_start > cur_end:
+            normalized[i][1] = next_start
+        elif next_start < cur_end:
+            normalized[i + 1][0] = cur_end
+    normalized[-1][1] = dur
+
+    coalesced: list[tuple[float, float, CameraLayoutMode, list[int]]] = []
+    for cs_obj, ce_obj, mode_obj, sids_obj in normalized:
+        cs = float(cs_obj)
+        ce = float(ce_obj)
+        if ce <= cs + 1e-6:
+            continue
+        mode: CameraLayoutMode = mode_obj  # type: ignore[assignment]
+        sids: list[int] = sids_obj  # type: ignore[assignment]
+        if coalesced and coalesced[-1][2] == mode:
+            prev_s, _, prev_m, prev_sids = coalesced[-1]
+            merged_sids = list(dict.fromkeys([*prev_sids, *sids]))
+            coalesced[-1] = (prev_s, ce, prev_m, merged_sids)
+        else:
+            coalesced.append((cs, ce, mode, sids))
+
+    if not coalesced:
+        return [(0.0, dur, plan.primary_mode, [])]
+    if len(coalesced) == 1:
+        _, _, only_mode, only_sids = coalesced[0]
+        # Preserve plan.primary_mode when single-mode
+        resolved_mode = only_mode if plan.shots else plan.primary_mode
+        return [(0.0, dur, resolved_mode, only_sids)]
+    return coalesced
+
 
 def compute_9_16_crop_dimensions(source_width: int = 1920, source_height: int = 1080) -> tuple[int, int]:
     """Compute even-integer 9:16 crop window `(crop_w, crop_h)` inside `source_width x source_height`."""
@@ -613,22 +734,52 @@ def _plan_single_shot(
             span_end += 1
 
         span_samples = samples[span_start : span_end + 1]
-        pts = [(s.timestamp, s.crop_x) for s in span_samples]
-        simplified = ramer_douglas_peucker(pts, epsilon=rdp_epsilon)
-        sec_lookup = {s.timestamp: s.secondary_crop_x for s in span_samples}
-        for t_val, x_val in simplified:
-            keyframes.append(
-                CameraKeyframe(
-                    time=float(t_val),
-                    x=float(x_val),
-                    y=0.0,
-                    crop_w=crop_width,
-                    crop_h=crop_height,
-                    mode=span_mode,
-                    shot_id=shot.shot_id,
-                    secondary_x=sec_lookup.get(t_val),
+        if span_mode == "split_screen":
+            pts_primary = [(float(s.timestamp), float(s.crop_x)) for s in span_samples]
+            pts_secondary = [
+                (
+                    float(s.timestamp),
+                    float(s.secondary_crop_x) if s.secondary_crop_x is not None else float(s.crop_x),
                 )
+                for s in span_samples
+            ]
+            simp_primary = ramer_douglas_peucker(pts_primary, epsilon=rdp_epsilon)
+            simp_secondary = ramer_douglas_peucker(pts_secondary, epsilon=rdp_epsilon)
+            kept_times = sorted(
+                {float(t) for t, _ in simp_primary} | {float(t) for t, _ in simp_secondary}
             )
+            sample_by_time = {float(s.timestamp): s for s in span_samples}
+            for t_val in kept_times:
+                smp = sample_by_time[t_val]
+                keyframes.append(
+                    CameraKeyframe(
+                        time=float(t_val),
+                        x=float(smp.crop_x),
+                        y=0.0,
+                        crop_w=crop_width,
+                        crop_h=crop_height,
+                        mode=span_mode,
+                        shot_id=shot.shot_id,
+                        secondary_x=smp.secondary_crop_x,
+                    )
+                )
+        else:
+            pts = [(s.timestamp, s.crop_x) for s in span_samples]
+            simplified = ramer_douglas_peucker(pts, epsilon=rdp_epsilon)
+            sec_lookup = {s.timestamp: s.secondary_crop_x for s in span_samples}
+            for t_val, x_val in simplified:
+                keyframes.append(
+                    CameraKeyframe(
+                        time=float(t_val),
+                        x=float(x_val),
+                        y=0.0,
+                        crop_w=crop_width,
+                        crop_h=crop_height,
+                        mode=span_mode,
+                        shot_id=shot.shot_id,
+                        secondary_x=sec_lookup.get(t_val),
+                    )
+                )
         span_start = span_end + 1
 
     # Dominant mode in shot by frame count

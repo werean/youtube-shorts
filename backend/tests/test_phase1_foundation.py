@@ -365,7 +365,7 @@ async def test_health_and_config_routes(async_client: httpx.AsyncClient) -> None
     r_prompt = await async_client.get("/config/llm-prompt")
     assert r_prompt.status_code == 200
     assert "prompt" in r_prompt.json()
-    assert r_prompt.json()["version"] == "v3"
+    assert r_prompt.json()["version"] == "v4"
 
     r_prompt_def = await async_client.get("/config/llm-prompt/default")
     assert r_prompt_def.status_code == 200
