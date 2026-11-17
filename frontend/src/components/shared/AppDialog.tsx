@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { X } from "@phosphor-icons/react";
 import { AppButton } from "./AppButton";
 
 interface AppDialogProps {
@@ -48,7 +49,7 @@ export function AppDialog({
                 disabled={disableClose}
                 aria-label="Fechar"
               >
-                X
+                <X size={15} weight="regular" />
               </AppButton>
             </div>
           ) : null}

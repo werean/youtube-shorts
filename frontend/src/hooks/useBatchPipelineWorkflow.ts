@@ -213,6 +213,24 @@ export function useBatchPipelineWorkflow({ onActiveVideosLoaded }: BatchPipeline
     setBatchCompletionMessage("");
   }
 
+  async function startSingleJobPipeline(jobId: string, options: BatchPipelineOptions) {
+    try {
+      setIsBatchProcessing(true);
+      setBatchWaitingForApproval(false);
+      setBatchPendingCuts([]);
+      setBatchProcessingLogs([`Iniciando processamento do vídeo...`]);
+      const result = await startBatchPipeline([jobId], options);
+      setActiveBatchId(result.batch_id);
+      startBatchPolling(result.batch_id);
+      return result.batch_id;
+    } catch (error: any) {
+      console.error("[UI] Error starting single job pipeline:", error);
+      setBatchProcessingLogs((prev) => [...prev, `Erro ao iniciar pipeline: ${error.message}`]);
+      setIsBatchProcessing(false);
+      throw error;
+    }
+  }
+
   useEffect(() => {
     return () => {
       stopBatchPolling();
@@ -238,6 +256,7 @@ export function useBatchPipelineWorkflow({ onActiveVideosLoaded }: BatchPipeline
     updateBatchPipelineOptions,
     cancelBatchPipelineDialog,
     startBatchPipelineDialog,
+    startSingleJobPipeline,
     closeBatchCompletionNotification,
   };
 }

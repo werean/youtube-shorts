@@ -15,7 +15,7 @@
   font-size: var(--app-checkbox-label-size, 0.96rem);
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
 textarea,
 .app-input {
   padding: 10px 12px;
@@ -30,7 +30,7 @@ textarea,
     background-color 150ms ease;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):focus,
 textarea:focus,
 .app-input:focus {
   outline: none;
