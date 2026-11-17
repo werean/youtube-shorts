@@ -184,7 +184,7 @@ export function ImmersiveVideoStage({
                   placeholder="https://youtube.com/watch?v=..."
                   aria-label="Link do vídeo"
                   disabled={submitting}
-                  className="w-full h-9 pl-9 pr-3 rounded-pill bg-white/[0.06] border border-line text-base text-text-1 placeholder:text-text-3 focus:border-line-strong focus:outline-none"
+                  className="w-full h-9 pl-9 pr-3 rounded-pill bg-white/[0.06] border border-line text-base text-text-1 placeholder:text-text-3 focus:border-line-strong focus-visible:ring-2 focus-visible:ring-accent-ring"
                 />
               </div>
               <button

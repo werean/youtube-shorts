@@ -125,7 +125,7 @@ export function NewVideoModal({
               onChange={(e) => setUrlValue(e.target.value)}
               placeholder="Cole um link do YouTube..."
               disabled={submitting}
-              className="w-full bg-transparent text-sm text-text-1 placeholder:text-text-3 outline-none"
+              className="w-full bg-transparent text-sm text-text-1 placeholder:text-text-3 focus-visible:ring-2 focus-visible:ring-accent-ring rounded-pill"
             />
           </div>
           <button

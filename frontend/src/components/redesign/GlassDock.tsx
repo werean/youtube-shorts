@@ -145,12 +145,13 @@ export function GlassDock({
 
   // Calcula posições sem sobreposição na trilha horizontal
   const positionedCuts = useMemo(() => {
-    const trackMinPx = Math.max(720, visibleCuts.length * 124);
+    const cardWidth = 164;
+    const trackMinPx = Math.max(720, visibleCuts.length * (cardWidth + 16));
     let lastRightPx = -Infinity;
     return visibleCuts.map((cut) => {
       const rawLeftPx = (cut.start / safeDuration) * trackMinPx;
       const clampedLeft = Math.max(rawLeftPx, lastRightPx + 10);
-      lastRightPx = clampedLeft + 108;
+      lastRightPx = clampedLeft + cardWidth;
       const segLeftPct = Math.min(100, Math.max(0, (cut.start / safeDuration) * 100));
       const segWidthPct = Math.min(
         100 - segLeftPct,
@@ -167,7 +168,7 @@ export function GlassDock({
 
   const timelineTrackWidth = useMemo(() => {
     if (positionedCuts.length === 0) return "100%";
-    const maxRight = positionedCuts[positionedCuts.length - 1].leftPx + 124;
+    const maxRight = positionedCuts[positionedCuts.length - 1].leftPx + 180;
     return `max(100%, ${Math.ceil(maxRight)}px)`;
   }, [positionedCuts]);
 
@@ -410,7 +411,7 @@ export function GlassDock({
               </div>
 
               {/* Cartões posicionados pelo tempo real */}
-              <div className="relative h-[112px] mt-1">
+              <div className="relative h-[86px] mt-1">
                 {positionedCuts.length === 0 ? (
                   <div className="h-full flex items-center text-xs text-text-3">
                     {isProcessing
@@ -453,7 +454,7 @@ export function GlassDock({
                         }}
                         style={{ left: `${leftPx}px`, width: "var(--card-w)" }}
                         className={[
-                          "absolute top-2 snap-start p-1.5 rounded-card border cursor-pointer transition-[transform,box-shadow,background-color,opacity] duration-base ease-out",
+                          "absolute top-2 snap-start p-1.5 rounded-card border cursor-pointer flex items-center gap-2 transition-[transform,box-shadow,background-color,opacity] duration-base ease-out",
                           isSelected
                             ? "-translate-y-0.5 bg-[rgba(91,156,255,0.10)] border-transparent shadow-[0_0_0_1.5px_var(--accent-ring),var(--shadow-card)]"
                             : "bg-white/[0.05] border-line shadow-card hover:-translate-y-[1px] hover:bg-white/[0.08]",
@@ -470,7 +471,7 @@ export function GlassDock({
                           className="absolute -top-3 left-[13.5px] w-1.5 h-1.5 rounded-pill bg-accent-soft"
                         />
 
-                        <div className="relative w-full h-[46px] rounded-[6px] overflow-hidden bg-black/50">
+                        <div className="relative h-[56px] aspect-[9/16] shrink-0 rounded-[6px] overflow-hidden bg-black/50 border border-line">
                           {thumbUrl ? (
                             <video
                               src={thumbUrl}
@@ -483,61 +484,63 @@ export function GlassDock({
                           {isReady && (
                             <span
                               title="Pronto para baixar"
-                              className="absolute bottom-1 right-1 grid h-4 w-4 place-items-center rounded-pill bg-black/70 text-text-1"
+                              className="absolute bottom-0.5 right-0.5 grid h-3.5 w-3.5 place-items-center rounded-pill bg-black/75 text-text-1"
                             >
-                              <DownloadSimple size={10} weight="regular" />
+                              <DownloadSimple size={9} weight="regular" />
                             </span>
                           )}
                         </div>
 
-                        {editingTitleId === cut.cut_id ? (
-                          <input
-                            type="text"
-                            value={editingTitleValue}
-                            autoFocus
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => setEditingTitleValue(e.target.value)}
-                            onBlur={() => {
-                              if (editingTitleValue.trim()) {
-                                onRenameCut(cut.cut_id, editingTitleValue.trim());
-                              }
-                              setEditingTitleId(null);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
+                        <div className="min-w-0 flex-1 flex flex-col justify-between h-[56px] py-0.5">
+                          {editingTitleId === cut.cut_id ? (
+                            <input
+                              type="text"
+                              value={editingTitleValue}
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => setEditingTitleValue(e.target.value)}
+                              onBlur={() => {
                                 if (editingTitleValue.trim()) {
                                   onRenameCut(cut.cut_id, editingTitleValue.trim());
                                 }
                                 setEditingTitleId(null);
-                              }
-                              if (e.key === "Escape") setEditingTitleId(null);
-                            }}
-                            className="mt-1 w-full px-1 py-0.5 rounded bg-black/60 border border-line-strong text-xs text-text-1 focus:outline-none"
-                          />
-                        ) : (
-                          <p
-                            onDoubleClick={(e) => {
-                              e.stopPropagation();
-                              setEditingTitleId(cut.cut_id);
-                              setEditingTitleValue(cut.title || "Corte");
-                            }}
-                            className="mt-1 text-xs font-medium text-text-1 leading-tight line-clamp-2"
-                          >
-                            {cut.title || "Corte sugerido"}
-                          </p>
-                        )}
-
-                        <div className="mt-1 flex items-center justify-between text-xs text-text-2 tabular-nums">
-                          <span className="inline-flex items-center gap-1">
-                            <span
-                              className={[
-                                "w-1.5 h-1.5 rounded-pill inline-block",
-                                isReady || isApproved ? "bg-accent-soft" : "bg-success",
-                              ].join(" ")}
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  if (editingTitleValue.trim()) {
+                                    onRenameCut(cut.cut_id, editingTitleValue.trim());
+                                  }
+                                  setEditingTitleId(null);
+                                }
+                                if (e.key === "Escape") setEditingTitleId(null);
+                              }}
+                              className="w-full px-1 py-0.5 rounded bg-black/60 border border-line-strong text-xs text-text-1 focus-visible:ring-2 focus-visible:ring-accent-ring"
                             />
-                            <span>{statusText}</span>
-                          </span>
-                          <span>{formatShortTime(cutDuration)}</span>
+                          ) : (
+                            <p
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTitleId(cut.cut_id);
+                                setEditingTitleValue(cut.title || "Corte");
+                              }}
+                              className="text-xs font-medium text-text-1 leading-tight line-clamp-2"
+                            >
+                              {cut.title || "Corte sugerido"}
+                            </p>
+                          )}
+
+                          <div className="flex items-center justify-between gap-1 text-[11px] text-text-2 tabular-nums">
+                            <span className="inline-flex items-center gap-1 truncate">
+                              <span
+                                className={[
+                                  "w-1.5 h-1.5 rounded-pill inline-block shrink-0",
+                                  isReady || isApproved ? "bg-accent-soft" : "bg-success",
+                                ].join(" ")}
+                              />
+                              <span className="truncate">{statusText}</span>
+                            </span>
+                            <span className="shrink-0 text-text-3">{formatShortTime(cutDuration)}</span>
+                          </div>
                         </div>
                       </div>
                     );

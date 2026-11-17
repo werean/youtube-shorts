@@ -75,10 +75,10 @@
   --dock-h: 236px;
   --dock-h-collapsed: 56px;
   --dock-gap: 16px;
-  --card-w: 108px;
-  --card-thumb-h: 60px;
-  --item-thumb-w: 44px;
-  --item-thumb-h: 28px;
+  --card-w: 164px;
+  --card-thumb-h: 56px;
+  --item-thumb-w: 20px;
+  --item-thumb-h: 36px;
 
   /* Tipografia */
   --font-sans: "Inter Variable", "Inter", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -94,8 +94,8 @@
   --z-video: 0;
   --z-dock: 20;
   --z-edge: 30;
-  --z-sidebar: 40;
-  --z-chrome: 50;
+  --z-chrome: 45;
+  --z-sidebar: 55;
   --z-popover: 60;
   --z-modal: 80;
 
@@ -204,10 +204,36 @@
 
 /* Movimento reduzido */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+
   *,
   *::before,
   *::after {
-    transition-duration: 100ms !important;
-    animation-duration: 1ms !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .glass,
+  .glass--strong {
+    transition: opacity 0.01ms !important;
+  }
+
+  [class*="translate-"],
+  [class*="scale-"],
+  [class*="hover:-translate-"] {
+    transform: none !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-w: 220px;
+    --card-w: 148px;
   }
 }

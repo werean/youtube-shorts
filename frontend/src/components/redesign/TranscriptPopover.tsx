@@ -99,7 +99,7 @@ export function TranscriptPopover({
             <button
               type="button"
               onClick={onToggleShowDiscarded}
-              className="h-7 px-2.5 rounded-pill inline-flex items-center gap-1.5 text-xs text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast"
+              className="h-7 px-2.5 rounded-pill inline-flex items-center gap-1.5 text-xs text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast whitespace-nowrap shrink-0"
             >
               {showDiscardedCuts ? <EyeSlash size={13} /> : <Eye size={13} />}
               <span>

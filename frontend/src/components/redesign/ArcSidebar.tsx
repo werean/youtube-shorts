@@ -238,15 +238,11 @@ export function ArcSidebar({
             className={[
               "grid h-7 w-7 place-items-center rounded-pill transition-colors duration-fast",
               pinned
-                ? "bg-glass-active text-text-1"
+                ? "bg-accent/15 text-accent-soft"
                 : "text-text-2 hover:bg-glass-hover hover:text-text-1",
             ].join(" ")}
           >
-            {pinned ? (
-              <PushPinSlash size={16} weight="regular" />
-            ) : (
-              <PushPin size={16} weight="regular" />
-            )}
+            <PushPin size={16} weight={pinned ? "fill" : "regular"} />
           </button>
         </div>
 
@@ -263,7 +259,11 @@ export function ArcSidebar({
               const isProcessing =
                 Boolean(video.isTranscribing) || isJobProcessingStatus(video.job.status);
               const title = video.job.video_name || video.job.source_file_name || "Vídeo sem título";
-              const thumbSrc = video.videoPath ? `${apiBaseUrl}${video.videoPath}#t=1` : undefined;
+              const thumbSrc = video.videoPath
+                ? `${apiBaseUrl}${video.videoPath}#t=1`
+                : video.job.status !== "CREATED"
+                  ? `${apiBaseUrl}/media/videos/${jobId}#t=1`
+                  : undefined;
 
               return (
                 <div key={jobId} className="group relative">
@@ -282,7 +282,7 @@ export function ArcSidebar({
                         : "text-text-2 hover:bg-glass-hover hover:text-text-1",
                     ].join(" ")}
                   >
-                    <div className="w-[44px] h-[28px] rounded-thumb overflow-hidden bg-black/40 border border-line shrink-0 grid place-items-center">
+                    <div className="h-9 aspect-[9/16] rounded-thumb overflow-hidden bg-black/40 border border-line shrink-0 grid place-items-center">
                       {thumbSrc ? (
                         <video
                           src={thumbSrc}
@@ -292,7 +292,7 @@ export function ArcSidebar({
                           className="w-full h-full object-cover pointer-events-none"
                         />
                       ) : (
-                        <FilmStrip size={14} weight="regular" className="text-text-3" />
+                        <FilmStrip size={13} weight="regular" className="text-text-3" />
                       )}
                     </div>
 

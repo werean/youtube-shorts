@@ -2,13 +2,15 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { SpinnerGap } from "@phosphor-icons/react";
 import { cn } from "../../lib/utils";
 
-export type ButtonVariant = "primary" | "ghost" | "destructive";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   leadingIcon?: ReactNode;
+  leftIcon?: ReactNode;
+  rightIcon?: ReactNode;
   loading?: boolean;
   loadingLabel?: string;
   fullWidth?: boolean;
@@ -24,9 +26,13 @@ const sizeStyles: Record<ButtonSize, string> = {
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
     "bg-accent text-accent-fg border border-transparent hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] disabled:opacity-45",
+  secondary:
+    "bg-white/[0.08] text-text-1 border border-line hover:bg-white/[0.14] disabled:opacity-45",
   ghost:
     "bg-white/[0.06] text-text-1 border border-line hover:bg-white/[0.12] disabled:opacity-45",
   destructive:
+    "bg-white/[0.06] text-text-1 border border-line hover:bg-[var(--danger-bg)] hover:text-danger disabled:opacity-45",
+  danger:
     "bg-white/[0.06] text-text-1 border border-line hover:bg-[var(--danger-bg)] hover:text-danger disabled:opacity-45",
 };
 
@@ -35,6 +41,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     variant = "ghost",
     size = "md",
     leadingIcon,
+    leftIcon,
+    rightIcon,
     loading = false,
     loadingLabel = "Carregando…",
     fullWidth = false,
@@ -47,6 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const isDisabled = disabled || loading;
+  const resolvedLeadingIcon = leadingIcon ?? leftIcon;
 
   return (
     <button
@@ -66,12 +75,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     >
       {loading ? (
         <SpinnerGap className="h-3.5 w-3.5 animate-spin shrink-0" weight="regular" aria-hidden="true" />
-      ) : leadingIcon ? (
+      ) : resolvedLeadingIcon ? (
         <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true">
-          {leadingIcon}
+          {resolvedLeadingIcon}
         </span>
       ) : null}
       {children ? <span>{loading ? loadingLabel : children}</span> : null}
+      {!loading && rightIcon ? (
+        <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true">
+          {rightIcon}
+        </span>
+      ) : null}
     </button>
   );
 });
