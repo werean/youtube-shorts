@@ -27,7 +27,7 @@ export function ModelSelector({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="select-field h-8 w-full rounded-md border-[0.5px] border-border-1 bg-bg-3 px-2 text-body text-text-1 focus:border-border-3 focus:outline-none"
+        className="select-field h-8 w-full rounded-md border-[0.5px] border-border-1 bg-bg-3 px-2 text-body text-text-1 focus:border-border-3 focus-visible:ring-2 focus-visible:ring-accent-ring"
       >
         {models.map((model) => (
           <option key={model} value={model}>

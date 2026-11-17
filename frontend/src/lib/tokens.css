@@ -224,10 +224,18 @@
     transition: opacity 0.01ms !important;
   }
 
-  [class*="translate-"],
-  [class*="scale-"],
-  [class*="hover:-translate-"] {
-    transform: none !important;
+  .-translate-x-3 {
+    --tw-translate-x: 0px !important;
+  }
+
+  .-translate-y-0\.5,
+  .hover\:-translate-y-\[1px\]:hover {
+    --tw-translate-y: 0px !important;
+  }
+
+  .active\:scale-\[0\.98\]:active {
+    --tw-scale-x: 1 !important;
+    --tw-scale-y: 1 !important;
   }
 }
 

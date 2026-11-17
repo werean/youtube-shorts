@@ -32,7 +32,7 @@ export function TranscriptExport({ onExport, ...rest }: TranscriptExportProps) {
           <select
             value={format}
             onChange={(event) => setFormat(event.target.value as TranscriptExportFormat)}
-            className="select-field h-8 rounded-md border-[0.5px] border-border-1 bg-bg-3 px-2 text-body text-text-1 focus:border-border-3 focus:outline-none"
+            className="select-field h-8 rounded-md border-[0.5px] border-border-1 bg-bg-3 px-2 text-body text-text-1 focus:border-border-3 focus-visible:ring-2 focus-visible:ring-accent-ring"
           >
             <option value="txt">TXT</option>
             <option value="vtt">VTT</option>

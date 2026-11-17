@@ -185,6 +185,20 @@ export function ArcSidebar({
         data-pinned={pinned ? "true" : "false"}
         onMouseEnter={handleSidebarEnter}
         onMouseLeave={scheduleClose}
+        onFocus={() => {
+          if (closeTimerRef.current) {
+            window.clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+          }
+          if (!pinned && !open) {
+            onSetOpen(true);
+          }
+        }}
+        onBlur={(e) => {
+          if (!pinned && !sidebarRef.current?.contains(e.relatedTarget as Node)) {
+            scheduleClose();
+          }
+        }}
         className={[
           "fixed z-sidebar flex flex-col gap-2 p-3 glass transition-[opacity,transform,border-radius] duration-slow ease-out",
           "focus-within:opacity-100 focus-within:translate-x-0 focus-within:pointer-events-auto",
