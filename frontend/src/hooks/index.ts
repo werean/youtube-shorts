@@ -16,5 +16,17 @@ export { useVideoList } from "./useVideoList";
 export { useRendering as useRenderingState } from "./useRenderingState";
 export { useLogs } from "./useLogsState";
 export { useCutsState } from "./useCutsState";
-export { useJobEvents, type JobEventPayload } from "./useJobEvents";
+export {
+  useJobEvents,
+  INITIAL_DUBBING_EVENT_STATE,
+  type JobEventPayload,
+  type DubbingEventState,
+} from "./useJobEvents";
+export {
+  useDubbingWorkflow,
+  type DubbingWorkflowPreviewOptions,
+  type PendingDubRequest,
+  type UseDubbingWorkflowOptions,
+  type StartDubWithPreflightResult,
+} from "./useDubbingWorkflow";
 

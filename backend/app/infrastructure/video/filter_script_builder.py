@@ -15,25 +15,31 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
-from app.domain.rendering.ass_generator import TimelineMapper
-from app.domain.rendering.virtual_cameraman import (
-    CameraKeyframe,
-    CameraLayoutMode,
-    VirtualCameramanPlan,
-)
+if TYPE_CHECKING:
+    from app.domain.rendering.ass_generator import TimelineMapper
+    from app.domain.rendering.virtual_cameraman import (
+        CameraKeyframe,
+        CameraLayoutMode,
+        VirtualCameramanPlan,
+    )
 
 
 def escape_ffmpeg_filter_path(file_path: str | Path) -> str:
     """Escape file path for FFmpeg filter arguments (subtitles='...').
 
-    Converts backslashes to forward slashes, escapes colons (`C:` -> `C\:`), and escapes single quotes.
+    Converts backslashes to forward slashes and escapes FFmpeg filtergraph
+    special characters (`:`, `'`, `[`, `]`, `,`, `;`).
     """
     clean = str(file_path).replace("\\", "/")
-    # Escape colons (especially Windows drive letters C:)
+    # Escape colons (especially Windows drive letters C:) and filtergraph delimiters
     clean = clean.replace(":", r"\:")
     clean = clean.replace("'", r"\'")
+    clean = clean.replace("[", r"\[")
+    clean = clean.replace("]", r"\]")
+    clean = clean.replace(",", r"\,")
+    clean = clean.replace(";", r"\;")
     return f"'{clean}'"
 
 

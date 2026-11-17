@@ -1,8 +1,15 @@
 import { useState } from "react";
+import type {
+  DubbingEngine,
+  DubbingLanguage,
+  DubbingSettings,
+  DubbingSubtitlePreset,
+  DubbingVoiceMode,
+} from "@youtube-shorts/contracts";
 import { selectFolder } from "../../api";
 import type { ActionState } from "../../hooks/useAppAction";
 import { AppDialog } from "../shared";
-import { GlassButton, GlassCard, GlassBadge } from "../ui/glass";
+import { GlassButton, GlassCard } from "../ui/glass";
 
 interface ConfigureAppDialogProps {
   configBaseDir: string;
@@ -13,9 +20,18 @@ interface ConfigureAppDialogProps {
     baseDir: string,
     resolution: "1080p" | "1440p" | "4k",
     askDeleteCutConfirm: boolean,
+    dubbingSettings?: DubbingSettings,
   ) => void;
   onCancel: () => void;
 }
+
+const DEFAULT_DUBBING_SETTINGS: DubbingSettings = {
+  engine: "qwen3_tts",
+  default_target_lang: "ask",
+  default_voice_mode: "auto",
+  default_subtitles_enabled: true,
+  default_subtitle_preset: "mov_text",
+};
 
 export function ConfigureAppDialog({
   configBaseDir: initialDir,
@@ -32,6 +48,37 @@ export function ConfigureAppDialog({
   const [askDeleteCutConfirm, setAskDeleteCutConfirm] = useState<boolean>(
     appSettings?.preferences?.ask_delete_cut_confirm ?? true,
   );
+  const initialDubbing: DubbingSettings = {
+    engine:
+      appSettings?.dubbing?.engine === "chatterbox" ? "chatterbox" : DEFAULT_DUBBING_SETTINGS.engine,
+    default_target_lang:
+      appSettings?.dubbing?.default_target_lang || DEFAULT_DUBBING_SETTINGS.default_target_lang,
+    default_voice_mode:
+      appSettings?.dubbing?.default_voice_mode === "single"
+        ? "single"
+        : DEFAULT_DUBBING_SETTINGS.default_voice_mode,
+    default_subtitles_enabled:
+      typeof appSettings?.dubbing?.default_subtitles_enabled === "boolean"
+        ? appSettings.dubbing.default_subtitles_enabled
+        : DEFAULT_DUBBING_SETTINGS.default_subtitles_enabled,
+    default_subtitle_preset:
+      appSettings?.dubbing?.default_subtitle_preset === "hardsub"
+        ? "hardsub"
+        : DEFAULT_DUBBING_SETTINGS.default_subtitle_preset,
+  };
+  const [dubbingEngine, setDubbingEngine] = useState<DubbingEngine>(initialDubbing.engine);
+  const [dubbingDefaultLang, setDubbingDefaultLang] = useState<"ask" | DubbingLanguage>(
+    initialDubbing.default_target_lang,
+  );
+  const [dubbingVoiceMode, setDubbingVoiceMode] = useState<DubbingVoiceMode>(
+    initialDubbing.default_voice_mode,
+  );
+  const [dubbingSubtitlesEnabled, setDubbingSubtitlesEnabled] = useState<boolean>(
+    initialDubbing.default_subtitles_enabled,
+  );
+  const [dubbingSubtitlePreset, setDubbingSubtitlePreset] = useState<DubbingSubtitlePreset>(
+    initialDubbing.default_subtitle_preset,
+  );
 
   const handlePickFolder = async () => {
     try {
@@ -46,7 +93,13 @@ export function ConfigureAppDialog({
 
   const handleSave = () => {
     if (baseDir.trim()) {
-      onSave(baseDir, resolution, askDeleteCutConfirm);
+      onSave(baseDir, resolution, askDeleteCutConfirm, {
+        engine: dubbingEngine,
+        default_target_lang: dubbingDefaultLang,
+        default_voice_mode: dubbingVoiceMode,
+        default_subtitles_enabled: dubbingSubtitlesEnabled,
+        default_subtitle_preset: dubbingSubtitlePreset,
+      });
     }
   };
 
@@ -224,6 +277,221 @@ export function ConfigureAppDialog({
                 }`}
               />
             </button>
+          </div>
+        </GlassCard>
+
+        {/* Card: Dublagem & Legendas (IA Local) */}
+        <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-400/25 flex items-center justify-center text-cyan-300 flex-shrink-0">
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 8l6 6" />
+                <path d="M4 14l6-6 2-3" />
+                <path d="M2 5h12" />
+                <path d="M7 2h1" />
+                <path d="M22 22l-5-10-5 10" />
+                <path d="M14 18h6" />
+              </svg>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-white">Dublagem &amp; Legendas (IA Local)</h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Configure o motor neural de clonagem de voz, idioma padrão e formato de exportação das legendas.
+              </p>
+            </div>
+          </div>
+
+          {/* Motor de Síntese Vocal */}
+          <div className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 block">
+              Motor TTS Local
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                {
+                  id: "qwen3_tts" as DubbingEngine,
+                  label: "Qwen3-TTS-1.7B",
+                  desc: "Clonagem prosódica multilíngue padrão (alta fidelidade)",
+                },
+                {
+                  id: "chatterbox" as DubbingEngine,
+                  label: "Chatterbox Multilingual",
+                  desc: "Alternativa expressiva com controle emocional local",
+                },
+              ].map((item) => {
+                const isSelected = dubbingEngine === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setDubbingEngine(item.id)}
+                    className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all duration-200 ${
+                      isSelected
+                        ? "bg-white/[0.1] border-cyan-400/45 shadow-[0_2px_12px_rgba(34,211,238,0.12),inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                        : "bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-sm font-semibold text-white">{item.label}</span>
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isSelected ? "bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" : "bg-zinc-700"
+                        }`}
+                      />
+                    </div>
+                    <span className="text-[11px] text-zinc-400 mt-1 leading-snug">{item.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Idioma Padrão e Modo de Vozes */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 block">
+                Idioma de Destino Padrão
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: "ask" as const, label: "Perguntar sempre" },
+                  { id: "pt-BR" as DubbingLanguage, label: "PT-BR" },
+                  { id: "en" as DubbingLanguage, label: "EN" },
+                  { id: "es" as DubbingLanguage, label: "ES" },
+                ].map((langOpt) => {
+                  const isSelected = dubbingDefaultLang === langOpt.id;
+                  return (
+                    <button
+                      key={langOpt.id}
+                      type="button"
+                      onClick={() => setDubbingDefaultLang(langOpt.id)}
+                      className={`px-3 py-2 rounded-xl border text-xs font-medium text-left transition-all ${
+                        isSelected
+                          ? "bg-white/[0.12] border-white/35 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                          : "bg-white/[0.02] border-white/[0.08] text-zinc-300 hover:border-white/20 hover:text-white"
+                      }`}
+                    >
+                      {langOpt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 block">
+                Modo de Vozes
+              </span>
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  { id: "auto" as DubbingVoiceMode, label: "Automático (detectar pessoas)" },
+                  { id: "single" as DubbingVoiceMode, label: "Voz única" },
+                ].map((modeOpt) => {
+                  const isSelected = dubbingVoiceMode === modeOpt.id;
+                  return (
+                    <button
+                      key={modeOpt.id}
+                      type="button"
+                      onClick={() => setDubbingVoiceMode(modeOpt.id)}
+                      className={`px-3 py-2 rounded-xl border text-xs font-medium text-left flex items-center justify-between transition-all ${
+                        isSelected
+                          ? "bg-white/[0.12] border-white/35 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                          : "bg-white/[0.02] border-white/[0.08] text-zinc-300 hover:border-white/20 hover:text-white"
+                      }`}
+                    >
+                      <span>{modeOpt.label}</span>
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isSelected ? "bg-white shadow-[0_0_6px_rgba(255,255,255,0.8)]" : "bg-zinc-700"
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Toggle de Legendas */}
+          <div className="flex items-center justify-between gap-4 pt-2 border-t border-white/[0.06]">
+            <div className="space-y-0.5">
+              <h5 className="text-xs font-semibold text-white">Gerar Legendas por Padrão</h5>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Sincronizar legendas no idioma dublado (exibidas no player e exportáveis).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDubbingSubtitlesEnabled((prev) => !prev)}
+              aria-label="Ativar legendas na dublagem por padrão"
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none flex-shrink-0 ${
+                dubbingSubtitlesEnabled ? "bg-white justify-end" : "bg-zinc-800 justify-start"
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full shadow-md transition-all duration-200 ${
+                  dubbingSubtitlesEnabled ? "bg-zinc-950" : "bg-zinc-400"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Preset de Exportação de Legendas */}
+          <div className="space-y-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 block">
+              Preset Padrão de Legendas ao Exportar .mp4
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                {
+                  id: "mov_text" as DubbingSubtitlePreset,
+                  label: "Preset 1 — Embutida Selecionável (mov_text + .srt/.vtt)",
+                  desc: "Sem re-encode de vídeo (-c:v copy), faixa ativável no player e arquivos .srt/.vtt separados.",
+                },
+                {
+                  id: "hardsub" as DubbingSubtitlePreset,
+                  label: "Preset 2 — Gravada na Imagem (Hardsub NVENC)",
+                  desc: "Legenda queimada permanentemente no vídeo via NVENC/x264 (ideal para redes sociais).",
+                },
+              ].map((presetOpt) => {
+                const isSelected = dubbingSubtitlePreset === presetOpt.id;
+                return (
+                  <button
+                    key={presetOpt.id}
+                    type="button"
+                    onClick={() => setDubbingSubtitlePreset(presetOpt.id)}
+                    className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all duration-200 ${
+                      isSelected
+                        ? "bg-white/[0.1] border-white/35 shadow-[0_2px_12px_rgba(255,255,255,0.08),inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                        : "bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 w-full">
+                      <span className="text-xs font-semibold text-white leading-snug">
+                        {presetOpt.label}
+                      </span>
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${
+                          isSelected ? "bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" : "bg-zinc-700"
+                        }`}
+                      />
+                    </div>
+                    <span className="text-[11px] text-zinc-400 mt-1 leading-snug">
+                      {presetOpt.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </GlassCard>
       </div>

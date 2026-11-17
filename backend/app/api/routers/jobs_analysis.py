@@ -33,6 +33,11 @@ router = APIRouter(prefix="/jobs", tags=["jobs-analysis"])
 async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
     """Run Stage 3 discourse-aware semantic blocks + contextual TextTiling topic segmentation."""
     container = get_container()
+    if container.runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Dublagem em andamento para este vídeo. Aguarde ou cancele antes de gerar blocos.",
+        )
     try:
         blocks = build_semantic_blocks(job_id, container=container)
         await build_topic_segments(job_id, container=container)
@@ -45,6 +50,11 @@ async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
 async def analyze_job_cuts(job_id: str) -> Any:
     """Auto-prepare blocks/topics if missing, run 3-phase narrative arc mining, and save `cuts.suggested.json`."""
     container = get_container()
+    if container.runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Dublagem em andamento para este vídeo. Aguarde ou cancele antes de analisar cortes.",
+        )
     try:
         return await analyze_job(job_id, container=container)
     except LocalLLMUnavailableError as exc:

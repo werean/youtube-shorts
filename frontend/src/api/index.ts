@@ -76,8 +76,17 @@ export {
   importToolConfigs,
   getCommonFolders,
   selectFolder,
+  getStorageUsage,
+  deleteModelStorage,
+  deleteLmStudioModel,
   type InstallationGuide,
   type AppSettings,
+  type DubbingSettings,
+  type ModelStorageItem,
+  type LmStudioModelStorageItem,
+  type StorageUsageSummary,
+  type DeleteModelResponse,
+  type DeleteLmStudioModelResponse,
   type DependencyInstallSessionStatus,
   type DependencyOperationMode,
   type DependencyInstallOptions,
@@ -87,3 +96,19 @@ export {
   type RemoveOllamaModelResponse,
   type SavedLLMPrompt,
 } from "./config";
+
+// Dubbing API
+export {
+  DubbingApiError,
+  resolveDubbingMediaUrl,
+  getDubbingManifest,
+  getDubbingPreflight,
+  startDubbing,
+  startDubbingPreview,
+  cancelDubbing,
+  exportDubbedVideo,
+  sendDubbedToCuts,
+  deleteDubbingTrack,
+  type DubbingStartResponse,
+  type DeleteDubbingTrackResponse,
+} from "./dubbing";

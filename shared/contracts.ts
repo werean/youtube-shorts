@@ -21,6 +21,127 @@ export interface Job {
   source_file_name?: string;
   video_name?: string;
   video_duration_seconds?: number;
+  dubbing_status?: string | null;
+  dubbed_languages?: string[] | null;
+}
+
+export type DubbingEngine = "qwen3_tts" | "chatterbox";
+export type DubbingLanguage = "pt-BR" | "en" | "es";
+export type DubbingVoiceMode = "auto" | "single";
+export type DubbingSubtitlePreset = "mov_text" | "hardsub";
+
+export interface DubbingSettings {
+  engine: DubbingEngine;
+  default_target_lang: "ask" | DubbingLanguage;
+  default_voice_mode: DubbingVoiceMode;
+  default_subtitles_enabled: boolean;
+  default_subtitle_preset: DubbingSubtitlePreset;
+}
+
+export interface DubbingTrack {
+  lang: DubbingLanguage | string;
+  engine: DubbingEngine | string;
+  voice_mode: DubbingVoiceMode | string;
+  status: string;
+  audio_url?: string | null;
+  audio_path?: string | null;
+  vtt_url?: string | null;
+  srt_url?: string | null;
+  duration_seconds?: number | null;
+  speakers_count?: number | null;
+  units_count?: number | null;
+  warnings?: string[];
+  error?: string | null;
+  exported_mp4_url?: string | null;
+  exported_mp4_path?: string | null;
+  subtitle_preset?: DubbingSubtitlePreset | string | null;
+  subtitles_enabled?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface DubbingPreview {
+  lang: DubbingLanguage | string;
+  engine: DubbingEngine | string;
+  voice_mode: DubbingVoiceMode | string;
+  status: string;
+  preview_start: number;
+  preview_end: number;
+  duration: number;
+  audio_url?: string | null;
+  vtt_url?: string | null;
+  audio_path?: string | null;
+  vtt_path?: string | null;
+  warnings?: string[];
+  error?: string | null;
+  updated_at?: string | null;
+}
+
+export interface DubbingCutTrack {
+  cut_id: string;
+  short_file?: string | null;
+  lang: DubbingLanguage | string;
+  engine: DubbingEngine | string;
+  voice_mode: DubbingVoiceMode | string;
+  status: string;
+  audio_url?: string | null;
+  vtt_url?: string | null;
+  srt_url?: string | null;
+  exported_mp4_url?: string | null;
+  exported_mp4_path?: string | null;
+  subtitle_preset?: DubbingSubtitlePreset | string | null;
+  subtitles_enabled?: boolean | null;
+  warnings?: string[];
+  created_at?: string | null;
+  updated_at?: string | null;
+  error?: string | null;
+}
+
+export interface DubbingManifest {
+  job_id: string;
+  active_lang?: string | null;
+  status: string;
+  tracks: Record<string, DubbingTrack>;
+  preview?: DubbingPreview | null;
+  cut_dubs?: Record<string, Record<string, DubbingCutTrack>>;
+  updated_at?: string | null;
+}
+
+export interface ModelStorageItem {
+  model_id: string;
+  label: string;
+  size_bytes: number;
+  path?: string | null;
+  paths?: string[];
+  installed: boolean;
+  deletable: boolean;
+  category?: string | null;
+}
+
+export interface LmStudioModelStorageItem {
+  model_key: string;
+  display_name: string;
+  model_type: string;
+  quantization?: string | null;
+  size_bytes: number;
+  paths?: string[];
+  bundled: boolean;
+  deletable: boolean;
+}
+
+export interface StorageUsageSummary {
+  videos_bytes: number;
+  dubs_bytes: number;
+  stems_bytes: number;
+  shorts_bytes: number;
+  archives_bytes: number;
+  total_media_bytes: number;
+  total_models_bytes: number;
+  total_app_bytes: number;
+  lmstudio_models_bytes?: number;
+  total_with_lmstudio_bytes?: number;
+  models: ModelStorageItem[];
+  lmstudio_models?: LmStudioModelStorageItem[];
 }
 
 export interface NarrativeArc {
@@ -108,6 +229,7 @@ export interface AppSettings {
   llm: {
     model: string;
   };
+  dubbing?: DubbingSettings;
 }
 
 export interface InstallationGuide {

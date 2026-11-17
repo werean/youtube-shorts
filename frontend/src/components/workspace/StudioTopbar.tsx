@@ -16,6 +16,7 @@ export interface StudioTopbarProps {
   onConfigureFFmpeg?: () => void;
   onShowHowToUse?: () => void;
   onOpenSettings?: () => void;
+  dubbingControl?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }
@@ -33,6 +34,7 @@ export function StudioTopbar({
   onConfigureFFmpeg,
   onShowHowToUse,
   onOpenSettings,
+  dubbingControl,
   actions,
   className,
 }: StudioTopbarProps) {
@@ -143,6 +145,7 @@ export function StudioTopbar({
 
       {/* Direita: Indicador de Hardware + Acoes + Menu de Configuracoes */}
       <div className="flex items-center gap-2.5">
+        {dubbingControl}
         {actions}
 
         {/* Indicador de Hardware */}
@@ -249,7 +252,7 @@ export function StudioTopbar({
                     </div>
                     <div>
                       <p className="text-sm font-medium text-white group-hover:text-white transition-colors">Configurar Aplicação</p>
-                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Pastas de mídia e resolução</p>
+                      <p className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">Pastas de mídia, resolução e dublagem</p>
                     </div>
                   </button>
                 )}

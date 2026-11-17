@@ -11,6 +11,13 @@ export interface LiveTaskFeedbackCardProps {
   onCancel?: () => void;
   isExpanded?: boolean;
   onToggleExpanded?: () => void;
+  isDubbingTask?: boolean;
+  downloadPercent?: number | null;
+  prepStage?: string | null;
+  errorMessage?: string | null;
+  errorPhase?: string | null;
+  onRetry?: () => void;
+  onDismissError?: () => void;
   className?: string;
 }
 
@@ -47,6 +54,64 @@ const FRIENDLY_STATUS: Record<string, { label: string; step: string; color: stri
   },
 };
 
+const FRIENDLY_DUBBING_STATUS: Record<string, { label: string; step: string; color: string }> = {
+  PREPARING: {
+    label: "Preparando ambiente e transcrição de dublagem",
+    step: "Dublagem IA",
+    color: "from-cyan-500 to-blue-400",
+  },
+  DOWNLOADING: {
+    label: "Baixando modelos locais e ambiente de dublagem",
+    step: "Dublagem IA",
+    color: "from-cyan-500 to-indigo-400",
+  },
+  TRANSLATING: {
+    label: "Traduzindo roteiro com contexto (LLM local)",
+    step: "Dublagem IA",
+    color: "from-indigo-500 to-purple-400",
+  },
+  SEPARATING: {
+    label: "Separando voz e trilha sonora (Demucs)",
+    step: "Dublagem IA",
+    color: "from-purple-500 to-cyan-400",
+  },
+  DIARIZING: {
+    label: "Detectando locutores no áudio (Sherpa-ONNX)",
+    step: "Dublagem IA",
+    color: "from-sky-500 to-cyan-400",
+  },
+  SYNTHESIZING: {
+    label: "Sintetizando vozes clonadas (TTS Neural)",
+    step: "Dublagem IA",
+    color: "from-cyan-400 to-emerald-400",
+  },
+  MIXING: {
+    label: "Mixando trilha dublada e legendas sincronizadas",
+    step: "Dublagem IA",
+    color: "from-emerald-500 to-teal-400",
+  },
+  PREVIEWING: {
+    label: "Gerando prévia rápida de 20s",
+    step: "Prévia 20s",
+    color: "from-amber-500 to-cyan-400",
+  },
+  ERROR: {
+    label: "Erro na dublagem",
+    step: "Falha",
+    color: "from-rose-500 to-amber-500",
+  },
+};
+
+const PREP_STAGE_LABELS: Record<string, string> = {
+  prep: "áudio & Whisper",
+  translate: "tradução LLM",
+  demucs: "separação Demucs",
+  diarize: "diarização",
+  tts: "síntese TTS",
+  mix: "mixagem",
+  preview_prep: "prévia 20s",
+};
+
 function formatEta(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || seconds < 0) return "";
   if (seconds < 60) return `~${Math.round(seconds)}s restante`;
@@ -64,6 +129,13 @@ export function LiveTaskFeedbackCard({
   onCancel,
   isExpanded = true,
   onToggleExpanded,
+  isDubbingTask = false,
+  downloadPercent = null,
+  prepStage = null,
+  errorMessage = null,
+  errorPhase = null,
+  onRetry,
+  onDismissError,
   className,
 }: LiveTaskFeedbackCardProps) {
   const [internalExpanded, setInternalExpanded] = useState(isExpanded);
@@ -82,11 +154,21 @@ export function LiveTaskFeedbackCard({
   };
 
   const normalizedStatus = String(status || "").replace(/^JobStatus\./i, "").toUpperCase();
-  const info = FRIENDLY_STATUS[normalizedStatus] || {
-    label: normalizedStatus ? `Processando (${normalizedStatus})` : "Processando tarefa...",
-    step: "Ativo",
-    color: "from-blue-500 to-indigo-500",
-  };
+  const info = (isDubbingTask ? FRIENDLY_DUBBING_STATUS[normalizedStatus] : undefined) ||
+    FRIENDLY_STATUS[normalizedStatus] ||
+    FRIENDLY_DUBBING_STATUS[normalizedStatus] || {
+      label: normalizedStatus ? `Processando (${normalizedStatus})` : "Processando tarefa...",
+      step: isDubbingTask ? "Dublagem IA" : "Ativo",
+      color: "from-blue-500 to-indigo-500",
+    };
+
+  const showParallelDownloadSummary =
+    isDubbingTask &&
+    !errorMessage &&
+    (typeof downloadPercent === "number" || normalizedStatus === "DOWNLOADING");
+  const parallelPrepLabel = prepStage
+    ? PREP_STAGE_LABELS[prepStage.toLowerCase()] || prepStage
+    : null;
 
   // Auto-scroll para o final dos logs
   useEffect(() => {
@@ -171,8 +253,40 @@ export function LiveTaskFeedbackCard({
           </div>
         </div>
 
-        {/* Mensagem Atual da Tarefa */}
-        {currentMessage && (
+        {/* Mensagem Atual da Tarefa / Progresso Paralelo / Retry de Erro */}
+        {showParallelDownloadSummary && (
+          <div className="text-xs text-cyan-200 font-sans bg-cyan-500/[0.08] border border-cyan-500/25 rounded-lg px-3 py-1.5 flex items-center justify-between gap-2 flex-wrap">
+            <span>
+              Baixando {typeof downloadPercent === "number" ? `${Math.round(downloadPercent)}%` : "..."} • Preparando em paralelo
+              {parallelPrepLabel ? ` (${parallelPrepLabel})` : "..."}
+            </span>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-3 flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-xs font-semibold text-rose-200 m-0">
+                Falha {errorPhase ? `na etapa (${errorPhase})` : "na dublagem"}
+              </p>
+              <p className="text-xs text-rose-100/85 m-0 break-words">{errorMessage}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {onRetry && (
+                <GlassButton variant="primary" size="sm" onClick={onRetry}>
+                  Tentar novamente (retomar)
+                </GlassButton>
+              )}
+              {onDismissError && (
+                <GlassButton variant="ghost" size="sm" onClick={onDismissError}>
+                  Fechar
+                </GlassButton>
+              )}
+            </div>
+          </div>
+        )}
+
+        {currentMessage && !errorMessage && (
           <p className="text-xs text-zinc-300 font-sans bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-1.5 truncate">
             {currentMessage}
           </p>

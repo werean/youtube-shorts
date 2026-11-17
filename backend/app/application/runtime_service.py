@@ -6,6 +6,7 @@ import asyncio
 import collections
 import json
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -33,6 +34,7 @@ TaskName = Literal[
     "topics",
     "analysis",
     "render",
+    "dubbing",
     "orchestrator",
     "batch",
     "all",
@@ -44,6 +46,7 @@ VALID_TASK_NAMES: set[str] = {
     "topics",
     "analysis",
     "render",
+    "dubbing",
     "orchestrator",
     "batch",
     "all",
@@ -243,6 +246,7 @@ class OperationRuntimeService:
         self._cancel_tokens: dict[tuple[str, str], CancelToken] = {}
         self._process_pids: dict[tuple[str, str], set[int]] = collections.defaultdict(set)
         self._partial_files: dict[str, set[Path]] = collections.defaultdict(set)
+        self._partial_dirs: dict[str, set[Path]] = collections.defaultdict(set)
         self._cancelled_renderings: set[str] = set()
         self._batches: dict[str, BatchPipelineProgress] = {}
         self._install_sessions: dict[str, dict[str, Any]] = {}
@@ -263,6 +267,7 @@ class OperationRuntimeService:
                 "ingest": collections.deque(maxlen=self.max_log_lines),
                 "transcription": collections.deque(maxlen=self.max_log_lines),
                 "render": collections.deque(maxlen=self.max_log_lines),
+                "dubbing": collections.deque(maxlen=self.max_log_lines),
             }
             self._logs[job_id] = store
         return store
@@ -387,6 +392,7 @@ class OperationRuntimeService:
                     "topics",
                     "analysis",
                     "render",
+                    "dubbing",
                 ]
                 seen = set(ordered_keys)
                 all_lines: list[str] = []
@@ -519,6 +525,12 @@ class OperationRuntimeService:
     def unregister_partial_file(self, job_id: str, file_path: str | Path) -> None:
         self._partial_files[job_id].discard(Path(file_path))
 
+    def register_partial_dir(self, job_id: str, path: str | Path) -> None:
+        self._partial_dirs[job_id].add(Path(path))
+
+    def unregister_partial_dir(self, job_id: str, path: str | Path) -> None:
+        self._partial_dirs[job_id].discard(Path(path))
+
     def cleanup_partial_files(self, job_id: str) -> list[str]:
         removed: list[str] = []
         files = self._partial_files.pop(job_id, set())
@@ -527,6 +539,15 @@ class OperationRuntimeService:
                 try:
                     f.unlink(missing_ok=True)
                     removed.append(str(f))
+                except OSError:
+                    pass
+        dirs = self._partial_dirs.pop(job_id, set())
+        for d in dirs:
+            if d.exists():
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                    if not d.exists():
+                        removed.append(str(d))
                 except OSError:
                     pass
         return removed
@@ -546,6 +567,8 @@ class OperationRuntimeService:
             if task == "render" and found:
                 self._cancelled_renderings.add(job_id)
                 self.cleanup_partial_files(job_id)
+            elif task == "dubbing" and found:
+                self.cleanup_partial_files(job_id)
             return found
 
         # Cancel all tasks for job_id
@@ -561,12 +584,34 @@ class OperationRuntimeService:
                     self.kill_process_tree(pid)
                     found = True
                 self._process_pids.pop((jid, tname), None)
-        if job_id in self._partial_files:
+        if job_id in self._partial_files or job_id in self._partial_dirs:
             self.cleanup_partial_files(job_id)
         return found
 
     def is_rendering_cancelled(self, job_id: str) -> bool:
         return job_id in self._cancelled_renderings
+
+    def is_dubbing_active(self, job_id: str) -> bool:
+        token = self._cancel_tokens.get((job_id, "dubbing"))
+        if token is not None and not token.is_set():
+            return True
+        pids = self._process_pids.get((job_id, "dubbing"))
+        if pids and len(pids) > 0:
+            return True
+        return False
+
+    def is_any_task_active(self, job_id: str) -> list[str]:
+        active: list[str] = []
+        seen: set[str] = set()
+        for (jid, task), token in list(self._cancel_tokens.items()):
+            if jid == job_id and not token.is_set() and task not in seen:
+                seen.add(task)
+                active.append(task)
+        for (jid, task), pids in list(self._process_pids.items()):
+            if jid == job_id and len(pids) > 0 and task not in seen:
+                seen.add(task)
+                active.append(task)
+        return active
 
     def conflicting_active_rendering_job_id(self, job_id: str) -> str | None:
         for (jid, task), token in self._cancel_tokens.items():
@@ -775,6 +820,8 @@ class ServiceContainer:
         self.dependency_installer: Callable[[str, dict[str, Any] | None, CancelToken | None, Callable[[str], None] | None], Awaitable[tuple[int, dict[str, Any]]]] | None = None
         self.dependency_uninstaller: Callable[[str, CancelToken | None, Callable[[str], None] | None], Awaitable[tuple[int, dict[str, Any]]]] | None = None
         self.terminal_opener: Callable[[str], dict[str, Any]] | None = None
+        self.dubbing_command_runner: Callable[..., Any] | None = None
+        self.dubbing_subprocess_runner: Any | None = None
 
     # Convenience accessors for settings and tool_configs
     def load_settings(self) -> settings.AppSettings:

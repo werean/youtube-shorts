@@ -10,6 +10,7 @@ from typing import Any
 
 from app.core.paths import settings_file_path
 from app.infrastructure.storage.atomic_store import atomic_write_json, read_json
+from app.models.domain import DubbingSettings
 from app.models.schemas import (
     AppSettings,
     LlmSettings,
@@ -105,6 +106,13 @@ def default_settings() -> AppSettings:
         ),
         whisper=WhisperSettings(device="cuda", formats=["json", "vtt", "txt"]),
         llm=LlmSettings(model="qwen2.5:14b"),
+        dubbing=DubbingSettings(
+            engine="qwen3_tts",
+            default_target_lang="ask",
+            default_voice_mode="auto",
+            default_subtitles_enabled=True,
+            default_subtitle_preset="mov_text",
+        ),
     )
 
 
@@ -120,6 +128,7 @@ def _parse_settings_dict(parsed: dict[str, Any]) -> AppSettings:
     prefs_in = parsed.get("preferences") if isinstance(parsed.get("preferences"), dict) else {}
     whisper_in = parsed.get("whisper") if isinstance(parsed.get("whisper"), dict) else {}
     llm_in = parsed.get("llm") if isinstance(parsed.get("llm"), dict) else {}
+    dubbing_in = parsed.get("dubbing") if isinstance(parsed.get("dubbing"), dict) else {}
 
     raw_base_dir = media_in.get("base_dir")
     base_dir = normalize_cross_os_base_dir(
@@ -156,6 +165,30 @@ def _parse_settings_dict(parsed: dict[str, Any]) -> AppSettings:
 
     model = str(llm_in.get("model") or "").strip() or defaults.llm.model
 
+    raw_engine = dubbing_in.get("engine")
+    dub_engine = "chatterbox" if raw_engine == "chatterbox" else defaults.dubbing.engine
+
+    raw_lang = dubbing_in.get("default_target_lang")
+    dub_lang = (
+        raw_lang
+        if raw_lang in ("ask", "pt-BR", "en", "es")
+        else defaults.dubbing.default_target_lang
+    )
+
+    raw_voice_mode = dubbing_in.get("default_voice_mode")
+    dub_voice_mode = "single" if raw_voice_mode == "single" else defaults.dubbing.default_voice_mode
+
+    dub_subs_enabled = (
+        dubbing_in["default_subtitles_enabled"]
+        if isinstance(dubbing_in.get("default_subtitles_enabled"), bool)
+        else defaults.dubbing.default_subtitles_enabled
+    )
+
+    raw_sub_preset = dubbing_in.get("default_subtitle_preset")
+    dub_sub_preset = (
+        "hardsub" if raw_sub_preset == "hardsub" else defaults.dubbing.default_subtitle_preset
+    )
+
     return AppSettings(
         media=MediaSettings(base_dir=base_dir, download_resolution=download_resolution),
         preferences=PreferencesSettings(
@@ -165,6 +198,13 @@ def _parse_settings_dict(parsed: dict[str, Any]) -> AppSettings:
         ),
         whisper=WhisperSettings(device=device, formats=formats),
         llm=LlmSettings(model=model),
+        dubbing=DubbingSettings(
+            engine=dub_engine,
+            default_target_lang=dub_lang,
+            default_voice_mode=dub_voice_mode,
+            default_subtitles_enabled=dub_subs_enabled,
+            default_subtitle_preset=dub_sub_preset,
+        ),
     )
 
 
@@ -232,6 +272,7 @@ def update_settings(partial: dict[str, Any] | AppSettings) -> AppSettings:
         "preferences": {**current["preferences"], **(patch.get("preferences") or {})},
         "whisper": {**current["whisper"], **(patch.get("whisper") or {})},
         "llm": {**current["llm"], **(patch.get("llm") or {})},
+        "dubbing": {**current.get("dubbing", {}), **(patch.get("dubbing") or {})},
     }
     if not merged["media"].get("base_dir"):
         merged["media"]["base_dir"] = current["media"]["base_dir"]

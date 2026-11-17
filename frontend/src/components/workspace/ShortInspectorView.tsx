@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { formatTimestamp } from "../../utils/formatters";
+import { resolveDubbingMediaUrl } from "../../api/dubbing";
 import { GlassButton, GlassCard, GlassBadge } from "../ui/glass";
-import type { Cut } from "../../types";
-import { ShortPreviewModal } from "./ShortPreviewModal";
+import type { Cut, DubbingCutTrack, DubbingManifest } from "../../types";
+import { ShortPreviewModal, type ShortPreviewDubTrack } from "./ShortPreviewModal";
 
 export interface ShortInspectorViewProps {
   cut?: Cut | null;
@@ -20,6 +21,7 @@ export interface ShortInspectorViewProps {
   renderOutputs?: string[];
   renderTitlesByFileName?: Record<string, string>;
   buildRenderUrl?: (renderPath: string) => string;
+  dubbingManifest?: DubbingManifest | null;
   readOnly?: boolean;
   onSelectCut?: (cutId: string) => void;
   onApproveAllCuts?: () => void;
@@ -52,6 +54,12 @@ function extractRenderFileName(renderPath: string): string {
   return withoutQuery.split("/").pop() || withoutQuery;
 }
 
+function appendDownloadParam(url: string): string {
+  if (!url) return url;
+  if (/[?&]download=1\b/i.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}download=1`;
+}
+
 export function ShortInspectorView({
   cut,
   videoSrc,
@@ -67,6 +75,7 @@ export function ShortInspectorView({
   renderOutputs = [],
   renderTitlesByFileName,
   buildRenderUrl,
+  dubbingManifest = null,
   readOnly = false,
   onSelectCut,
   onApproveAllCuts,
@@ -76,6 +85,9 @@ export function ShortInspectorView({
 }: ShortInspectorViewProps) {
   const [selectedRenderPath, setSelectedRenderPath] = useState<string | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [selectedDubLang, setSelectedDubLang] = useState<string | null>(null);
+  const [previewAudioMode, setPreviewAudioMode] = useState<"original" | "dubbed">("original");
+  const [previewDubLang, setPreviewDubLang] = useState<string | null>(null);
   const skipResetCutIdRef = useRef<string | null>(null);
   const prevCutIdRef = useRef<string | null>(cut?.cut_id ?? null);
 
@@ -139,11 +151,70 @@ export function ShortInspectorView({
     return matchedCut?.title || cut?.title || fileName;
   }, [activeRenderPath, renderTitlesByFileName, cutsByFileName, cut?.title]);
 
+  const readyCutDubTracks = useMemo<DubbingCutTrack[]>(() => {
+    const cutDubs = dubbingManifest?.cut_dubs;
+    if (!cutDubs) return [];
+    const activeFileName = activeRenderPath ? extractRenderFileName(activeRenderPath) : null;
+    const matchedFileCut = activeFileName ? cutsByFileName.get(activeFileName) : undefined;
+    const targetCutId = matchedFileCut?.cut_id ?? cut?.cut_id;
+
+    let langMap: Record<string, DubbingCutTrack> | undefined = targetCutId
+      ? cutDubs[targetCutId]
+      : undefined;
+
+    if (!langMap && activeFileName) {
+      for (const entries of Object.values(cutDubs)) {
+        const hasMatchingFile = Object.values(entries || {}).some(
+          (t) => t?.short_file === activeFileName,
+        );
+        if (hasMatchingFile) {
+          langMap = entries;
+          break;
+        }
+      }
+    }
+
+    if (!langMap) return [];
+    return Object.values(langMap).filter(
+      (t) =>
+        Boolean(t) &&
+        Boolean(t.exported_mp4_url) &&
+        (t.status === "ready" || t.status === "done" || Boolean(t.exported_mp4_url)),
+    );
+  }, [dubbingManifest?.cut_dubs, activeRenderPath, cutsByFileName, cut?.cut_id]);
+
+  const modalDubbedTracks = useMemo<ShortPreviewDubTrack[]>(() => {
+    return readyCutDubTracks
+      .map((track): ShortPreviewDubTrack | null => {
+        const resolved = resolveDubbingMediaUrl(track.exported_mp4_url);
+        if (!resolved) return null;
+        return {
+          lang: String(track.lang),
+          src: resolved,
+          label: `Dublado (${String(track.lang).toUpperCase()})`,
+        };
+      })
+      .filter((item): item is ShortPreviewDubTrack => item !== null);
+  }, [readyCutDubTracks]);
+
+  const activeDubTrack = useMemo(() => {
+    if (modalDubbedTracks.length === 0) return null;
+    if (selectedDubLang) {
+      const found = modalDubbedTracks.find((t) => t.lang === selectedDubLang);
+      if (found) return found;
+    }
+    if (dubbingManifest?.active_lang) {
+      const found = modalDubbedTracks.find((t) => t.lang === dubbingManifest.active_lang);
+      if (found) return found;
+    }
+    return modalDubbedTracks[0] ?? null;
+  }, [modalDubbedTracks, selectedDubLang, dubbingManifest?.active_lang]);
+
   useEffect(() => {
-    if (!activeRenderUrl && isPreviewModalOpen) {
+    if (!activeRenderUrl && !activeDubTrack?.src && isPreviewModalOpen) {
       setIsPreviewModalOpen(false);
     }
-  }, [activeRenderUrl, isPreviewModalOpen]);
+  }, [activeRenderUrl, activeDubTrack?.src, isPreviewModalOpen]);
 
   // Curation counts
   const hasCutsList = Boolean(cuts && cuts.length > 0);
@@ -474,6 +545,16 @@ export function ShortInspectorView({
                     matchedCut?.title ||
                     fileName;
                   const isActive = selectedRenderPath === path;
+                  const cutDubLangs = matchedCut
+                    ? Object.values(dubbingManifest?.cut_dubs?.[matchedCut.cut_id] || {})
+                        .filter(
+                          (t) =>
+                            Boolean(t) &&
+                            Boolean(t.exported_mp4_url) &&
+                            (t.status === "ready" || t.status === "done" || Boolean(t.exported_mp4_url)),
+                        )
+                        .map((t) => String(t.lang).toUpperCase())
+                    : [];
 
                   return (
                     <button
@@ -495,16 +576,23 @@ export function ShortInspectorView({
                           {fileName}
                         </p>
                       </div>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold",
-                          isActive
-                            ? "bg-emerald-400/20 text-emerald-200 border border-emerald-400/30"
-                            : "bg-white/[0.06] text-zinc-300 border border-white/10",
+                      <div className="flex shrink-0 items-center gap-1">
+                        {cutDubLangs.length > 0 && (
+                          <span className="rounded-md border border-cyan-400/35 bg-cyan-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-cyan-200">
+                            {cutDubLangs.join(", ")}
+                          </span>
                         )}
-                      >
-                        {isActive ? "No player" : "Ver"}
-                      </span>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold",
+                            isActive
+                              ? "bg-emerald-400/20 text-emerald-200 border border-emerald-400/30"
+                              : "bg-white/[0.06] text-zinc-300 border border-white/10",
+                          )}
+                        >
+                          {isActive ? "No player" : "Ver"}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}
@@ -638,9 +726,11 @@ export function ShortInspectorView({
                 variant={activeRenderUrl ? "primary" : "glass"}
                 size="sm"
                 fullWidth
-                disabled={!activeRenderUrl}
+                disabled={!activeRenderUrl && !activeDubTrack?.src}
                 onClick={() => {
-                  if (activeRenderUrl) {
+                  if (activeRenderUrl || activeDubTrack?.src) {
+                    setPreviewAudioMode(activeRenderUrl ? "original" : "dubbed");
+                    setPreviewDubLang(activeDubTrack?.lang ?? null);
                     setIsPreviewModalOpen(true);
                   }
                 }}
@@ -680,6 +770,59 @@ export function ShortInspectorView({
               )}
             </div>
           </div>
+
+          {modalDubbedTracks.length > 0 && activeDubTrack && (
+            <div className="rounded-xl border border-cyan-400/25 bg-cyan-500/[0.07] p-2.5 space-y-2 backdrop-blur-md shadow-[0_0_16px_rgba(34,211,238,0.08)]">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">
+                  Short Dublado
+                </span>
+                <div className="flex flex-wrap items-center gap-1">
+                  {modalDubbedTracks.map((track) => {
+                    const isSelected = activeDubTrack.lang === track.lang;
+                    return (
+                      <button
+                        key={track.lang}
+                        type="button"
+                        onClick={() => setSelectedDubLang(track.lang)}
+                        className={cn(
+                          "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase transition-colors cursor-pointer",
+                          isSelected
+                            ? "border-cyan-400/50 bg-cyan-500/25 text-cyan-100"
+                            : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-cyan-400/30 hover:text-cyan-100",
+                        )}
+                      >
+                        {track.lang}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewAudioMode("dubbed");
+                    setPreviewDubLang(activeDubTrack.lang);
+                    setIsPreviewModalOpen(true);
+                  }}
+                  className="flex-1 rounded-lg border border-cyan-400/40 bg-cyan-500/20 px-2.5 py-1.5 text-center text-[11px] font-semibold text-cyan-100 hover:bg-cyan-500/30 transition-colors cursor-pointer"
+                >
+                  Ver Dublado ({activeDubTrack.lang.toUpperCase()})
+                </button>
+                <a
+                  href={appendDownloadParam(activeDubTrack.src)}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-1.5 text-center text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/30 transition-colors"
+                >
+                  Baixar Dublado (.mp4)
+                </a>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pilares do Arco Narrativo (Hook, Desenvolvimento, Clímax, Resolução) */}
@@ -1077,9 +1220,12 @@ export function ShortInspectorView({
 
       {/* Modal Limpo de Pre-visualizacao do Short Renderizado */}
       <ShortPreviewModal
-        isOpen={isPreviewModalOpen && Boolean(activeRenderUrl)}
-        src={activeRenderUrl}
+        isOpen={isPreviewModalOpen && Boolean(activeRenderUrl || activeDubTrack?.src)}
+        src={activeRenderUrl || activeDubTrack?.src || ""}
         title={activeRenderTitle}
+        dubbedTracks={modalDubbedTracks}
+        initialAudioMode={previewAudioMode}
+        initialDubLang={previewDubLang}
         onClose={() => setIsPreviewModalOpen(false)}
       />
     </aside>

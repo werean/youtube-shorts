@@ -2,10 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/utils";
 
+export interface ShortPreviewDubTrack {
+  lang: string;
+  src: string;
+  label?: string;
+}
+
 export interface ShortPreviewModalProps {
   isOpen: boolean;
   src: string;
   title?: string;
+  dubbedTracks?: ShortPreviewDubTrack[];
+  initialAudioMode?: "original" | "dubbed";
+  initialDubLang?: string | null;
   onClose: () => void;
 }
 
@@ -15,6 +24,9 @@ export function ShortPreviewModal({
   isOpen,
   src,
   title,
+  dubbedTracks = [],
+  initialAudioMode = "original",
+  initialDubLang = null,
   onClose,
 }: ShortPreviewModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -22,6 +34,27 @@ export function ShortPreviewModal({
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [audioMode, setAudioMode] = useState<"original" | "dubbed">(initialAudioMode);
+  const [selectedDubLang, setSelectedDubLang] = useState<string | null>(initialDubLang);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasDubbed = dubbedTracks.length > 0;
+    const nextMode = initialAudioMode === "dubbed" && hasDubbed ? "dubbed" : "original";
+    setAudioMode(nextMode);
+    if (initialDubLang && dubbedTracks.some((t) => t.lang === initialDubLang)) {
+      setSelectedDubLang(initialDubLang);
+    } else {
+      setSelectedDubLang(dubbedTracks[0]?.lang ?? null);
+    }
+  }, [isOpen, initialAudioMode, initialDubLang, dubbedTracks]);
+
+  const activeDubbedTrack =
+    dubbedTracks.find((t) => t.lang === selectedDubLang) ?? dubbedTracks[0] ?? null;
+  const effectiveAudioMode =
+    audioMode === "dubbed" && activeDubbedTrack ? "dubbed" : "original";
+  const activeSrc =
+    effectiveAudioMode === "dubbed" && activeDubbedTrack ? activeDubbedTrack.src : src;
 
   // Lock background page scroll while modal is open
   useEffect(() => {
@@ -64,9 +97,9 @@ export function ShortPreviewModal({
     video.volume = volume;
     video.muted = isMuted;
     video.playbackRate = playbackRate;
-  }, [isOpen, src, volume, isMuted, playbackRate]);
+  }, [isOpen, activeSrc, volume, isMuted, playbackRate]);
 
-  if (!isOpen || !src || typeof document === "undefined") {
+  if (!isOpen || !activeSrc || typeof document === "undefined") {
     return null;
   }
 
@@ -154,12 +187,56 @@ export function ShortPreviewModal({
           </button>
         </div>
 
+        {/* Optional Original / Dubbed switcher */}
+        {dubbedTracks.length > 0 && (
+          <div
+            className="flex w-full flex-wrap items-center justify-center gap-1 rounded-xl border border-white/[0.1] bg-white/[0.04] p-1"
+            role="group"
+            aria-label="Alternar versão do Short"
+          >
+            <button
+              type="button"
+              onClick={() => setAudioMode("original")}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+                effectiveAudioMode === "original"
+                  ? "bg-white/[0.16] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)]"
+                  : "text-zinc-400 hover:text-white",
+              )}
+            >
+              Original (.mp4)
+            </button>
+            {dubbedTracks.map((track) => {
+              const isSelected =
+                effectiveAudioMode === "dubbed" && activeDubbedTrack?.lang === track.lang;
+              return (
+                <button
+                  key={track.lang}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDubLang(track.lang);
+                    setAudioMode("dubbed");
+                  }}
+                  className={cn(
+                    "rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+                    isSelected
+                      ? "border border-cyan-400/45 bg-cyan-500/25 text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.2)]"
+                      : "text-zinc-400 hover:text-cyan-200",
+                  )}
+                >
+                  {track.label || `Dublado (${track.lang.toUpperCase()})`}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Clean 9:16 video player without native controls clutter */}
         <div className="relative flex w-full justify-center overflow-hidden rounded-2xl border border-white/[0.12] bg-black">
           <video
-            key={src}
+            key={activeSrc}
             ref={videoRef}
-            src={src}
+            src={activeSrc}
             autoPlay
             loop
             playsInline
@@ -176,7 +253,10 @@ export function ShortPreviewModal({
               video.muted = isMuted;
               video.playbackRate = playbackRate;
             }}
-            className="aspect-[9/16] max-h-[68vh] w-auto cursor-pointer object-contain bg-black"
+            className={cn(
+              "aspect-[9/16] w-auto cursor-pointer object-contain bg-black",
+              dubbedTracks.length > 0 ? "max-h-[62vh]" : "max-h-[68vh]",
+            )}
           />
         </div>
 

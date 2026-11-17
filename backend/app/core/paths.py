@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
+from typing import Sequence
 
 _override_data_dir: Path | None = None
 _override_project_root: Path | None = None
@@ -149,3 +151,99 @@ def job_pipeline_log_path(job_id: str) -> Path:
 def job_stage_log_path(job_id: str, stage: str) -> Path:
     safe_stage = _sanitize_log_segment(stage, "general")
     return job_logs_dir(job_id) / f"{safe_stage}.log"
+
+
+def models_root_dir(create: bool = False) -> Path:
+    """Return `{data_dir}/models` directory."""
+    d = data_dir() / "models"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def whisper_models_dir(create: bool = False) -> Path:
+    """Return `{data_dir}/models/whisper` directory for faster-whisper download_root."""
+    d = models_root_dir(create=create) / "whisper"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def dubbing_base_venv_dir() -> Path:
+    """Return `{data_dir}/models/.venv-dubbing-base`."""
+    return models_root_dir(create=False) / ".venv-dubbing-base"
+
+
+def dubbing_engine_venv_dir(engine: str) -> Path:
+    """Return isolated engine sub-venv directory under `{data_dir}/models/`."""
+    norm = (engine or "").strip().lower()
+    if norm in ("qwen3", "qwen3_tts", "qwen3-tts"):
+        slug = "qwen3"
+    elif norm in ("chatterbox", "chatterbox_tts", "chatterbox-tts"):
+        slug = "chatterbox"
+    else:
+        slug = _sanitize_log_segment(norm, "unknown")
+    return models_root_dir(create=False) / f".venv-{slug}"
+
+
+def dubbing_hf_cache_dir(create: bool = False) -> Path:
+    """Return `{data_dir}/models/hf_cache` for isolated HF_HOME downloads."""
+    d = models_root_dir(create=create) / "hf_cache"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def dubbing_sep_cache_dir(create: bool = False) -> Path:
+    """Return `{data_dir}/models/audio_separator` for Demucs/audio-separator checkpoints."""
+    d = models_root_dir(create=create) / "audio_separator"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def dubbing_sherpa_cache_dir(create: bool = False) -> Path:
+    """Return `{data_dir}/models/sherpa_onnx` for sherpa-onnx diarization models."""
+    d = models_root_dir(create=create) / "sherpa_onnx"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def dubs_dir_path(video_dir: str | Path, create: bool = False) -> Path:
+    """Return `{video_dir}/dubs` directory."""
+    d = Path(video_dir) / "dubs"
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def dubbing_manifest_path(job_id: str) -> Path:
+    """Return `data/jobs/<job_id>/dubbing.manifest.json`."""
+    return job_dir(job_id) / "dubbing.manifest.json"
+
+
+def is_hidden_or_internal_dir_name(name: str) -> bool:
+    """Return True for hidden/internal directory names starting with `.` or `_` (case-insensitive)."""
+    cleaned = (name or "").strip().lower()
+    return cleaned.startswith(".") or cleaned.startswith("_")
+
+
+def sweep_trash_directories(roots: Sequence[Path]) -> int:
+    """Best-effort cleanup of leftover `.trash_*` directories on Windows/POSIX startup."""
+    removed = 0
+    for root in roots:
+        try:
+            root_path = Path(root)
+            if not root_path.exists() or not root_path.is_dir():
+                continue
+            for entry in root_path.iterdir():
+                if entry.is_dir() and entry.name.lower().startswith(".trash_"):
+                    try:
+                        shutil.rmtree(entry)
+                        removed += 1
+                    except OSError:
+                        pass
+        except OSError:
+            continue
+    return removed

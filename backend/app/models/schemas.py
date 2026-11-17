@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.domain import Cut, Job, Segment
+from app.models.domain import Cut, DubbingSettings, Job, Segment
 
 
 class ErrorDetailResponse(BaseModel):
@@ -172,6 +172,7 @@ class AppSettings(BaseModel):
     preferences: PreferencesSettings
     whisper: WhisperSettings
     llm: LlmSettings
+    dubbing: DubbingSettings = Field(default_factory=DubbingSettings)
 
 
 class SavedLLMPrompt(BaseModel):

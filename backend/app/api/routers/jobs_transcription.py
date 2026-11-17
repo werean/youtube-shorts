@@ -17,6 +17,11 @@ VALID_DELETE_FORMATS: frozenset[str] = frozenset({"segments", "text", "vtt", "js
 
 @router.post("/jobs/{job_id}/transcribe")
 async def transcribe_job_route(job_id: str) -> dict[str, Any]:
+    if get_container().runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Dublagem em andamento para este vídeo. Aguarde ou cancele antes de transcrever.",
+        )
     try:
         result = await get_transcription_service().transcribe_job(job_id)
         return result.model_dump()

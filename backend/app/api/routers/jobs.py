@@ -109,6 +109,11 @@ async def run_single_job_pipeline(
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Run full 1-click sequential processing pipeline for a job."""
+    if get_container().runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Dublagem em andamento para este vídeo. Aguarde ou cancele antes de executar o pipeline.",
+        )
     include_render = bool(body.get("include_render", True))
     try:
         job = await run_job_pipeline(job_id, include_render=include_render)
@@ -183,6 +188,11 @@ async def archive_job_attempt(
 ) -> dict[str, Any]:
     """Snapshot active attempt artifacts and optionally reset active state to DOWNLOADED."""
     container = get_container()
+    if container.runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Dublagem em andamento para este vídeo. Aguarde ou cancele antes de arquivar a tentativa.",
+        )
     raw_label = body.get("label") if isinstance(body, dict) else None
     label = str(raw_label) if raw_label is not None else None
     raw_reset = body.get("reset_active") if isinstance(body, dict) else None

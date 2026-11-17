@@ -8,8 +8,11 @@ import type {
   DependencyInstallSession,
   DependencyInstallSessionStatus,
   DependencyOperationMode,
+  DubbingSettings,
   InstallationGuide,
   InstallDependencyResult,
+  LmStudioModelStorageItem,
+  ModelStorageItem,
   OllamaModelsResponse,
   PytorchGpuTier,
   RegisterOllamaModelRequest,
@@ -17,17 +20,23 @@ import type {
   RemoveOllamaModelResponse,
   SavedLLMPrompt,
   StartDependencyInstallSessionResult,
+  StorageUsageSummary,
 } from "@youtube-shorts/contracts";
+import type { DeleteModelResponse } from "../types";
 
 export type {
   AppSettings,
+  DeleteModelResponse,
   DependenciesSnapshot,
   DependencyInstallOptions,
   DependencyInstallSession,
   DependencyInstallSessionStatus,
   DependencyOperationMode,
+  DubbingSettings,
   InstallationGuide,
   InstallDependencyResult,
+  LmStudioModelStorageItem,
+  ModelStorageItem,
   OllamaModelsResponse,
   PytorchGpuTier,
   RegisterOllamaModelRequest,
@@ -35,6 +44,7 @@ export type {
   RemoveOllamaModelResponse,
   SavedLLMPrompt,
   StartDependencyInstallSessionResult,
+  StorageUsageSummary,
 };
 
 export async function getLLMPrompt(): Promise<{ prompt: string; version: string }> {
@@ -252,4 +262,32 @@ export async function getCommonFolders(): Promise<{
 
 export async function selectFolder(): Promise<{ selected: boolean; path: string | null }> {
   return request("/config/select-folder", { method: "POST" });
+}
+
+export async function getStorageUsage(): Promise<StorageUsageSummary> {
+  return request<StorageUsageSummary>("/config/storage-usage");
+}
+
+export async function deleteModelStorage(modelId: string): Promise<DeleteModelResponse> {
+  return request<DeleteModelResponse>(`/config/models/${encodeURIComponent(modelId)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface DeleteLmStudioModelResponse {
+  ok: boolean;
+  model_key: string;
+  freed_bytes: number;
+  deleted_paths: string[];
+}
+
+export async function deleteLmStudioModel(
+  modelKey: string,
+): Promise<DeleteLmStudioModelResponse> {
+  return request<DeleteLmStudioModelResponse>(
+    `/config/lmstudio-models?model_key=${encodeURIComponent(modelKey)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }

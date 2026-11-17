@@ -110,10 +110,9 @@ async def stream_job_events(
                         idle_ping_counter = 0
                         yield ": keep-alive\n\n"
 
-                    # Only exit if the job reached terminal state and queue is drained
+                    # Check if browser/client disconnected cleanly
                     try:
-                        latest_job = c.jobs.load_job(job_id)
-                        if latest_job.status in (JobStatus.DONE, JobStatus.ERROR) and queue.empty():
+                        if await request.is_disconnected():
                             break
                     except Exception:
                         pass
@@ -136,6 +135,11 @@ async def _handle_rename_job(job_id: str, body: dict[str, Any]) -> dict[str, Any
     if not new_name:
         raise HTTPException(status_code=400, detail="new_name is required")
     c = get_container()
+    if c.runtime.is_dubbing_active(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Não é possível renomear o vídeo enquanto a dublagem está em andamento.",
+        )
     try:
         job = c.jobs.rename_video(job_id, new_name)
         return job.model_dump()

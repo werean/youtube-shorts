@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
 from app.application.job_lifecycle import utc_now_iso
@@ -30,6 +30,12 @@ from app.core.tool_configs import (
     reset_tool_config_section_payload,
     update_tool_configs,
     update_tool_configs_payload,
+)
+from app.infrastructure.dubbing.storage_manager import (
+    ModelInUseError,
+    compute_app_storage_usage,
+    delete_individual_model,
+    delete_lmstudio_model,
 )
 from app.infrastructure.storage.atomic_store import atomic_write_json, read_json
 
@@ -1221,3 +1227,40 @@ async def open_dependency_terminal(
         "message": f"Opened the default system terminal with the {mode} command.",
         "command": command,
     }
+
+
+# --- Storage Usage & Individual Model Cache Cleanup (`/config/storage-usage`, `/config/models/{model_id}`) ---
+
+
+@router.get("/storage-usage")
+async def get_storage_usage() -> dict[str, Any]:
+    """Return total app disk usage split by media categories and individual model/venv caches."""
+    return compute_app_storage_usage().model_dump()
+
+
+@router.delete("/models/{model_id}", response_model=None)
+async def delete_model_route(model_id: str) -> Any:
+    """Safely delete an individual cached model or isolated dubbing sub-venv."""
+    container = get_container()
+    try:
+        return delete_individual_model(model_id, container=container)
+    except ModelInUseError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    except OSError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@router.delete("/lmstudio-models", response_model=None)
+async def delete_lmstudio_model_route(model_key: str = Query(..., min_length=1)) -> Any:
+    """Safely delete a user-downloaded LM Studio model directory outside .internal/."""
+    container = get_container()
+    try:
+        return delete_lmstudio_model(model_key, container=container)
+    except ModelInUseError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    except OSError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})

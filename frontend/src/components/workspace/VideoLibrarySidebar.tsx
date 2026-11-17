@@ -11,6 +11,7 @@ export interface WorkspaceVideoItem {
   cutsCount?: number;
   status: JobStatus | string;
   isProcessing?: boolean;
+  isDubbingActive?: boolean;
   attemptsCount?: number;
   canArchive?: boolean;
 }
@@ -22,6 +23,8 @@ export interface VideoLibrarySidebarProps {
   onImportClick?: () => void;
   onTranscribeVideo?: (videoId: string) => void;
   onGenerateCuts?: (videoId: string) => void;
+  onDeleteVideo?: (videoId: string) => void;
+  deletingVideoId?: string | null;
   attemptsByVideoId?: Record<string, AttemptSummary[]>;
   loadingAttemptsByVideoId?: Record<string, boolean>;
   selectedAttemptKey?: { jobId: string; attemptId: string } | null;
@@ -92,6 +95,8 @@ export function VideoLibrarySidebar({
   onImportClick,
   onTranscribeVideo,
   onGenerateCuts,
+  onDeleteVideo,
+  deletingVideoId = null,
   attemptsByVideoId = {},
   loadingAttemptsByVideoId = {},
   selectedAttemptKey = null,
@@ -258,17 +263,60 @@ export function VideoLibrarySidebar({
                         : "border-transparent bg-transparent hover:border-white/[0.08] hover:bg-white/[0.04]",
                   )}
                 >
-                  {/* Linha superior: Titulo */}
+                  {/* Linha superior: Titulo e botao Excluir */}
                   <div className="flex items-start justify-between gap-1.5">
                     <span
                       className={cn(
-                        "line-clamp-2 text-sm font-semibold transition-colors leading-snug",
+                        "line-clamp-2 text-sm font-semibold transition-colors leading-snug flex-1 min-w-0",
                         isSelected ? "text-white" : "text-zinc-200 group-hover:text-white",
                       )}
                       title={video.title}
                     >
                       {video.title}
                     </span>
+                    {onDeleteVideo && (() => {
+                      const isDeleteDisabled = Boolean(
+                        video.isProcessing ||
+                          video.isDubbingActive ||
+                          deletingVideoId === video.id,
+                      );
+                      return (
+                        <button
+                          type="button"
+                          disabled={isDeleteDisabled}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteVideo(video.id);
+                          }}
+                          title={
+                            isDeleteDisabled
+                              ? "Aguarde ou cancele o processamento/dublagem antes de excluir"
+                              : "Excluir vídeo permanentemente"
+                          }
+                          aria-label={`Excluir ${video.title}`}
+                          className={cn(
+                            "p-1 rounded-lg text-zinc-500 transition-all flex-shrink-0",
+                            isDeleteDisabled
+                              ? "opacity-30 cursor-not-allowed"
+                              : "opacity-60 group-hover:opacity-100 hover:text-rose-400 hover:bg-rose-500/15",
+                          )}
+                        >
+                          <svg
+                            className="w-3.5 h-3.5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {/* Linha inferior: Duracao, Cortes e Status */}

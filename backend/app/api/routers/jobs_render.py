@@ -34,6 +34,17 @@ async def start_render_cuts(
     # Validate job exists (raises JobNotFoundError -> 404 if not found)
     job = container.jobs.load_job(job_id)
 
+    if container.runtime.is_dubbing_active(job_id):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": (
+                    "Dublagem em andamento para este vídeo. "
+                    "Aguarde ou cancele a dublagem antes de renderizar cortes."
+                )
+            },
+        )
+
     conflict = container.runtime.conflicting_active_rendering_job_id(job_id)
     if conflict:
         return JSONResponse(

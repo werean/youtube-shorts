@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from app.application.job_lifecycle import JobNotFoundError, utc_now_iso
+from app.application.job_lifecycle import (
+    ACTIVE_PROCESSING_STATUSES,
+    JobNotFoundError,
+    utc_now_iso,
+)
 from app.application.runtime_service import get_container
+from app.core.paths import is_hidden_or_internal_dir_name, job_logs_dir
 from app.core.settings import (
     archived_videos_dir,
     get_archived_video_dir,
@@ -37,6 +44,8 @@ def _collect_video_files(root_dir: Path, archived: bool) -> list[dict[str, Any]]
     results: list[dict[str, Any]] = []
     for entry in sorted(root_dir.iterdir(), key=lambda p: p.name):
         if not archived and entry.name == "_archived":
+            continue
+        if is_hidden_or_internal_dir_name(entry.name):
             continue
         if not entry.is_dir():
             continue
@@ -176,6 +185,14 @@ async def archive_video(job_id: str) -> Any:
     except JobNotFoundError:
         return JSONResponse(status_code=404, content={"detail": "Video not found"})
 
+    active_tasks = container.runtime.is_any_task_active(job_id)
+    if active_tasks or job.status in ACTIVE_PROCESSING_STATUSES:
+        reason = ", ".join(active_tasks) or str(job.status.value if hasattr(job.status, "value") else job.status)
+        return JSONResponse(
+            status_code=409,
+            content={"detail": f"Não é possível arquivar enquanto há processamento ativo ({reason})."},
+        )
+
     video_name = job.video_name or job_id
     video_dir = get_video_dir(job_id, video_name)
     if not video_dir.exists():
@@ -197,6 +214,33 @@ async def archive_video(job_id: str) -> Any:
     return {"ok": True, "job_id": job_id}
 
 
+async def _atomic_trash_and_remove_dir(
+    target_dir: Path,
+    trash_root: Path,
+    job_id: str,
+) -> Path | None:
+    """Atomically move `target_dir` to a `.trash_*` tombstone with 3x150ms retries before deletion."""
+    if not target_dir.exists():
+        return None
+
+    trash_root.mkdir(parents=True, exist_ok=True)
+    trash_path = trash_root / f".trash_{job_id}_{uuid.uuid4().hex[:8]}"
+    last_err: OSError | None = None
+    for attempt in range(3):
+        try:
+            os.replace(str(target_dir), str(trash_path))
+            return trash_path
+        except PermissionError as exc:
+            last_err = exc
+            if attempt < 2:
+                await asyncio.sleep(0.15)
+        except OSError as exc:
+            last_err = exc
+            if attempt < 2:
+                await asyncio.sleep(0.15)
+    raise last_err or PermissionError(f"Directory locked: {target_dir}")
+
+
 @router.delete("/{job_id}", response_model=None)
 async def delete_video(job_id: str) -> Any:
     container = get_container()
@@ -205,24 +249,79 @@ async def delete_video(job_id: str) -> Any:
     except JobNotFoundError:
         return JSONResponse(status_code=404, content={"detail": "Video not found"})
 
+    active_tasks = container.runtime.is_any_task_active(job_id)
+    if active_tasks or job.status in ACTIVE_PROCESSING_STATUSES:
+        reason = ", ".join(active_tasks) or str(job.status.value if hasattr(job.status, "value") else job.status)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": (
+                    f"Não é possível excluir enquanto há processamento ativo ({reason}). "
+                    "Cancele a tarefa antes de excluir."
+                )
+            },
+        )
+
+    base_dir = Path(load_settings().media.base_dir).resolve()
+    arch_root = archived_videos_dir(create=False).resolve()
+
     video_name = job.video_name or job_id
     active_dir = get_video_dir(job_id, video_name)
     arch_dir = get_archived_video_dir(video_name, create=False)
 
+    candidates: list[tuple[Path, Path]] = []
+    seen_keys: set[str] = set()
+
+    def _add_candidate(d: Path, trash_root: Path) -> None:
+        try:
+            resolved = d.resolve()
+        except OSError:
+            resolved = d
+        if resolved == base_dir or resolved == arch_root:
+            return
+        key = os.path.normcase(os.path.normpath(str(resolved)))
+        if key not in seen_keys:
+            seen_keys.add(key)
+            candidates.append((d, trash_root))
+
     if job.source_video_path:
         svp_dir = Path(job.source_video_path).parent
-        if svp_dir.exists():
-            shutil.rmtree(svp_dir, ignore_errors=True)
+        svp_parent = svp_dir.parent.resolve() if svp_dir.parent else base_dir
+        _add_candidate(svp_dir, svp_parent)
 
-    if active_dir.exists():
-        shutil.rmtree(active_dir, ignore_errors=True)
-    if arch_dir.exists():
-        shutil.rmtree(arch_dir, ignore_errors=True)
+    _add_candidate(active_dir, base_dir)
+    _add_candidate(arch_dir, arch_root)
+
+    trash_paths: list[Path] = []
+    for target_dir, trash_root in candidates:
+        if not target_dir.exists():
+            continue
+        try:
+            moved_trash = await _atomic_trash_and_remove_dir(target_dir, trash_root, job_id)
+            if moved_trash is not None:
+                trash_paths.append(moved_trash)
+        except OSError:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": (
+                        "Arquivo de vídeo ainda está em uso pelo player ou sistema operacional. "
+                        "Aguarde um instante e tente excluir novamente."
+                    )
+                },
+            )
+
+    for tp in trash_paths:
+        shutil.rmtree(tp, ignore_errors=True)
 
     container.jobs.delete_render_outputs(job_id)
     jdir = container.jobs.job_dir_path(job_id, create=False)
     if jdir.exists():
         shutil.rmtree(jdir, ignore_errors=True)
+
+    ldir = job_logs_dir(job_id)
+    if ldir.exists():
+        shutil.rmtree(ldir, ignore_errors=True)
 
     container.jobs.invalidate_caches(job_id)
     return {"ok": True, "job_id": job_id}

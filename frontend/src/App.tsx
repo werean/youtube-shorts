@@ -3,6 +3,11 @@ import type {
   AttemptDetail,
   AttemptSummary,
   Cut,
+  DubbingEngine,
+  DubbingLanguage,
+  DubbingStartOptions,
+  DubbingSubtitlePreset,
+  DubbingVoiceMode,
   Job,
   JobStatus,
   Segment,
@@ -13,7 +18,7 @@ import { recordToVideoItem } from "./utils/videoHelpers";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
-import { useJobEvents, useUIState } from "./hooks";
+import { useDubbingWorkflow, useJobEvents, useUIState } from "./hooks";
 import { useCutsWorkflow } from "./hooks/useCutsWorkflow";
 import { useCutTimestampWorkflow } from "./hooks/useCutTimestampWorkflow";
 import { useDependencyManagementWorkflow } from "./hooks/useDependencyManagementWorkflow";
@@ -40,6 +45,7 @@ import {
   listVideos,
   openVideoFolder,
   renameVideo,
+  resolveDubbingMediaUrl,
   runJobPipeline,
   updateCuts,
   uploadVideoFile,
@@ -71,6 +77,8 @@ import { TranscriptionDialogs } from "./components/app/TranscriptionDialogs";
 import { DependenciesDialog } from "./components/dialogs/DependenciesDialog";
 import { LLMConfigDialog } from "./components/dialogs/LLMConfigDialog";
 import { ConfigureAppDialog } from "./components/dialogs/ConfigureAppDialog";
+import { DubbingPreflightDialog } from "./components/dialogs/DubbingPreflightDialog";
+import { DeleteVideoConfirmDialog } from "./components/dialogs/DeleteVideoConfirmDialog";
 import { SimpleDialogs } from "./components/dialogs/SimpleDialogs";
 import { RenderingSection } from "./components/RenderingSection";
 import { UploadSection } from "./components/UploadSection";
@@ -125,6 +133,29 @@ const STATUS_DESCRIPTIONS: Record<string, string> = {
   DONE: "Processamento concluído com sucesso",
   ERROR: "Erro durante o processamento",
 };
+
+const DUBBING_STATUS_DESCRIPTIONS: Record<string, string> = {
+  preparing: "Preparando ambiente de dublagem (IA Local)",
+  downloading: "Baixando modelos e ambiente de dublagem",
+  translating: "Traduzindo roteiro com contexto (LLM local)",
+  separating: "Separando voz e trilha de fundo (Demucs)",
+  diarizing: "Identificando locutores no áudio (Sherpa-ONNX)",
+  synthesizing: "Sintetizando vozes clonadas (TTS Neural)",
+  mixing: "Mixando trilha dublada e legendas sincronizadas",
+  previewing: "Gerando prévia rápida de 20s",
+  error: "Erro na dublagem",
+};
+
+const ACTIVE_DUBBING_JOB_STATUSES = new Set([
+  "preparing",
+  "downloading",
+  "translating",
+  "separating",
+  "diarizing",
+  "synthesizing",
+  "mixing",
+  "previewing",
+]);
 
 function formatEtaSeconds(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || seconds < 0) return "";
@@ -392,13 +423,21 @@ export default function App() {
     jobStatus: sseJobStatus,
     logs: sseLogs,
     resetProgress,
+    dubbingState,
+    resetDubbingState,
   } = useJobEvents(activeVideoId, (newStatus) => {
     const normalizedStatus = String(newStatus).replace(/^JobStatus\./i, "").toUpperCase() as JobStatus;
     console.log(`[SSE] Status alterado para ${activeVideoId}: ${normalizedStatus}`);
     if (activeVideoId) {
+      const existingVideo = videos.find((v) => v.job.job_id === activeVideoId);
+      const previousStatus = existingVideo?.job?.status
+        ? String(existingVideo.job.status).replace(/^JobStatus\./i, "").toUpperCase()
+        : null;
+      const isStatusTransition = previousStatus !== normalizedStatus;
+
       updateVideo(activeVideoId, {
         job: {
-          ...(videos.find((v) => v.job.job_id === activeVideoId)?.job ?? {
+          ...(existingVideo?.job ?? {
             job_id: activeVideoId,
             youtube_url: "",
             status: normalizedStatus,
@@ -408,6 +447,10 @@ export default function App() {
         },
         isTranscribing: normalizedStatus === "TRANSCRIBING",
       });
+
+      if (!isStatusTransition && !is1ClickRunning) {
+        return;
+      }
 
       if (normalizedStatus === "WAITING_APPROVAL") {
         void loadCutsForActiveJob(activeVideoId);
@@ -423,7 +466,6 @@ export default function App() {
       if (normalizedStatus === "DONE") {
         void loadCutsForActiveJob(activeVideoId);
         void refreshRenderOutputs(activeVideoId);
-        void refreshVideo(activeVideoId);
       }
       if (normalizedStatus === "DOWNLOADED" || normalizedStatus === "DONE" || normalizedStatus === "ERROR") {
         setIs1ClickRunning(false);
@@ -433,6 +475,288 @@ export default function App() {
       }
     }
   });
+
+  const {
+    manifest: dubbingManifest,
+    preflightDialogData: dubbingPreflightData,
+    isDubbingActive,
+    activeDubCutId,
+    isExporting: isExportingDub,
+    exportResult: dubExportResult,
+    isSendingToCuts: isSendingDubToCuts,
+    isDeletingDub,
+    selectedAudioTrack,
+    setSelectedAudioTrack,
+    selectedDubLang,
+    setSelectedDubLang,
+    subtitlesEnabled: dubSubtitlesVisible,
+    setSubtitlesEnabled: setDubSubtitlesVisible,
+    dubbingError,
+    startDubWithPreflight,
+    startCutDubWithPreflight,
+    confirmInstallAndDub,
+    dismissPreflightDialog: dismissDubPreflightDialog,
+    cancelDub,
+    exportMp4: exportDubMp4,
+    sendDubToCuts,
+    deleteDubTrack,
+  } = useDubbingWorkflow({
+    activeJobId: activeVideoId,
+    dubbingState,
+    defaultSubtitlesEnabled: appSettings?.dubbing?.default_subtitles_enabled ?? true,
+    onNotify: (msg) => setToastNotification(msg),
+    onError: (msg) => setToastNotification(msg),
+    onJobCreated: (createdJob) => {
+      void loadVideos().then(() => {
+        setActiveVideoId(createdJob.job_id);
+      });
+    },
+    onRefreshVideo: refreshVideo,
+  });
+
+  const [dubPopoverOpen, setDubPopoverOpen] = useState(false);
+  const [dubLangOverride, setDubLangOverride] = useState<DubbingLanguage>("pt-BR");
+  const [dubEngineOverride, setDubEngineOverride] = useState<DubbingEngine>("qwen3_tts");
+  const [dubVoiceModeOverride, setDubVoiceModeOverride] = useState<DubbingVoiceMode>("auto");
+  const [dubSubtitlesOverride, setDubSubtitlesOverride] = useState<boolean>(true);
+  const [dubPreviewMode, setDubPreviewMode] = useState<"auto" | "current">("auto");
+  const [dubExportPreset, setDubExportPreset] = useState<DubbingSubtitlePreset>("mov_text");
+  const [dismissedDubErrorMsg, setDismissedDubErrorMsg] = useState<string | null>(null);
+  const dubPopoverRef = useRef<HTMLDivElement>(null);
+  const lastDubAttemptRef = useRef<{
+    jobId: string;
+    cutId?: string;
+    isPreview: boolean;
+    overrides: DubbingStartOptions;
+    startTime?: number;
+  } | null>(null);
+
+  const dubbedCutLangsByCutId = useMemo(() => {
+    const result: Record<string, string[]> = {};
+    const cutDubs = dubbingManifest?.cut_dubs;
+    if (!cutDubs) return result;
+    for (const [cutId, langsMap] of Object.entries(cutDubs)) {
+      const readyLangs = Object.values(langsMap || {})
+        .filter((track) => Boolean(track) && (track.status === "ready" || track.status === "done" || Boolean(track.exported_mp4_url)))
+        .map((track) => String(track.lang));
+      if (readyLangs.length > 0) {
+        result[cutId] = readyLangs;
+      }
+    }
+    return result;
+  }, [dubbingManifest?.cut_dubs]);
+
+  const [deleteConfirmVideoId, setDeleteConfirmVideoId] = useState<string | null>(null);
+  const [isDeletingVideo, setIsDeletingVideo] = useState(false);
+  const [deleteVideoError, setDeleteVideoError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const dubCfg = appSettings?.dubbing;
+    if (!dubCfg) return;
+    setDubEngineOverride(dubCfg.engine || "qwen3_tts");
+    if (dubCfg.default_target_lang && dubCfg.default_target_lang !== "ask") {
+      setDubLangOverride(dubCfg.default_target_lang);
+    }
+    setDubVoiceModeOverride(dubCfg.default_voice_mode || "auto");
+    setDubSubtitlesOverride(dubCfg.default_subtitles_enabled ?? true);
+    setDubExportPreset(dubCfg.default_subtitle_preset || "mov_text");
+  }, [appSettings?.dubbing]);
+
+  useEffect(() => {
+    if (isDubbingActive) {
+      setDismissedDubErrorMsg(null);
+    }
+  }, [isDubbingActive]);
+
+  useEffect(() => {
+    if (!dubPopoverOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (dubPopoverRef.current && !dubPopoverRef.current.contains(event.target as Node)) {
+        setDubPopoverOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDubPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [dubPopoverOpen]);
+
+  function handleStartDubbing(checkDefaultAsk: boolean) {
+    if (!activeVideoId) {
+      setToastNotification("Selecione um vídeo na biblioteca primeiro.");
+      return;
+    }
+    if (isInspectingArchive) {
+      setToastNotification("Volte para a tentativa ativa para iniciar uma dublagem.");
+      return;
+    }
+
+    const defaultLang = appSettings?.dubbing?.default_target_lang ?? "ask";
+    if (checkDefaultAsk && defaultLang === "ask") {
+      setDubPopoverOpen(true);
+      return;
+    }
+
+    const targetLang =
+      checkDefaultAsk && defaultLang !== "ask"
+        ? defaultLang
+        : dubLangOverride;
+
+    const overrides: DubbingStartOptions = {
+      target_lang: targetLang,
+      engine: dubEngineOverride,
+      voice_mode: dubVoiceModeOverride,
+      subtitles_enabled: dubSubtitlesOverride,
+      subtitle_preset: dubExportPreset,
+    };
+
+    lastDubAttemptRef.current = {
+      jobId: activeVideoId,
+      isPreview: false,
+      overrides,
+    };
+    setDismissedDubErrorMsg(null);
+    setDubPopoverOpen(false);
+    void startDubWithPreflight(activeVideoId, overrides);
+  }
+
+  function handleStartQuickPreview() {
+    if (!activeVideoId) {
+      setToastNotification("Selecione um vídeo na biblioteca primeiro.");
+      return;
+    }
+    if (isInspectingArchive) {
+      setToastNotification("Volte para a tentativa ativa para gerar uma prévia.");
+      return;
+    }
+
+    const startTime =
+      dubPreviewMode === "current"
+        ? Math.max(0, Math.floor(currentVideoTime || 0))
+        : undefined;
+
+    const overrides: DubbingStartOptions = {
+      target_lang: dubLangOverride,
+      engine: dubEngineOverride,
+      voice_mode: dubVoiceModeOverride,
+      subtitles_enabled: dubSubtitlesOverride,
+      subtitle_preset: dubExportPreset,
+    };
+
+    lastDubAttemptRef.current = {
+      jobId: activeVideoId,
+      isPreview: true,
+      overrides,
+      startTime,
+    };
+    setDismissedDubErrorMsg(null);
+    setDubPopoverOpen(false);
+    void startDubWithPreflight(activeVideoId, overrides, {
+      preview20s: true,
+      startTime,
+      duration: 20,
+    });
+  }
+
+  function handleStartCutDubbing(cut: Cut) {
+    if (!activeVideoId) {
+      setToastNotification("Selecione um vídeo na biblioteca primeiro.");
+      return;
+    }
+    if (isInspectingArchive) {
+      setToastNotification("Volte para a tentativa ativa para dublar um corte.");
+      return;
+    }
+
+    const defaultLang = appSettings?.dubbing?.default_target_lang ?? "ask";
+    const targetLang =
+      defaultLang && defaultLang !== "ask" ? defaultLang : dubLangOverride;
+
+    const overrides: DubbingStartOptions = {
+      target_lang: targetLang,
+      engine: dubEngineOverride,
+      voice_mode: dubVoiceModeOverride,
+      subtitles_enabled: dubSubtitlesOverride,
+      subtitle_preset: dubExportPreset,
+    };
+
+    lastDubAttemptRef.current = {
+      jobId: activeVideoId,
+      cutId: cut.cut_id,
+      isPreview: false,
+      overrides,
+    };
+    setDismissedDubErrorMsg(null);
+    setDubPopoverOpen(false);
+    void startCutDubWithPreflight(activeVideoId, cut.cut_id, overrides);
+  }
+
+  function handleRetryLastDub() {
+    if (!activeVideoId) return;
+    setDismissedDubErrorMsg(null);
+    const last = lastDubAttemptRef.current;
+    if (last && last.jobId === activeVideoId) {
+      if (last.cutId) {
+        void startCutDubWithPreflight(last.jobId, last.cutId, last.overrides);
+        return;
+      }
+      void startDubWithPreflight(
+        last.jobId,
+        last.overrides,
+        last.isPreview
+          ? { preview20s: true, startTime: last.startTime, duration: 20 }
+          : undefined,
+      );
+      return;
+    }
+    void startDubWithPreflight(activeVideoId, {
+      target_lang: dubLangOverride,
+      engine: dubEngineOverride,
+      voice_mode: dubVoiceModeOverride,
+      subtitles_enabled: dubSubtitlesOverride,
+      subtitle_preset: dubExportPreset,
+    });
+  }
+
+  async function handleConfirmDeleteVideo() {
+    const targetId = deleteConfirmVideoId;
+    if (!targetId) return;
+
+    setIsDeletingVideo(true);
+    setDeleteVideoError(null);
+    try {
+      if (activeVideoId === targetId) {
+        videoPlayerHandleRef.current?.releaseMedia();
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      }
+
+      await deleteVideo(targetId);
+
+      setDeleteConfirmVideoId(null);
+      if (activeVideoId === targetId) {
+        setActiveVideoId(null);
+        resetForActiveVideoChange();
+        handleExitArchivedInspection();
+        resetProgress();
+        resetDubbingState();
+      }
+      await loadVideos();
+      setToastNotification("Vídeo e arquivos associados excluídos permanentemente.");
+    } catch (err: any) {
+      const msg = err?.message || "Falha ao excluir vídeo do disco.";
+      setDeleteVideoError(msg);
+      setToastNotification(msg);
+    } finally {
+      setIsDeletingVideo(false);
+    }
+  }
 
   const selectedSuggestedCut = useMemo(() => {
     if (!suggestedCuts.length) return null;
@@ -638,6 +962,7 @@ export default function App() {
     isRendering ||
     Boolean(activeVideo?.isTranscribing) ||
     isIngesting ||
+    isDubbingActive ||
     action.busy;
 
   const isInspectingArchive = Boolean(
@@ -734,6 +1059,9 @@ export default function App() {
         attemptsByJobId[jobId]?.length ??
         v.attemptsCount ??
         0;
+      const dubStatus = String(v.job.dubbing_status || "").toLowerCase();
+      const isVideoDubbing =
+        (isCurrentActive && isDubbingActive) || ACTIVE_DUBBING_JOB_STATUSES.has(dubStatus);
 
       return {
         id: jobId,
@@ -742,8 +1070,9 @@ export default function App() {
         cutsCount,
         status,
         isProcessing,
+        isDubbingActive: isVideoDubbing,
         attemptsCount,
-        canArchive: !isProcessing && hasActiveContent,
+        canArchive: !isProcessing && !isVideoDubbing && hasActiveContent,
       };
     });
   }, [
@@ -751,6 +1080,7 @@ export default function App() {
     activeVideoId,
     suggestedCuts,
     sseJobStatus,
+    isDubbingActive,
     renderOutputs.length,
     attemptsCountByJobId,
     attemptsByJobId,
@@ -929,12 +1259,23 @@ export default function App() {
     [videos, activeVideoId],
   );
 
+  const rawDubError =
+    dubbingError ||
+    (dubbingState.status === "error" ? dubbingState.error || "Falha durante a dublagem." : null);
+  const activeDubError =
+    rawDubError && rawDubError !== dismissedDubErrorMsg ? rawDubError : null;
+
+  const isDubbingFeedbackVisible = Boolean(
+    activeVideo && (isDubbingActive || Boolean(activeDubError)),
+  );
+
   const showProgressBanner = Boolean(
     activeVideo &&
-      (isVideoProcessing || is1ClickRunning) &&
-      activeStatus !== "DOWNLOADED" &&
-      activeStatus !== "ERROR" &&
-      activeStatus !== "DONE",
+      (((isVideoProcessing || is1ClickRunning) &&
+        activeStatus !== "DOWNLOADED" &&
+        activeStatus !== "ERROR" &&
+        activeStatus !== "DONE") ||
+        isDubbingActive),
   );
 
   const allLogs = useMemo(() => {
@@ -944,8 +1285,13 @@ export default function App() {
         combined.push(log);
       }
     }
+    for (const log of dubbingState.logs) {
+      if (!combined.includes(log)) {
+        combined.push(log);
+      }
+    }
     return combined.length > 0 ? combined : sseLogs;
-  }, [activeTaskLogs, sseLogs]);
+  }, [activeTaskLogs, sseLogs, dubbingState.logs]);
 
   async function handleRunPipeline(includeRender: boolean) {
     if (!activeVideoId) {
@@ -1068,25 +1414,43 @@ export default function App() {
     if (!activeVideoId) return;
     console.log(`[UI] Cancelando operação ativa para ${activeVideoId}`);
     try {
-      // 1. Aciona o cancelamento unificado do job no backend
-      try {
-        await cancelJob(activeVideoId);
-      } catch (e) {
-        console.warn("[UI] cancelJob fallback:", e);
+      const hasPipelineTask =
+        isVideoProcessing ||
+        is1ClickRunning ||
+        isRendering ||
+        Boolean(activeVideo?.isTranscribing);
+
+      if (isDubbingActive) {
+        try {
+          await cancelDub(activeVideoId);
+        } catch (e) {
+          console.warn("[UI] cancelDub fallback:", e);
+        }
       }
 
-      // 2. Aciona cancelamentos específicos adicionais por garantia
-      try {
-        await cancelTranscription(activeVideoId);
-      } catch {}
-      try {
-        await cancelRendering(activeVideoId);
-      } catch {}
+      if (hasPipelineTask) {
+        // 1. Aciona o cancelamento unificado do job no backend
+        try {
+          await cancelJob(activeVideoId);
+        } catch (e) {
+          console.warn("[UI] cancelJob fallback:", e);
+        }
+
+        // 2. Aciona cancelamentos específicos adicionais por garantia
+        try {
+          await cancelTranscription(activeVideoId);
+        } catch {}
+        try {
+          await cancelRendering(activeVideoId);
+        } catch {}
+        try {
+          await cancelActiveRendering();
+        } catch {}
+      }
 
       // 3. Reseta estados visuais de loading do frontend imediatamente
       pipelineIncludeRenderRef.current = true;
       setIs1ClickRunning(false);
-      setIsRendering(false);
       updateVideo(activeVideoId, {
         isTranscribing: false,
       });
@@ -1097,7 +1461,6 @@ export default function App() {
       setToastNotification("Falha ao cancelar operação.");
     } finally {
       setIs1ClickRunning(false);
-      setIsRendering(false);
       resetProgress();
       if (activeVideoId) {
         await refreshVideo(activeVideoId);
@@ -1238,14 +1601,14 @@ export default function App() {
     );
   }
 
-  // Find any video currently transcribing or rendering
+  // Find any video currently transcribing, rendering or dubbing
   function findActiveTranscriptionOrRendering(): string | null {
     // Check if any video is transcribing
     const transcribingVideo = videos.find((v) => v.isTranscribing);
     if (transcribingVideo) return transcribingVideo.job.job_id;
 
-    // Check if rendering is in progress (applies to activeVideo)
-    if (isRendering && activeVideoId) return activeVideoId;
+    // Check if rendering or dubbing is in progress (applies to activeVideo)
+    if ((isRendering || isDubbingActive) && activeVideoId) return activeVideoId;
 
     return null;
   }
@@ -1652,13 +2015,332 @@ export default function App() {
           onTabChange={setStudioTab}
           activeVideoTitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : null}
           gpuStatus={isAnyOperationRunning ? "busy" : "online"}
-          gpuLabel={isAnyOperationRunning ? (STATUS_DESCRIPTIONS[activeStatus || ""] ? (activeStatus || "PROCESSANDO") : "PROCESSANDO") : "GPU ONLINE"}
+          gpuLabel={
+            isAnyOperationRunning
+              ? isDubbingActive
+                ? (dubbingState.stage || dubbingState.status || "DUBLANDO").toUpperCase()
+                : STATUS_DESCRIPTIONS[activeStatus || ""]
+                  ? activeStatus || "PROCESSANDO"
+                  : "PROCESSANDO"
+              : "GPU ONLINE"
+          }
           onConfigureApp={() => setShowConfigureAppDialog(true)}
           onManageDependencies={() => setShowDependenciesDialog(true)}
           onConfigureLLM={() => setShowLLMConfigDialog(true)}
           onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
           onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
           onShowHowToUse={() => setShowHowToUseDialog(true)}
+          dubbingControl={
+            activeVideo ? (
+              <div className="relative" ref={dubPopoverRef}>
+                {(() => {
+                  const availableTracks = Object.entries(dubbingManifest?.tracks || {}).filter(
+                    ([, track]) => track.status === "ready" || Boolean(track.audio_url),
+                  );
+                  const currentExportLang =
+                    selectedDubLang && dubbingManifest?.tracks?.[selectedDubLang]
+                      ? selectedDubLang
+                      : availableTracks[0]?.[0] ?? null;
+                  const currentTrackObj = currentExportLang
+                    ? dubbingManifest?.tracks?.[currentExportLang] ?? null
+                    : null;
+                  const activeMp4DownloadUrl = resolveDubbingMediaUrl(
+                    dubExportResult?.mp4_url || currentTrackObj?.exported_mp4_url,
+                  );
+                  const activeSrtDownloadUrl = resolveDubbingMediaUrl(
+                    dubExportResult?.srt_url || currentTrackObj?.srt_url,
+                  );
+                  const activeVttDownloadUrl = resolveDubbingMediaUrl(
+                    dubExportResult?.vtt_url || currentTrackObj?.vtt_url,
+                  );
+
+                  return (
+                    <>
+                      <div className="inline-flex items-center rounded-xl border border-indigo-400/30 bg-indigo-500/10 shadow-[0_0_12px_rgba(99,102,241,0.18)]">
+                        <button
+                          type="button"
+                          onClick={() => handleStartDubbing(true)}
+                          disabled={isAnyOperationRunning || isInspectingArchive}
+                          title={
+                            isInspectingArchive
+                              ? "Volte para a tentativa ativa para dublar"
+                              : appSettings?.dubbing?.default_target_lang &&
+                                  appSettings.dubbing.default_target_lang !== "ask"
+                                ? `Dublar imediatamente para ${appSettings.dubbing.default_target_lang}`
+                                : "Escolher idioma e opções de dublagem (IA Local)"
+                          }
+                          className="px-2.5 py-1.5 text-xs font-medium text-indigo-100 hover:bg-indigo-500/20 rounded-l-xl transition-colors flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                        >
+                          {isDubbingActive ? (
+                            <svg className="w-3.5 h-3.5 animate-spin text-indigo-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5 text-indigo-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M5 8l6 6" />
+                              <path d="M4 14l6-6 2-3" />
+                              <path d="M2 5h12" />
+                              <path d="M7 2h1" />
+                              <path d="M22 22l-5-10-5 10" />
+                              <path d="M14 18h6" />
+                            </svg>
+                          )}
+                          <span>{isDubbingActive ? "Dublando..." : "Dublar"}</span>
+                        </button>
+
+                        <span className="h-4 w-px bg-indigo-400/25" />
+
+                        <button
+                          type="button"
+                          onClick={() => setDubPopoverOpen((prev) => !prev)}
+                          aria-label="Abrir opções de dublagem e exportação"
+                          title="Opções de dublagem, prévia 20s, exportação e envio para Cortes"
+                          className="px-2 py-1.5 text-xs text-indigo-200 hover:bg-indigo-500/20 rounded-r-xl transition-colors cursor-pointer"
+                        >
+                          ▾
+                        </button>
+                      </div>
+
+                      {dubPopoverOpen && (
+                        <div className="absolute right-0 top-full mt-2 w-[350px] max-w-[92vw] rounded-2xl border border-white/15 bg-[#0c1018]/95 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.65)] p-3.5 z-50 space-y-3 text-xs">
+                          <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                            <div>
+                              <p className="font-semibold text-white">Dublagem & Legendas (IA Local)</p>
+                              <p className="text-[11px] text-zinc-400">
+                                Ajuste pontual sem alterar seus padrões globais
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setDubPopoverOpen(false)}
+                              className="text-zinc-400 hover:text-white px-1.5 py-0.5 rounded-md hover:bg-white/10 cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="space-y-1">
+                              <span className="text-[11px] text-zinc-400 block">Idioma alvo</span>
+                              <select
+                                value={dubLangOverride}
+                                onChange={(e) => setDubLangOverride(e.target.value as DubbingLanguage)}
+                                className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-400"
+                              >
+                                <option value="pt-BR">PT-BR (Português)</option>
+                                <option value="en">EN (English)</option>
+                                <option value="es">ES (Español)</option>
+                              </select>
+                            </label>
+
+                            <label className="space-y-1">
+                              <span className="text-[11px] text-zinc-400 block">Motor TTS</span>
+                              <select
+                                value={dubEngineOverride}
+                                onChange={(e) => setDubEngineOverride(e.target.value as DubbingEngine)}
+                                className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-400"
+                              >
+                                <option value="qwen3_tts">Qwen3-TTS-1.7B</option>
+                                <option value="chatterbox">Chatterbox Multilingual</option>
+                              </select>
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 items-end">
+                            <label className="space-y-1">
+                              <span className="text-[11px] text-zinc-400 block">Vozes / Locutores</span>
+                              <select
+                                value={dubVoiceModeOverride}
+                                onChange={(e) => setDubVoiceModeOverride(e.target.value as DubbingVoiceMode)}
+                                className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-400"
+                              >
+                                <option value="auto">Automático (detectar)</option>
+                                <option value="single">Voz única</option>
+                              </select>
+                            </label>
+
+                            <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={dubSubtitlesOverride}
+                                onChange={(e) => setDubSubtitlesOverride(e.target.checked)}
+                                className="rounded border-white/25 bg-black/50 accent-indigo-500"
+                              />
+                              <span className="text-[11px] text-zinc-200">Gerar legendas</span>
+                            </label>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <GlassButton
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleStartDubbing(false)}
+                              disabled={isAnyOperationRunning || isInspectingArchive}
+                              className="flex-1 text-xs"
+                            >
+                              Dublar vídeo ({dubLangOverride})
+                            </GlassButton>
+                          </div>
+
+                          {/* Prévia rápida 20s */}
+                          <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-2.5 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-cyan-200">Prévia rápida (20s)</span>
+                              <select
+                                value={dubPreviewMode}
+                                onChange={(e) => setDubPreviewMode(e.target.value as "auto" | "current")}
+                                className="rounded-md border border-white/15 bg-black/50 px-2 py-1 text-[11px] text-zinc-200"
+                              >
+                                <option value="auto">Trecho automático (fala)</option>
+                                <option value="current">
+                                  Tempo atual ({formatTimestamp(currentVideoTime || 0)})
+                                </option>
+                              </select>
+                            </div>
+                            <GlassButton
+                              variant="glass"
+                              size="sm"
+                              onClick={handleStartQuickPreview}
+                              disabled={isAnyOperationRunning || isInspectingArchive}
+                              className="w-full text-xs border-cyan-400/30 text-cyan-100 hover:bg-cyan-500/15"
+                            >
+                              Gerar prévia de 20s ({dubLangOverride})
+                            </GlassButton>
+                          </div>
+
+                          {/* Faixas prontas: Exportar .mp4 e Mandar dublado para Cortes */}
+                          {currentExportLang ? (
+                            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-2.5 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-emerald-200">
+                                  Faixa pronta ({currentExportLang})
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {availableTracks.length > 1 && (
+                                    <select
+                                      value={currentExportLang}
+                                      onChange={(e) => setSelectedDubLang(e.target.value)}
+                                      className="rounded-md border border-white/15 bg-black/50 px-1.5 py-0.5 text-[11px] text-zinc-100"
+                                    >
+                                      {availableTracks.map(([lang]) => (
+                                        <option key={lang} value={lang}>
+                                          {lang}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={isDeletingDub || isDubbingActive}
+                                    onClick={() => void deleteDubTrack(currentExportLang)}
+                                    title={`Remover dublagem ${currentExportLang}`}
+                                    className="px-1.5 py-0.5 rounded-md text-[11px] text-rose-300 hover:bg-rose-500/20 border border-rose-500/25 disabled:opacity-40 cursor-pointer"
+                                  >
+                                    Excluir faixa
+                                  </button>
+                                </div>
+                              </div>
+
+                              <label className="space-y-1 block">
+                                <span className="text-[11px] text-zinc-400 block">
+                                  Preset de legenda ao exportar .mp4
+                                </span>
+                                <select
+                                  value={dubExportPreset}
+                                  onChange={(e) =>
+                                    setDubExportPreset(e.target.value as DubbingSubtitlePreset)
+                                  }
+                                  className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-1.5 text-[11px] text-zinc-100"
+                                >
+                                  <option value="mov_text">
+                                    Preset 1 — Embutida Selecionável (mov_text + .srt/.vtt)
+                                  </option>
+                                  <option value="hardsub">
+                                    Preset 2 — Gravada na Imagem (Hardsub NVENC)
+                                  </option>
+                                </select>
+                              </label>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <GlassButton
+                                  variant="glass"
+                                  size="sm"
+                                  loading={isExportingDub}
+                                  disabled={isDubbingActive || isExportingDub || isSendingDubToCuts}
+                                  onClick={() =>
+                                    void exportDubMp4(
+                                      currentExportLang,
+                                      dubExportPreset,
+                                      dubSubtitlesVisible,
+                                    )
+                                  }
+                                  className="text-xs border-emerald-400/30 text-emerald-100"
+                                >
+                                  Exportar .mp4
+                                </GlassButton>
+
+                                <GlassButton
+                                  variant="glass"
+                                  size="sm"
+                                  loading={isSendingDubToCuts}
+                                  disabled={isDubbingActive || isExportingDub || isSendingDubToCuts}
+                                  onClick={() => void sendDubToCuts(currentExportLang)}
+                                  className="text-xs border-amber-400/30 text-amber-100"
+                                >
+                                  Mandar dublado para Cortes
+                                </GlassButton>
+                              </div>
+
+                              {activeMp4DownloadUrl && (
+                                <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                                  <a
+                                    href={activeMp4DownloadUrl}
+                                    download
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-2 py-1 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/30 font-medium"
+                                  >
+                                    Baixar .mp4 dublado
+                                  </a>
+                                  {activeSrtDownloadUrl && (
+                                    <a
+                                      href={activeSrtDownloadUrl}
+                                      download
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-2 py-1 rounded-md bg-white/5 border border-white/15 text-zinc-200 hover:bg-white/10"
+                                    >
+                                      .srt
+                                    </a>
+                                  )}
+                                  {activeVttDownloadUrl && (
+                                    <a
+                                      href={activeVttDownloadUrl}
+                                      download
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-2 py-1 rounded-md bg-white/5 border border-white/15 text-zinc-200 hover:bg-white/10"
+                                    >
+                                      .vtt
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-zinc-400 px-1">
+                              Nenhuma faixa dublada finalizada ainda para exportar ou enviar para Cortes.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : undefined
+          }
           actions={
             <div className="flex items-center gap-2">
               {activeVideo && (
@@ -1767,62 +2449,79 @@ export default function App() {
         />
 
         {/* Real-time SSE Progress Banner */}
-        {showProgressBanner && (
-          <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-blue-950/80 via-[#0d1224]/90 to-[#07080b]/90 border-b border-blue-500/25 backdrop-blur-xl flex items-center justify-between gap-4 z-30 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex-none">
-                <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping absolute" />
-                <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-xs tracking-wide uppercase text-blue-300">
-                    {STATUS_DESCRIPTIONS[activeStatus || ""] || activeStatus || "Processando"}
-                  </span>
-                  {etaSeconds !== null && etaSeconds !== undefined && etaSeconds > 0 && (
-                    <span className="text-xs font-mono font-medium text-cyan-300 bg-cyan-950/60 px-2.5 py-0.5 rounded-md border border-cyan-500/30">
-                      {formatEtaSeconds(etaSeconds)}
+        {showProgressBanner && (() => {
+          const baseDubTitle =
+            DUBBING_STATUS_DESCRIPTIONS[dubbingState.status] || "Dublando vídeo (IA Local)";
+          const bannerTitle = isDubbingActive
+            ? activeDubCutId
+              ? `${baseDubTitle} (Corte)`
+              : baseDubTitle
+            : STATUS_DESCRIPTIONS[activeStatus || ""] || activeStatus || "Processando";
+          const bannerMessage = isDubbingActive
+            ? dubbingState.downloadPercent !== null && dubbingState.prepStage
+              ? `Baixando ${dubbingState.downloadPercent.toFixed(0)}% • Preparando em paralelo (${dubbingState.prepStage})`
+              : dubbingState.message || currentMessage
+            : currentMessage;
+          const bannerProgress = isDubbingActive ? dubbingState.percent : progress;
+          const bannerEta = isDubbingActive ? dubbingState.etaSeconds : etaSeconds;
+
+          return (
+            <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-blue-950/80 via-[#0d1224]/90 to-[#07080b]/90 border-b border-blue-500/25 backdrop-blur-xl flex items-center justify-between gap-4 z-30 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex-none">
+                  <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping absolute" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-xs tracking-wide uppercase text-blue-300">
+                      {bannerTitle}
                     </span>
+                    {bannerEta !== null && bannerEta !== undefined && bannerEta > 0 && (
+                      <span className="text-xs font-mono font-medium text-cyan-300 bg-cyan-950/60 px-2.5 py-0.5 rounded-md border border-cyan-500/30">
+                        {formatEtaSeconds(bannerEta)}
+                      </span>
+                    )}
+                  </div>
+                  {bannerMessage && (
+                    <p className="text-xs text-zinc-200 truncate max-w-md sm:max-w-xl mt-0.5">
+                      {bannerMessage}
+                    </p>
                   )}
                 </div>
-                {currentMessage && (
-                  <p className="text-xs text-zinc-200 truncate max-w-md sm:max-w-xl mt-0.5">
-                    {currentMessage}
-                  </p>
-                )}
               </div>
-            </div>
 
-            {/* Barra de Progresso + % e Botão de Cancelar Cooperativo */}
-            <div className="flex items-center gap-4 flex-none">
-              <div className="flex items-center gap-2.5">
-                <div className="w-28 sm:w-48 h-2 rounded-full bg-white/10 overflow-hidden border border-white/10 relative">
-                  <div
-                    className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                  />
+              {/* Barra de Progresso + % e Botão de Cancelar Cooperativo */}
+              <div className="flex items-center gap-4 flex-none">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-28 sm:w-48 h-2 rounded-full bg-white/10 overflow-hidden border border-white/10 relative">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out"
+                      style={{ width: `${Math.min(100, Math.max(0, bannerProgress))}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-sm font-bold text-white min-w-[3rem] text-right">
+                    {bannerProgress.toFixed(0)}%
+                  </span>
                 </div>
-                <span className="font-mono text-sm font-bold text-white min-w-[3rem] text-right">
-                  {progress.toFixed(0)}%
-                </span>
-              </div>
 
-              <GlassButton
-                variant="danger"
-                size="sm"
-                onClick={handleCancelActiveOperation}
-                leadingIcon={
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                }
-              >
-                Cancelar
-              </GlassButton>
+                <GlassButton
+                  variant="danger"
+                  size="sm"
+                  onClick={handleCancelActiveOperation}
+                  leadingIcon={
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  }
+                >
+                  Cancelar
+                </GlassButton>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Banner de Inspeção de Tentativa Arquivada (Somente Leitura) */}
         {isInspectingArchive && inspectingAttempt && (
@@ -1961,6 +2660,11 @@ export default function App() {
                 onArchiveCopy={(jobId) => void handleArchiveAttempt(jobId, false)}
                 onDeleteAttempt={(jobId, attemptId) => void handleDeleteAttempt(jobId, attemptId)}
                 archivingVideoId={archivingJobId}
+                onDeleteVideo={(videoId) => {
+                  setDeleteVideoError(null);
+                  setDeleteConfirmVideoId(videoId);
+                }}
+                deletingVideoId={isDeletingVideo ? deleteConfirmVideoId : null}
               />
 
               {/* Coluna 2: Player, Terminal de Logs e Transcrição Interativa com Painéis Estruturados e Colapsáveis */}
@@ -2012,31 +2716,86 @@ export default function App() {
                     onTimeUpdate={setCurrentVideoTime}
                     isExpanded={expandVideoPlayerSection}
                     onToggleExpanded={() => setExpandVideoPlayerSection((prev) => !prev)}
+                    dubbingManifest={dubbingManifest}
+                    selectedAudioMode={selectedAudioTrack}
+                    selectedDubLang={selectedDubLang}
+                    onSelectAudioMode={setSelectedAudioTrack}
+                    subtitlesVisible={dubSubtitlesVisible}
+                    onToggleSubtitles={() => setDubSubtitlesVisible((prev) => !prev)}
+                    renderOutputs={effectiveRenderOutputs}
+                    dubbingCutActive={Boolean(isDubbingActive && activeDubCutId)}
+                    dubbingActiveCutId={activeDubCutId}
+                    isAnyOperationRunning={Boolean(isAnyOperationRunning)}
+                    dubbedCutLangsByCutId={isInspectingArchive ? undefined : dubbedCutLangsByCutId}
+                    onDubSelectedCut={isInspectingArchive ? undefined : handleStartCutDubbing}
+                    onJumpToPreview={(startSeconds) => {
+                      videoPlayerHandleRef.current?.seek(startSeconds);
+                      void videoPlayerHandleRef.current?.play();
+                    }}
+                    onRunFullDubFromPreview={() => {
+                      if (!activeVideoId) return;
+                      void startDubWithPreflight(activeVideoId, {
+                        target_lang: selectedDubLang || dubLangOverride,
+                        engine: dubEngineOverride,
+                        voice_mode: dubVoiceModeOverride,
+                        subtitles_enabled: dubSubtitlesOverride,
+                        subtitle_preset: dubExportPreset,
+                      });
+                    }}
                   />
                 </div>
 
                 {/* 2. Card de Feedback em Tempo Real Durante Processamento (Liquid Glass com Ponto Pulsante, ETA, Barra e Mini Console) */}
-                {(isVideoProcessing || is1ClickRunning) && (
+                {(isVideoProcessing || is1ClickRunning || isDubbingFeedbackVisible) && (
                   <div className="flex-none transition-all duration-300">
                     <LiveTaskFeedbackCard
-                      status={activeStatus}
-                      progress={progress}
-                      etaSeconds={etaSeconds}
-                      currentMessage={currentMessage}
+                      status={isDubbingFeedbackVisible ? dubbingState.status || "preparing" : activeStatus}
+                      progress={isDubbingFeedbackVisible ? dubbingState.percent : progress}
+                      etaSeconds={isDubbingFeedbackVisible ? dubbingState.etaSeconds : etaSeconds}
+                      currentMessage={
+                        isDubbingFeedbackVisible
+                          ? dubbingState.message || currentMessage
+                          : currentMessage
+                      }
                       logs={allLogs}
                       onCancel={handleCancelActiveOperation}
                       isExpanded={expandTerminalSection}
                       onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
+                      isDubbingTask={isDubbingFeedbackVisible}
+                      downloadPercent={isDubbingFeedbackVisible ? dubbingState.downloadPercent : null}
+                      prepStage={isDubbingFeedbackVisible ? dubbingState.prepStage : null}
+                      errorMessage={isDubbingFeedbackVisible ? activeDubError : null}
+                      errorPhase={isDubbingFeedbackVisible ? dubbingState.errorPhase : null}
+                      onRetry={isDubbingFeedbackVisible ? handleRetryLastDub : undefined}
+                      onDismissError={
+                        isDubbingFeedbackVisible
+                          ? () => {
+                              setDismissedDubErrorMsg(rawDubError);
+                              resetDubbingState();
+                            }
+                          : undefined
+                      }
                     />
                   </div>
                 )}
 
                 {/* 3. Card de Terminal / Logs de Execução Histórico (Abaixo do Vídeo e Acima da Transcrição) */}
-                {!(isVideoProcessing || is1ClickRunning) && (
+                {!(isVideoProcessing || is1ClickRunning || isDubbingFeedbackVisible) && (
                   <div className="flex-none transition-all duration-300">
                     <TerminalLogsView
                       logs={allLogs}
-                      activeTask={activeTaskLogType || (is1ClickRunning ? "1-Clique" : isRendering ? "Render" : activeVideo?.isTranscribing ? "Whisper" : null)}
+                      activeTask={
+                        activeTaskLogType ||
+                        (isDubbingActive
+                          ? "Dublagem"
+                          : is1ClickRunning
+                            ? "1-Clique"
+                            : isRendering
+                              ? "Render"
+                              : activeVideo?.isTranscribing
+                                ? "Whisper"
+                                : null)
+                      }
                       isProcessing={Boolean(isAnyOperationRunning)}
                       isExpanded={expandTerminalSection}
                       onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
@@ -2089,6 +2848,7 @@ export default function App() {
                 renderOutputs={effectiveRenderOutputs}
                 renderTitlesByFileName={effectiveRenderTitlesByFileName}
                 buildRenderUrl={buildRenderUrl}
+                dubbingManifest={isInspectingArchive ? null : dubbingManifest}
                 readOnly={isInspectingArchive}
                 isRendering={isInspectingArchive ? false : isRendering}
                 onSelectCut={(cutId) => {
@@ -2535,7 +3295,7 @@ export default function App() {
           configDownloadResolution={configDownloadResolution}
           appSettings={appSettings}
           action={action}
-          onSave={(baseDir, resolution, askDeleteCutConfirm) => {
+          onSave={(baseDir, resolution, askDeleteCutConfirm, dubbingSettings) => {
             runAction(
               () =>
                 saveSettings({
@@ -2548,6 +3308,7 @@ export default function App() {
                     move_uploads: appSettings?.preferences?.move_uploads ?? false,
                     ask_delete_cut_confirm: askDeleteCutConfirm,
                   },
+                  dubbing: dubbingSettings ?? appSettings?.dubbing,
                 }),
               () => {
                 setShowConfigureAppDialog(false);
@@ -2562,6 +3323,36 @@ export default function App() {
           onCancel={() => setShowConfigureAppDialog(false)}
         />
       )}
+
+      {dubbingPreflightData && (
+        <DubbingPreflightDialog
+          preflight={dubbingPreflightData}
+          isStarting={isDubbingActive}
+          onConfirm={() => void confirmInstallAndDub()}
+          onCancel={dismissDubPreflightDialog}
+        />
+      )}
+
+      {deleteConfirmVideoId && (() => {
+        const targetVideo = videos.find((v) => v.job.job_id === deleteConfirmVideoId);
+        const videoTitle = String(
+          targetVideo?.job.video_name || targetVideo?.job.youtube_url || deleteConfirmVideoId,
+        );
+        return (
+          <DeleteVideoConfirmDialog
+            videoTitle={videoTitle}
+            isDeleting={isDeletingVideo}
+            errorMessage={deleteVideoError}
+            onCancel={() => {
+              if (!isDeletingVideo) {
+                setDeleteConfirmVideoId(null);
+                setDeleteVideoError(null);
+              }
+            }}
+            onConfirm={() => void handleConfirmDeleteVideo()}
+          />
+        );
+      })()}
 
       <BatchPipelineControls
         showBatchPipelineDialog={showBatchPipelineDialog}

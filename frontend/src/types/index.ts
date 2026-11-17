@@ -33,6 +33,18 @@ export type {
   ArchiveAttemptRequest,
   ArchiveAttemptResponse,
   DeleteAttemptResponse,
+  DubbingEngine,
+  DubbingLanguage,
+  DubbingVoiceMode,
+  DubbingSubtitlePreset,
+  DubbingSettings,
+  DubbingTrack,
+  DubbingCutTrack,
+  DubbingPreview,
+  DubbingManifest,
+  ModelStorageItem,
+  LmStudioModelStorageItem,
+  StorageUsageSummary,
 } from "@youtube-shorts/contracts";
 
 export * from "./cut";

@@ -21,6 +21,7 @@ from app.application.runtime_service import (
 )
 from app.application.scheduler import WhisperAllocationDecision
 from app.core.config import config
+from app.core.paths import whisper_models_dir
 from app.infrastructure.audio.acoustic_dsp import assign_acoustic_speakers
 from app.infrastructure.audio.pcm_extractor import extract_pcm_16k_wav, probe_media_duration
 from app.models.domain import Job, JobStatus, Segment, WordTiming
@@ -412,7 +413,29 @@ class FasterWhisperAdapter:
             if attempt_decision.device == "cpu" and attempt_decision.cpu_threads > 0:
                 model_kwargs["cpu_threads"] = attempt_decision.cpu_threads
 
-            whisper_model = factory(model_name, **model_kwargs)
+            is_real_whisper = self.model_factory is None and _custom_whisper_model_factory is None
+            if is_real_whisper:
+                model_kwargs["download_root"] = str(whisper_models_dir(create=True))
+            else:
+                try:
+                    sig = inspect.signature(factory)
+                    accepts_dl_root = "download_root" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
+                except (TypeError, ValueError):
+                    accepts_dl_root = False
+                if accepts_dl_root:
+                    model_kwargs["download_root"] = str(whisper_models_dir(create=True))
+
+            try:
+                whisper_model = factory(model_name, **model_kwargs)
+            except TypeError as exc:
+                if "download_root" in model_kwargs and "download_root" in str(exc):
+                    model_kwargs.pop("download_root", None)
+                    whisper_model = factory(model_name, **model_kwargs)
+                else:
+                    raise
 
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
@@ -569,23 +592,43 @@ class TranscriptionDomainService:
         write_vtt = use_all or "vtt" in normalized
         return write_text, write_vtt
 
-    async def transcribe_job(self, job_id: str) -> TranscribeJobResponse:
+    async def transcribe_job(
+        self,
+        job_id: str,
+        *,
+        emit_job_state: bool = True,
+        progress_task: str = "transcription",
+        cancel_token: CancelToken | None = None,
+    ) -> TranscribeJobResponse:
         """Execute Stage 2 GPU transcription for `job_id` inside `c.scheduler.whisper_slot()`."""
         c = self.c
         job = c.jobs.load_job(job_id)
 
-        c.runtime.clear_task_logs(job_id, "transcription")
+        if emit_job_state or progress_task == "transcription":
+            c.runtime.clear_task_logs(job_id, progress_task)
 
-        cancel_token = c.runtime.create_cancel_token(job_id, "transcription")
+        owns_cancel_token = False
+        if cancel_token is None:
+            existing_token = (
+                c.runtime.get_cancel_token(job_id, progress_task)
+                if not emit_job_state
+                else None
+            )
+            if existing_token is not None and not existing_token.is_set():
+                cancel_token = existing_token
+            else:
+                cancel_token = c.runtime.create_cancel_token(job_id, progress_task)
+                owns_cancel_token = True
         start_wall = time.monotonic()
 
         try:
-            c.jobs.update_job_status(job_id, JobStatus.TRANSCRIBING)
-            c.runtime.publish_state_change(
-                job_id, JobStatus.TRANSCRIBING.value, "[transcription] Starting transcription"
-            )
+            if emit_job_state:
+                c.jobs.update_job_status(job_id, JobStatus.TRANSCRIBING)
+                c.runtime.publish_state_change(
+                    job_id, JobStatus.TRANSCRIBING.value, "[transcription] Starting transcription"
+                )
             c.runtime.append_task_log(
-                job_id, "transcription", "[transcription] Starting transcription"
+                job_id, progress_task, f"[{progress_task}] Starting transcription"
             )
 
             video_path = c.jobs.find_source_video(job_id)
@@ -593,7 +636,7 @@ class TranscriptionDomainService:
                 raise RuntimeError("Source video not found for job")
 
             c.runtime.append_task_log(
-                job_id, "transcription", f"[transcription] Using file: {video_path}"
+                job_id, progress_task, f"[{progress_task}] Using file: {video_path}"
             )
 
             # Ensure 16kHz mono PCM WAV exists and is not a truncated fallback artifact
@@ -611,7 +654,7 @@ class TranscriptionDomainService:
                 ):
                     c.runtime.log_warning(
                         job_id,
-                        "transcription",
+                        progress_task,
                         f"Existing audio_16k.wav looks truncated/stale ({wav_dur}s vs video {expected_dur:.1f}s); re-extracting full audio.",
                     )
                     wav_path.unlink(missing_ok=True)
@@ -648,35 +691,40 @@ class TranscriptionDomainService:
                     rate = seg_end / elapsed if seg_end > 0 else 1.0
                     remaining_audio = max(0.0, denom - seg_end)
                     eta = int(round(remaining_audio / max(rate, 0.1)))
-                    msg = f"[transcription] Progresso: {pct:.0f}% ({seg_end:.1f}s / {denom:.1f}s)"
+                    msg = f"[{progress_task}] Progresso: {pct:.0f}% ({seg_end:.1f}s / {denom:.1f}s)"
                 else:
                     pct = 50.0
                     eta = None
-                    msg = f"[transcription] Decodificado até {seg_end:.1f}s"
+                    msg = f"[{progress_task}] Decodificado até {seg_end:.1f}s"
 
+                status_value = (
+                    JobStatus.TRANSCRIBING.value
+                    if emit_job_state
+                    else (job.status.value if hasattr(job.status, "value") else str(job.status))
+                )
                 c.runtime.publish_progress(
                     job_id,
-                    status=JobStatus.TRANSCRIBING.value,
-                    task="transcription",
+                    status=status_value,
+                    task=progress_task,
                     percent=pct,
                     eta_seconds=eta,
                     message=msg,
                 )
 
             def _on_runtime_fallback(reason: str) -> None:
-                c.runtime.log_warning(job_id, "transcription", reason)
+                c.runtime.log_warning(job_id, progress_task, reason)
 
             lmstudio = getattr(c, "lmstudio", None)
             if lmstudio is not None:
                 try:
                     await lmstudio.ensure_idle_vram_released(
                         job_id=job_id,
-                        task_log="transcription",
+                        task_log=progress_task,
                     )
                 except Exception as exc:
                     c.runtime.log_warning(
                         job_id,
-                        "transcription",
+                        progress_task,
                         f"LM Studio idle VRAM release skipped: {exc}",
                     )
 
@@ -684,19 +732,19 @@ class TranscriptionDomainService:
                 if decision.unloaded_models:
                     c.runtime.append_task_log(
                         job_id,
-                        "transcription",
-                        f"[transcription] Unloaded idle Ollama models: {', '.join(decision.unloaded_models)}",
+                        progress_task,
+                        f"[{progress_task}] Unloaded idle Ollama models: {', '.join(decision.unloaded_models)}",
                     )
                 if decision.fell_back_to_cpu:
                     fallback_msg = decision.fallback_reason or (
                         f"Free VRAM ({decision.free_vram_gb:.2f}GB < {config.MIN_FREE_VRAM_GB_FOR_WHISPER}GB); "
                         f"falling back to CPU ({decision.compute_type})"
                     )
-                    c.runtime.log_warning(job_id, "transcription", fallback_msg)
+                    c.runtime.log_warning(job_id, progress_task, fallback_msg)
                 c.runtime.append_task_log(
                     job_id,
-                    "transcription",
-                    f"[transcription] Carregando faster-whisper ({model_name}, {decision.device}, {decision.compute_type})...",
+                    progress_task,
+                    f"[{progress_task}] Carregando faster-whisper ({model_name}, {decision.device}, {decision.compute_type})...",
                 )
 
                 raw_segments, detected_duration, final_decision = await self.whisper_adapter.transcribe(
@@ -714,8 +762,8 @@ class TranscriptionDomainService:
 
             c.runtime.append_task_log(
                 job_id,
-                "transcription",
-                f"[transcription] Silero VAD ativo: {len(raw_segments)} segmentos brutos detectados ({final_decision.device})",
+                progress_task,
+                f"[{progress_task}] Silero VAD ativo: {len(raw_segments)} segmentos brutos detectados ({final_decision.device})",
             )
 
             # 2. Anti-hallucination post-filter
@@ -735,8 +783,8 @@ class TranscriptionDomainService:
             if discarded_count > 0:
                 c.runtime.append_task_log(
                     job_id,
-                    "transcription",
-                    f"[transcription] Anti-hallucination filter discarded {discarded_count} segment(s)",
+                    progress_task,
+                    f"[{progress_task}] Anti-hallucination filter discarded {discarded_count} segment(s)",
                 )
 
             # 3. Build canonical Segment list and run 5-min chunked acoustic speaker diarization
@@ -795,7 +843,7 @@ class TranscriptionDomainService:
                 vtt_text = build_vtt_content(diarized_segments)
                 c.jobs.save_transcription_vtt(job_id, vtt_text)
 
-            # 6. Update job status -> BUILDING_BLOCKS and ensure video_duration_seconds is populated
+            # 6. Update job status -> BUILDING_BLOCKS (only when emit_job_state=True) and ensure video_duration_seconds is populated
             resolved_duration = job.video_duration_seconds
             if not resolved_duration or resolved_duration <= 0:
                 if detected_duration and detected_duration > 0:
@@ -807,26 +855,36 @@ class TranscriptionDomainService:
                     elif diarized_segments:
                         resolved_duration = round(float(diarized_segments[-1].end), 3)
 
-            def _upd_job(j: Job) -> None:
-                j.status = JobStatus.BUILDING_BLOCKS
-                if resolved_duration and resolved_duration > 0:
-                    j.video_duration_seconds = float(resolved_duration)
+            if emit_job_state:
+                def _upd_job(j: Job) -> None:
+                    j.status = JobStatus.BUILDING_BLOCKS
+                    if resolved_duration and resolved_duration > 0:
+                        j.video_duration_seconds = float(resolved_duration)
 
-            updated_job = c.jobs.update_job(job_id, _upd_job)
+                updated_job = c.jobs.update_job(job_id, _upd_job)
+                c.runtime.publish_progress(
+                    job_id,
+                    status=JobStatus.BUILDING_BLOCKS.value,
+                    task=progress_task,
+                    percent=100.0,
+                    eta_seconds=0,
+                    message=f"[{progress_task}] Transcription saved",
+                )
+                c.runtime.publish_state_change(
+                    job_id, JobStatus.BUILDING_BLOCKS.value, f"[{progress_task}] Transcription completed"
+                )
+            else:
+                if (not job.video_duration_seconds or job.video_duration_seconds <= 0) and resolved_duration and resolved_duration > 0:
+                    updated_job = c.jobs.update_job(
+                        job_id, {"video_duration_seconds": float(resolved_duration)}
+                    )
+                else:
+                    updated_job = c.jobs.load_job(job_id)
+                c.runtime.append_task_log(
+                    job_id, progress_task, f"[{progress_task}] Transcription artifacts saved"
+                )
+
             available_formats = c.jobs.get_available_transcription_formats(job_id)
-
-            c.runtime.publish_progress(
-                job_id,
-                status=JobStatus.BUILDING_BLOCKS.value,
-                task="transcription",
-                percent=100.0,
-                eta_seconds=0,
-                message="[transcription] Transcription saved",
-            )
-            c.runtime.publish_state_change(
-                job_id, JobStatus.BUILDING_BLOCKS.value, "[transcription] Transcription completed"
-            )
-
             status_str = updated_job.status.value if hasattr(updated_job.status, "value") else str(updated_job.status)
             return TranscribeJobResponse(
                 transcription=plain_text,
@@ -837,34 +895,38 @@ class TranscriptionDomainService:
                 segments_count=len(diarized_segments),
             )
         except OperationCancelledError:
-            c.jobs.update_job_status(job_id, JobStatus.DOWNLOADED)
-            c.runtime.append_task_log(job_id, "transcription", "[transcription] Cancelled")
-            c.runtime.publish_state_change(
-                job_id, JobStatus.DOWNLOADED.value, "[transcription] Cancelled"
-            )
+            if emit_job_state:
+                c.jobs.update_job_status(job_id, JobStatus.DOWNLOADED)
+                c.runtime.publish_state_change(
+                    job_id, JobStatus.DOWNLOADED.value, f"[{progress_task}] Cancelled"
+                )
+            c.runtime.append_task_log(job_id, progress_task, f"[{progress_task}] Cancelled")
             raise
         except Exception as exc:
             if cancel_token.is_set():
-                c.jobs.update_job_status(job_id, JobStatus.DOWNLOADED)
-                c.runtime.append_task_log(job_id, "transcription", "[transcription] Cancelled")
-                c.runtime.publish_state_change(
-                    job_id, JobStatus.DOWNLOADED.value, "[transcription] Cancelled"
-                )
-                raise OperationCancelledError(job_id, "transcription") from exc
+                if emit_job_state:
+                    c.jobs.update_job_status(job_id, JobStatus.DOWNLOADED)
+                    c.runtime.publish_state_change(
+                        job_id, JobStatus.DOWNLOADED.value, f"[{progress_task}] Cancelled"
+                    )
+                c.runtime.append_task_log(job_id, progress_task, f"[{progress_task}] Cancelled")
+                raise OperationCancelledError(job_id, progress_task) from exc
 
             c.runtime.log_exception(
                 job_id,
-                "transcription",
+                progress_task,
                 exc,
-                message="[transcription] ERROR executing Whisper",
+                message=f"[{progress_task}] ERROR executing Whisper",
             )
-            c.jobs.update_job_status(job_id, JobStatus.ERROR)
-            c.runtime.publish_state_change(
-                job_id, JobStatus.ERROR.value, f"[transcription] {exc}"
-            )
+            if emit_job_state:
+                c.jobs.update_job_status(job_id, JobStatus.ERROR)
+                c.runtime.publish_state_change(
+                    job_id, JobStatus.ERROR.value, f"[{progress_task}] {exc}"
+                )
             raise
         finally:
-            c.runtime.clear_cancel_token(job_id, "transcription")
+            if owns_cancel_token:
+                c.runtime.clear_cancel_token(job_id, progress_task)
 
     def cancel_transcription(self, job_id: str) -> bool:
         """Trigger cooperative cancellation for `job_id` and reset status to `DOWNLOADED`."""
@@ -932,7 +994,16 @@ async def transcribe_job(
     job_id: str,
     *,
     container: ServiceContainer | None = None,
+    emit_job_state: bool = True,
+    progress_task: str = "transcription",
+    cancel_token: CancelToken | None = None,
     **kwargs: Any,
 ) -> TranscribeJobResponse:
     """Convenience entrypoint for Wave 3 orchestrator (`await transcribe_job(job_id)`)."""
-    return await get_transcription_service(container=container).transcribe_job(job_id, **kwargs)
+    return await get_transcription_service(container=container).transcribe_job(
+        job_id,
+        emit_job_state=emit_job_state,
+        progress_task=progress_task,
+        cancel_token=cancel_token,
+        **kwargs,
+    )

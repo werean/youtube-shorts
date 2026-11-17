@@ -1,6 +1,25 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type {
+  LmStudioModelStorageItem,
+  ModelStorageItem,
+  StorageUsageSummary,
+} from "../../types";
+import { deleteLmStudioModel, deleteModelStorage, getStorageUsage } from "../../api";
 import { AppButton, AppDialog } from "../shared";
-import { GlassButton } from "../ui/glass";
+import { GlassBadge, GlassButton, GlassCard } from "../ui/glass";
+
+function formatBytes(bytes: number | undefined | null): string {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let idx = 0;
+  let scaled = value;
+  while (scaled >= 1024 && idx < units.length - 1) {
+    scaled /= 1024;
+    idx += 1;
+  }
+  return `${scaled.toFixed(idx >= 3 ? 2 : idx >= 1 ? 1 : 0)} ${units[idx]}`;
+}
 
 interface Dependency {
   installed: boolean;
@@ -62,7 +81,94 @@ export function DependenciesDialog({
   onCancelInstallSession,
   onDownloadInstallLogs,
 }: DependenciesDialogProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const [storageUsage, setStorageUsage] = useState<StorageUsageSummary | null>(null);
+  const [loadingStorage, setLoadingStorage] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageFeedback, setStorageFeedback] = useState<string | null>(null);
+  const [confirmDeleteModel, setConfirmDeleteModel] = useState<ModelStorageItem | null>(null);
+  const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
+  const [confirmDeleteLmStudio, setConfirmDeleteLmStudio] =
+    useState<LmStudioModelStorageItem | null>(null);
+  const [deletingLmModelKey, setDeletingLmModelKey] = useState<string | null>(null);
+
+  const loadStorageUsage = useCallback(async () => {
+    setLoadingStorage(true);
+    setStorageError(null);
+    try {
+      const summary = await getStorageUsage();
+      setStorageUsage(summary);
+    } catch (error: unknown) {
+      const msg =
+        error instanceof Error ? error.message : "Falha ao calcular armazenamento do app.";
+      setStorageError(msg);
+    } finally {
+      setLoadingStorage(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStorageUsage();
+  }, [loadStorageUsage]);
+
+  const handleConfirmDeleteModel = async () => {
+    if (!confirmDeleteModel) return;
+    const target = confirmDeleteModel;
+    setDeletingModelId(target.model_id);
+    setStorageError(null);
+    setStorageFeedback(null);
+    try {
+      const result = await deleteModelStorage(target.model_id);
+      setConfirmDeleteModel(null);
+      setStorageFeedback(
+        `${target.label} removido (${formatBytes(result.freed_bytes)} liberados).`,
+      );
+      await loadStorageUsage();
+      await onRefresh();
+    } catch (error: unknown) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível remover o modelo (verifique se há tarefa ativa em execução).";
+      setStorageError(
+        /uso|ativa|active|409|lock|conflict/i.test(msg)
+          ? `Bloqueado (em uso): ${msg}`
+          : msg,
+      );
+      setConfirmDeleteModel(null);
+    } finally {
+      setDeletingModelId(null);
+    }
+  };
+
+  const handleConfirmDeleteLmStudioModel = async () => {
+    if (!confirmDeleteLmStudio) return;
+    const target = confirmDeleteLmStudio;
+    setDeletingLmModelKey(target.model_key);
+    setStorageError(null);
+    setStorageFeedback(null);
+    try {
+      const result = await deleteLmStudioModel(target.model_key);
+      setConfirmDeleteLmStudio(null);
+      setStorageFeedback(
+        `Modelo LM Studio "${target.display_name}" removido (${formatBytes(result.freed_bytes)} liberados).`,
+      );
+      await loadStorageUsage();
+      await onRefresh();
+    } catch (error: unknown) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível remover o modelo do LM Studio (verifique se está carregado na VRAM ou em uso).";
+      setStorageError(
+        /uso|ativa|active|409|lock|conflict/i.test(msg)
+          ? `Bloqueado (em uso): ${msg}`
+          : msg,
+      );
+      setConfirmDeleteLmStudio(null);
+    } finally {
+      setDeletingLmModelKey(null);
+    }
+  };
 
   const [pytorchGpuTier, setPytorchGpuTier] = useState<PytorchGpuTier | null>(() => {
     try {
@@ -184,6 +290,13 @@ export function DependenciesDialog({
   const offlineOllama =
     deps.ollama.installed && (deps.ollama.version || "").toLowerCase().includes("server offline");
 
+  const installedModels = (storageUsage?.models ?? []).filter(
+    (item) => item.installed || item.size_bytes > 0,
+  );
+  const installedLmStudioModels = (storageUsage?.lmstudio_models ?? []).filter(
+    (lm) => lm.size_bytes > 0 || (lm.paths && lm.paths.length > 0),
+  );
+
   async function handleChosenViewMode(viewMode: "terminal" | "logs") {
     if (!operationChoice) {
       return;
@@ -219,13 +332,16 @@ export function DependenciesDialog({
       wide
       scrollable
       footer={
-        <div className="flex items-center justify-start w-full">
+        <div className="flex items-center justify-between gap-2 w-full">
           <GlassButton
             variant="glass"
             size="sm"
-            onClick={onRefresh}
-            disabled={refreshingDependencies}
-            loading={refreshingDependencies}
+            onClick={() => {
+              void onRefresh();
+              void loadStorageUsage();
+            }}
+            disabled={refreshingDependencies || loadingStorage}
+            loading={refreshingDependencies || loadingStorage}
           >
             Atualizar Status
           </GlassButton>
@@ -539,6 +655,368 @@ export function DependenciesDialog({
               </div>
             </div>
           )}
+
+      {/* Armazenamento do App & Modelos */}
+      <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-4 mt-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="space-y-0.5">
+            <h4 className="text-sm font-semibold text-white">
+              Armazenamento do App &amp; Modelos
+            </h4>
+            <p className="text-xs text-zinc-400">
+              Total App Size = Modelos/Dependências + Vídeos/Dublagens/Cortes{" "}
+              <span className="text-zinc-500">
+                (LM Studio externo medido em card separado)
+              </span>
+            </p>
+          </div>
+          <GlassButton
+            variant="glass"
+            size="sm"
+            onClick={() => void loadStorageUsage()}
+            loading={loadingStorage}
+            disabled={loadingStorage}
+          >
+            Recalcular
+          </GlassButton>
+        </div>
+
+        {storageError && (
+          <div className="rounded-xl border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-200 leading-relaxed">
+            {storageError}
+          </div>
+        )}
+
+        {storageFeedback && (
+          <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-200 leading-relaxed">
+            {storageFeedback}
+          </div>
+        )}
+
+        {loadingStorage && !storageUsage ? (
+          <div className="flex items-center gap-2 py-3 text-xs text-zinc-400">
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+            <span>Calculando espaço ocupado em disco...</span>
+          </div>
+        ) : storageUsage ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <div className="rounded-xl border border-white/10 bg-black/35 p-3">
+                <span className="text-[11px] uppercase tracking-wider text-zinc-400 block">
+                  Total App Size
+                </span>
+                <span className="text-base font-mono font-bold text-white mt-0.5 block">
+                  {formatBytes(storageUsage.total_app_bytes)}
+                </span>
+              </div>
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] p-3">
+                <span className="text-[11px] uppercase tracking-wider text-cyan-300/80 block">
+                  Modelos / Dependências
+                </span>
+                <span className="text-base font-mono font-bold text-cyan-200 mt-0.5 block">
+                  {formatBytes(storageUsage.total_models_bytes)}
+                </span>
+              </div>
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3">
+                <span className="text-[11px] uppercase tracking-wider text-emerald-300/80 block">
+                  Vídeos / Dublagens / Cortes
+                </span>
+                <span className="text-base font-mono font-bold text-emerald-200 mt-0.5 block">
+                  {formatBytes(storageUsage.total_media_bytes)}
+                </span>
+              </div>
+              <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.07] p-3">
+                <span className="text-[11px] uppercase tracking-wider text-violet-300/85 block">
+                  LM Studio (Externo)
+                </span>
+                <span className="text-base font-mono font-bold text-violet-200 mt-0.5 block">
+                  {formatBytes(storageUsage.lmstudio_models_bytes ?? 0)}
+                </span>
+                <span className="text-[10px] text-zinc-400 mt-0.5 block">
+                  Total c/ LM Studio:{" "}
+                  <span className="font-mono text-zinc-200">
+                    {formatBytes(
+                      storageUsage.total_with_lmstudio_bytes ?? storageUsage.total_app_bytes,
+                    )}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+              <span className="rounded-md bg-white/[0.04] border border-white/[0.08] px-2 py-0.5">
+                Vídeos: {formatBytes(storageUsage.videos_bytes)}
+              </span>
+              <span className="rounded-md bg-white/[0.04] border border-white/[0.08] px-2 py-0.5">
+                Dublagens: {formatBytes(storageUsage.dubs_bytes)}
+              </span>
+              <span className="rounded-md bg-white/[0.04] border border-white/[0.08] px-2 py-0.5">
+                Stems: {formatBytes(storageUsage.stems_bytes)}
+              </span>
+              <span className="rounded-md bg-white/[0.04] border border-white/[0.08] px-2 py-0.5">
+                Shorts: {formatBytes(storageUsage.shorts_bytes)}
+              </span>
+              <span className="rounded-md bg-white/[0.04] border border-white/[0.08] px-2 py-0.5">
+                Arquivados: {formatBytes(storageUsage.archives_bytes)}
+              </span>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 block">
+                Modelos &amp; Ambientes Isolados ({installedModels.length})
+              </span>
+              {installedModels.length === 0 ? (
+                <p className="text-xs text-zinc-500 m-0">
+                  Nenhum modelo ou ambiente do app encontrado em disco.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {installedModels.map((item) => {
+                    const isBusy = deletingModelId === item.model_id;
+                    return (
+                      <div
+                        key={item.model_id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-semibold text-white">
+                              {item.label}
+                            </span>
+                            <span className="font-mono text-[10px] text-zinc-400 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded">
+                              {item.model_id}
+                            </span>
+                            <GlassBadge
+                              variant={item.installed ? "success" : "neutral"}
+                              size="sm"
+                            >
+                              {item.installed ? "Instalado" : "Ausente"}
+                            </GlassBadge>
+                          </div>
+                          {item.paths && item.paths.length > 1 ? (
+                            <div className="space-y-0.5">
+                              {item.paths.map((p) => (
+                                <p
+                                  key={p}
+                                  className="text-[11px] text-zinc-500 font-mono truncate m-0"
+                                  title={p}
+                                >
+                                  {p}
+                                </p>
+                              ))}
+                            </div>
+                          ) : (
+                            item.path && (
+                              <p
+                                className="text-[11px] text-zinc-500 font-mono truncate m-0"
+                                title={item.path}
+                              >
+                                {item.path}
+                              </p>
+                            )
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 flex-shrink-0">
+                          <span className="font-mono text-xs font-semibold text-zinc-200">
+                            {formatBytes(item.size_bytes)}
+                          </span>
+                          {item.installed && item.deletable && (
+                            <GlassButton
+                              variant="danger"
+                              size="sm"
+                              disabled={Boolean(deletingModelId || deletingLmModelKey)}
+                              loading={isBusy}
+                              onClick={() => setConfirmDeleteModel(item)}
+                            >
+                              Excluir
+                            </GlassButton>
+                          )}
+                          {item.installed && !item.deletable && (
+                            <GlassBadge variant="neutral" size="sm">
+                              Base do App
+                            </GlassBadge>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+              <span className="text-xs font-semibold uppercase tracking-wider text-violet-300/90 block">
+                Modelos no LM Studio ({installedLmStudioModels.length})
+              </span>
+              {installedLmStudioModels.length === 0 ? (
+                <p className="text-xs text-zinc-500 m-0">
+                  Nenhum modelo do LM Studio encontrado em disco.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {installedLmStudioModels.map((lm) => {
+                    const isBusyLm = deletingLmModelKey === lm.model_key;
+                    return (
+                      <div
+                        key={lm.model_key}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-violet-500/15 bg-violet-500/[0.04] px-3 py-2.5"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-semibold text-white">
+                              {lm.display_name}
+                            </span>
+                            <span className="font-mono text-[10px] text-zinc-400 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded">
+                              {lm.model_key}
+                            </span>
+                            <GlassBadge variant="neutral" size="sm">
+                              {lm.model_type}
+                            </GlassBadge>
+                            {lm.quantization && (
+                              <span className="font-mono text-[10px] text-violet-200/90 bg-violet-500/15 border border-violet-400/25 px-1.5 py-0.5 rounded">
+                                {lm.quantization}
+                              </span>
+                            )}
+                          </div>
+                          {lm.paths && lm.paths.length > 0 && (
+                            <div className="space-y-0.5">
+                              {lm.paths.map((p) => (
+                                <p
+                                  key={p}
+                                  className="text-[11px] text-zinc-500 font-mono truncate m-0"
+                                  title={p}
+                                >
+                                  {p}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 flex-shrink-0">
+                          <span className="font-mono text-xs font-semibold text-zinc-200">
+                            {formatBytes(lm.size_bytes)}
+                          </span>
+                          {lm.deletable ? (
+                            <GlassButton
+                              variant="danger"
+                              size="sm"
+                              disabled={Boolean(deletingModelId || deletingLmModelKey)}
+                              loading={isBusyLm}
+                              onClick={() => setConfirmDeleteLmStudio(lm)}
+                            >
+                              Excluir
+                            </GlassButton>
+                          ) : (
+                            <GlassBadge variant="neutral" size="sm">
+                              {lm.bundled ? "Embutido" : "Protegido"}
+                            </GlassBadge>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        ) : null}
+      </GlassCard>
+
+      {confirmDeleteModel && (
+        <AppDialog
+          title="Remover Modelo / Ambiente Local"
+          description="Libere espaço em disco removendo arquivos baixados localmente."
+          onClose={() => {
+            if (!deletingModelId) setConfirmDeleteModel(null);
+          }}
+          disableClose={Boolean(deletingModelId)}
+          size="md"
+          footer={
+            <div className="flex items-center justify-end gap-2 w-full">
+              <GlassButton
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDeleteModel(null)}
+                disabled={Boolean(deletingModelId)}
+              >
+                Cancelar
+              </GlassButton>
+              <GlassButton
+                variant="danger"
+                size="sm"
+                loading={Boolean(deletingModelId)}
+                disabled={Boolean(deletingModelId)}
+                onClick={() => void handleConfirmDeleteModel()}
+              >
+                Confirmar Exclusão
+              </GlassButton>
+            </div>
+          }
+        >
+          <div className="space-y-3 py-1">
+            <p className="text-xs text-zinc-200 leading-relaxed m-0">
+              Tem certeza que deseja excluir{" "}
+              <strong className="text-white">{confirmDeleteModel.label}</strong> (
+              <span className="font-mono">{formatBytes(confirmDeleteModel.size_bytes)}</span>)?
+            </p>
+            <p className="text-[11px] text-zinc-400 leading-relaxed m-0">
+              Se precisar usar este recurso novamente, ele será baixado de forma automática pelo preflight.
+              {confirmDeleteModel.model_id === "venv_base" &&
+                " Atenção: remover .venv-dubbing-base também limpa os ambientes dependentes (.venv-qwen3 e .venv-chatterbox)."}
+            </p>
+          </div>
+        </AppDialog>
+      )}
+
+      {confirmDeleteLmStudio && (
+        <AppDialog
+          title="Excluir Modelo Externo do LM Studio"
+          description="Esta ação apaga permanentemente os arquivos GGUF do LM Studio no disco."
+          onClose={() => {
+            if (!deletingLmModelKey) setConfirmDeleteLmStudio(null);
+          }}
+          disableClose={Boolean(deletingLmModelKey)}
+          size="md"
+          footer={
+            <div className="flex items-center justify-end gap-2 w-full">
+              <GlassButton
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDeleteLmStudio(null)}
+                disabled={Boolean(deletingLmModelKey)}
+              >
+                Cancelar
+              </GlassButton>
+              <GlassButton
+                variant="danger"
+                size="sm"
+                loading={Boolean(deletingLmModelKey)}
+                disabled={Boolean(deletingLmModelKey)}
+                onClick={() => void handleConfirmDeleteLmStudioModel()}
+              >
+                Confirmar Exclusão
+              </GlassButton>
+            </div>
+          }
+        >
+          <div className="space-y-3 py-1">
+            <p className="text-xs text-zinc-200 leading-relaxed m-0">
+              Tem certeza que deseja excluir{" "}
+              <strong className="text-white">{confirmDeleteLmStudio.display_name}</strong>{" "}
+              (<span className="font-mono">{confirmDeleteLmStudio.model_key}</span> ·{" "}
+              <span className="font-mono">{formatBytes(confirmDeleteLmStudio.size_bytes)}</span>)?
+            </p>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 leading-relaxed">
+              Atenção: modelos do LM Studio são compartilhados externamente no sistema.
+              Outros aplicativos ou fluxos locais que dependam deste modelo deixarão de
+              encontrá-lo até você baixá-lo novamente pelo LM Studio. Se o modelo estiver
+              carregado na VRAM agora, descarregue-o antes de excluir.
+            </div>
+          </div>
+        </AppDialog>
+      )}
 
           {operationChoice && (
         <AppDialog
