@@ -1,13 +1,16 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { SpinnerGap } from "@phosphor-icons/react";
 import { cn } from "../../lib/utils";
 
-export type ButtonVariant = "primary" | "ghost" | "destructive";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   leadingIcon?: ReactNode;
+  leftIcon?: ReactNode;
+  rightIcon?: ReactNode;
   loading?: boolean;
   loadingLabel?: string;
   fullWidth?: boolean;
@@ -15,50 +18,33 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 }
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: "h-7 px-2.5 text-body-sm",
-  md: "h-8 px-3 text-body",
-  lg: "h-9 px-3.5 text-body-md",
+  sm: "h-7 px-2.5 text-sm gap-1.5",
+  md: "h-9 px-4 text-base gap-1.5",
+  lg: "h-10 px-5 text-base gap-2",
 };
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-accent text-accent-fg border-[0.5px] border-border-3 hover:bg-text-1/90 disabled:bg-bg-4 disabled:text-text-3",
+    "bg-accent text-accent-fg border border-transparent hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] disabled:opacity-45",
+  secondary:
+    "bg-white/[0.08] text-text-1 border border-line hover:bg-white/[0.14] disabled:opacity-45",
   ghost:
-    "bg-transparent text-text-2 border-[0.5px] border-border-1 hover:bg-bg-2 hover:text-text-1 hover:border-border-2 disabled:text-text-3",
+    "bg-white/[0.06] text-text-1 border border-line hover:bg-white/[0.12] disabled:opacity-45",
   destructive:
-    "bg-danger text-text-1 border-[0.5px] border-danger hover:bg-danger/90 disabled:bg-bg-4 disabled:text-text-3 disabled:border-border-1",
+    "bg-white/[0.06] text-text-1 border border-line hover:bg-[var(--danger-bg)] hover:text-danger disabled:opacity-45",
+  danger:
+    "bg-white/[0.06] text-text-1 border border-line hover:bg-[var(--danger-bg)] hover:text-danger disabled:opacity-45",
 };
-
-function SpinnerIcon() {
-  return (
-    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" aria-hidden="true">
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="opacity-25"
-        fill="none"
-      />
-      <path
-        d="M21 12a9 9 0 0 0-9-9"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="opacity-100"
-        fill="none"
-      />
-    </svg>
-  );
-}
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   {
     variant = "ghost",
     size = "md",
     leadingIcon,
+    leftIcon,
+    rightIcon,
     loading = false,
-    loadingLabel = "Loading",
+    loadingLabel = "Carregando…",
     fullWidth = false,
     className,
     children,
@@ -69,6 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const isDisabled = disabled || loading;
+  const resolvedLeadingIcon = leadingIcon ?? leftIcon;
 
   return (
     <button
@@ -77,9 +64,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={isDisabled}
       aria-busy={loading || undefined}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md font-medium leading-none ds-transition-color",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-3",
-        "disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center rounded-pill font-medium leading-none transition-[background-color,transform,border-color,color] duration-fast ease-out",
+        "disabled:cursor-not-allowed select-none",
         sizeStyles[size],
         variantStyles[variant],
         fullWidth ? "w-full" : "",
@@ -87,10 +73,19 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...rest}
     >
-      <span className="inline-flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
-        {loading ? <SpinnerIcon /> : leadingIcon}
-      </span>
-      <span>{loading ? loadingLabel : children}</span>
+      {loading ? (
+        <SpinnerGap className="h-3.5 w-3.5 animate-spin shrink-0" weight="regular" aria-hidden="true" />
+      ) : resolvedLeadingIcon ? (
+        <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true">
+          {resolvedLeadingIcon}
+        </span>
+      ) : null}
+      {children ? <span>{loading ? loadingLabel : children}</span> : null}
+      {!loading && rightIcon ? (
+        <span className="inline-flex shrink-0 items-center justify-center" aria-hidden="true">
+          {rightIcon}
+        </span>
+      ) : null}
     </button>
   );
 });

@@ -5,19 +5,23 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal, 1000);
   padding: 20px;
 }
 
 .dialog,
 .app-dialog {
-  background: var(--panel);
+  background: var(--surface-glass-strong, rgba(16, 16, 20, 0.88));
+  backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-sat, 140%));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 24px)) saturate(var(--glass-sat, 140%));
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-panel, 18px);
   max-width: 600px;
   width: 100%;
   max-height: 80vh;
@@ -26,6 +30,7 @@
   z-index: 1001;
   position: relative;
   box-shadow: var(--shadow);
+  color: var(--text-1, #f5f5f7);
 }
 
 .dialog.wide,

@@ -65,7 +65,7 @@
 }
 
 /* Buttons */
-button,
+.dialog button,
 .app-btn {
   padding: 10px 20px;
   border-radius: 8px;
@@ -77,39 +77,39 @@ button,
   transition: all 0.2s ease;
 }
 
-button.primary,
+.dialog button.primary,
 .app-btn--primary {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--border);
 }
 
-button.primary:hover:not(:disabled),
+.dialog button.primary:hover:not(:disabled),
 .app-btn--primary:hover:not(:disabled) {
   background: var(--panel);
   border-color: var(--border);
 }
 
-button.secondary,
+.dialog button.secondary,
 .app-btn--secondary {
   background: var(--ink);
   color: var(--panel);
   border: 1px solid transparent;
 }
 
-button.accent,
+.dialog button.accent,
 .app-btn--accent {
   background: var(--accent-2);
   color: var(--bg);
 }
 
-button.ghost,
+.dialog button.ghost,
 .app-btn--ghost {
   background: transparent;
   border: 1px solid var(--border);
 }
 
-button:disabled,
+.dialog button:disabled,
 .app-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

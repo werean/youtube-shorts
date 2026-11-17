@@ -15,8 +15,8 @@
   font-size: var(--app-checkbox-label-size, 0.96rem);
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
-textarea,
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"])),
+:where(textarea),
 .app-input {
   padding: 10px 12px;
   border-radius: 8px;
@@ -30,10 +30,11 @@ textarea,
     background-color 150ms ease;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
-textarea:focus,
-.app-input:focus {
-  outline: none;
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):focus-visible,
+textarea:focus-visible,
+.app-input:focus-visible {
+  outline: 2px solid var(--accent-ring, rgba(91, 156, 255, 0.45));
+  outline-offset: 1px;
   border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);
 }
@@ -81,9 +82,10 @@ select,
     background-color 150ms ease;
 }
 
-select:focus,
-.select-field:focus {
-  outline: none;
+select:focus-visible,
+.select-field:focus-visible {
+  outline: 2px solid var(--accent-ring, rgba(91, 156, 255, 0.45));
+  outline-offset: 1px;
   border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);
 }
@@ -129,9 +131,10 @@ input[type="checkbox"]:checked::before,
   transform: scale(1);
 }
 
-input[type="checkbox"]:focus,
-.app-checkbox:focus {
-  outline: none;
+input[type="checkbox"]:focus-visible,
+.app-checkbox:focus-visible {
+  outline: 2px solid var(--accent-ring, rgba(91, 156, 255, 0.45));
+  outline-offset: 2px;
   border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border) 45%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 22%, transparent 78%);
 }
