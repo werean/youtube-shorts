@@ -40,6 +40,7 @@ const config: Config = {
           soft: "var(--accent-soft)",
           seg: "var(--accent-seg)",
           fg: "var(--accent-fg)",
+          ring: "var(--accent-ring)",
         },
         success: "var(--success)",
         "success-bg": "var(--success-bg)",

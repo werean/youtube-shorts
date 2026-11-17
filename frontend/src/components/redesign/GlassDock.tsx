@@ -236,7 +236,12 @@ export function GlassDock({
         />
       </button>
 
-      <div className="h-full px-4 py-3 flex flex-col justify-between gap-2.5">
+      <div
+        className={[
+          "h-full px-4 flex flex-col justify-between gap-2",
+          collapsed ? "py-3" : "pt-3 pb-7",
+        ].join(" ")}
+      >
         {/* Linha de reprodução (sempre visível) */}
         <div className="flex items-center gap-3 h-8 shrink-0">
           <button

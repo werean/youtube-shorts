@@ -296,7 +296,7 @@ export function ArcSidebar({
                         : "text-text-2 hover:bg-glass-hover hover:text-text-1",
                     ].join(" ")}
                   >
-                    <div className="h-9 aspect-[9/16] rounded-thumb overflow-hidden bg-black/40 border border-line shrink-0 grid place-items-center">
+                    <div className="w-9 h-9 rounded-lg overflow-hidden bg-black/40 border border-line shrink-0 grid place-items-center">
                       {thumbSrc ? (
                         <video
                           src={thumbSrc}
