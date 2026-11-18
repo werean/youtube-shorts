@@ -676,10 +676,10 @@ export function DependenciesSection({
           <div
             className={`${TABLE_GRID} border-b border-line px-4 py-2.5 text-label font-medium uppercase tracking-[0.06em] text-text-3`}
           >
-            <span className={`flex items-center pr-3 ${CELL_DIVIDER}`}>Programa</span>
-            <span className={`flex items-center px-3 ${CELL_DIVIDER}`}>Versão</span>
-            <span className={`flex items-center px-3 ${CELL_DIVIDER}`}>Status</span>
-            <span className="flex items-center pl-3 pr-2">Ação</span>
+            <span className="flex items-center justify-start pr-3">Programa</span>
+            <span className="flex items-center justify-center px-3 text-center">Versão</span>
+            <span className="flex items-center justify-center px-3 text-center">Status</span>
+            <span className="flex items-center justify-center px-3 text-center">Ação</span>
             <span aria-hidden="true" />
           </div>
 
@@ -719,7 +719,7 @@ export function DependenciesSection({
                     disabled={busy}
                     aria-label={`Instalar ${row.displayName}`}
                     onClick={() => startInstall(row)}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-left text-sm font-medium text-accent-soft transition-colors duration-fast hover:text-text-1 disabled:pointer-events-none disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-sm font-medium text-accent-soft transition-colors duration-fast hover:text-text-1 disabled:pointer-events-none disabled:opacity-50"
                   >
                     <DownloadSimple size={14} weight="regular" aria-hidden="true" />
                     <span>Instalar</span>
@@ -729,7 +729,7 @@ export function DependenciesSection({
                     type="button"
                     aria-label={`Como instalar ${row.displayName}`}
                     onClick={() => onShowInstallInstructions(row.name)}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-left text-sm font-medium text-text-2 transition-colors duration-fast hover:text-text-1"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-sm font-medium text-text-2 transition-colors duration-fast hover:text-text-1"
                   >
                     <Info size={14} weight="regular" aria-hidden="true" />
                     <span>Como instalar</span>
@@ -740,9 +740,9 @@ export function DependenciesSection({
               return (
                 <li
                   key={row.name}
-                  className={`${TABLE_GRID} relative px-4 py-2.5`}
+                  className={`${TABLE_GRID} relative px-4 py-0`}
                 >
-                  <div className={`flex min-w-0 items-center gap-3 pr-3 ${CELL_DIVIDER}`}>
+                  <div className={`flex min-w-0 items-center justify-start gap-3 py-2.5 pr-3 ${CELL_DIVIDER}`}>
                     <span
                       aria-hidden="true"
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-item bg-glass-hover text-text-2"
@@ -758,18 +758,20 @@ export function DependenciesSection({
                   </div>
 
                   <span
-                    className={`flex items-center px-3 font-mono text-sm text-text-3 tabular-nums ${CELL_DIVIDER}`}
+                    className={`flex items-center justify-center px-3 py-2.5 text-center font-sans text-sm text-text-3 tabular-nums ${CELL_DIVIDER}`}
                   >
                     {version}
                   </span>
-                  <div className={`flex items-center px-3 ${CELL_DIVIDER}`}>{statusNode}</div>
-                  <div className="flex items-center pl-3 pr-2">{actionNode}</div>
+                  <div className={`flex items-center justify-center px-3 py-2.5 text-center ${CELL_DIVIDER}`}>
+                    {statusNode}
+                  </div>
+                  <div className="flex items-center justify-center px-3 py-2.5 text-center">{actionNode}</div>
 
                   <div
                     ref={(node) => {
                       menuCellRefs.current[row.name] = node;
                     }}
-                    className="relative flex items-center justify-end"
+                    className="relative flex items-center justify-end py-2.5"
                   >
                     <button
                       type="button"
