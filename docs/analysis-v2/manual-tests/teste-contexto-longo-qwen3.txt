@@ -1,0 +1,308 @@
+Este é um teste de contexto longo. Leia o registro inteiro com atenção.
+INFORMAÇÃO A (início do registro): o código do armário é LARANJA-4172.
+
+REGISTRO DE OCORRÊNCIAS
+Ocorrência 1: a reunião de segunda precisou de ajuste pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 2: a rota de entrega atrasou por causa da chuva pelo Otávio, só que a nota fiscal veio com o valor errado.
+Ocorrência 3: a fila de atendimento foi revisado pelo pessoal da manhã, e ninguém reclamou depois.
+Ocorrência 4: a rota de entrega foi conferido duas vezes pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 5: a planilha de custos ficou pendente pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 6: a senha do portão foi aprovado sem ressalvas pelo Otávio, embora o prazo tenha estourado em dois dias.
+Ocorrência 7: o gerador reserva foi aprovado sem ressalvas pela Marta, e o cliente foi avisado por telefone.
+Ocorrência 8: o estoque de peças foi adiado pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 9: o servidor de arquivos foi conferido duas vezes pela equipe do depósito, mas ainda falta registrar no sistema.
+Ocorrência 10: a fila de atendimento passou sem problemas pela equipe do depósito, mas ainda falta registrar no sistema.
+Ocorrência 11: a fila de atendimento foi aprovado sem ressalvas pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 12: a rota de entrega atrasou por causa da chuva pelo Otávio, e ninguém reclamou depois.
+Ocorrência 13: a fila de atendimento foi adiado pela contabilidade, e o cliente foi avisado por telefone.
+Ocorrência 14: o lote de etiquetas gerou uma dúvida pela contabilidade, mas o cadeado novo ainda não chegou.
+Ocorrência 15: a reunião de segunda passou sem problemas pelo pessoal da manhã, e o custo ficou dentro do previsto.
+Ocorrência 16: a agenda do técnico foi adiado pelo Otávio, e isso resolveu a pendência da semana anterior.
+Ocorrência 17: o relatório mensal mudou de responsável pelo Renan, mas o cadeado novo ainda não chegou.
+Ocorrência 18: o servidor de arquivos foi aprovado sem ressalvas pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 19: o relatório mensal foi conferido duas vezes pela equipe do depósito, só que a nota fiscal veio com o valor errado.
+Ocorrência 20: o turno da noite mudou de responsável pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 21: o gerador reserva ficou pendente pelo Renan, só que a nota fiscal veio com o valor errado.
+Ocorrência 22: a agenda do técnico gerou uma dúvida pela contabilidade, mas o cadeado novo ainda não chegou.
+Ocorrência 23: a rota de entrega ficou pendente pela Dona Célia, mas o cadeado novo ainda não chegou.
+Ocorrência 24: a agenda do técnico ficou pendente pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 25: o gerador reserva foi aprovado sem ressalvas pela contabilidade, e isso resolveu a pendência da semana anterior.
+Ocorrência 26: a agenda do técnico foi conferido duas vezes pelo Renan, e ninguém reclamou depois.
+Ocorrência 27: a câmera do galpão gerou uma dúvida pela equipe do depósito, mas ainda falta registrar no sistema.
+Ocorrência 28: a câmera do galpão foi revisado pelo pessoal da manhã, e isso resolveu a pendência da semana anterior.
+Ocorrência 29: o turno da noite foi adiado pelo fornecedor, e o cliente foi avisado por telefone.
+Ocorrência 30: o caminhão azul mudou de responsável pelo Otávio, e o custo ficou dentro do previsto.
+Ocorrência 31: a câmera do galpão foi conferido duas vezes pela Dona Célia, e o custo ficou dentro do previsto.
+Ocorrência 32: a senha do portão foi conferido duas vezes pela Dona Célia, e o cliente foi avisado por telefone.
+Ocorrência 33: a reunião de segunda foi conferido duas vezes pelo pessoal da manhã, e o custo ficou dentro do previsto.
+Ocorrência 34: a rota de entrega precisou de ajuste pela equipe do depósito, embora o prazo tenha estourado em dois dias.
+Ocorrência 35: o gerador reserva foi adiado pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 36: a senha do portão foi aprovado sem ressalvas pela equipe do depósito, e isso resolveu a pendência da semana anterior.
+Ocorrência 37: o servidor de arquivos foi revisado pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 38: o relatório mensal gerou uma dúvida pelo Renan, e o custo ficou dentro do previsto.
+Ocorrência 39: a agenda do técnico atrasou por causa da chuva pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 40: o caminhão azul atrasou por causa da chuva pelo fornecedor, e o cliente foi avisado por telefone.
+Ocorrência 41: o contrato de aluguel foi conferido duas vezes pelo Otávio, mas o cadeado novo ainda não chegou.
+Ocorrência 42: o gerador reserva foi conferido duas vezes pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 43: a rota de entrega foi adiado pela contabilidade, e o custo ficou dentro do previsto.
+Ocorrência 44: a rota de entrega gerou uma dúvida pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 45: o estoque de peças foi aprovado sem ressalvas pela equipe do depósito, mas ainda falta registrar no sistema.
+Ocorrência 46: a reunião de segunda foi aprovado sem ressalvas pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 47: a senha do portão foi adiado pelo fornecedor, e o custo ficou dentro do previsto.
+Ocorrência 48: o gerador reserva passou sem problemas pelo Renan, só que a nota fiscal veio com o valor errado.
+Ocorrência 49: a câmera do galpão ficou pendente pelo Otávio, mas o cadeado novo ainda não chegou.
+Ocorrência 50: a câmera do galpão mudou de responsável pela contabilidade, e isso resolveu a pendência da semana anterior.
+Ocorrência 51: a rota de entrega precisou de ajuste pelo Otávio, só que a nota fiscal veio com o valor errado.
+Ocorrência 52: a agenda do técnico passou sem problemas pela contabilidade, e o custo ficou dentro do previsto.
+Ocorrência 53: o relatório mensal foi revisado pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 54: o turno da noite atrasou por causa da chuva pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 55: o gerador reserva ficou pendente pela Dona Célia, só que a nota fiscal veio com o valor errado.
+Ocorrência 56: o caminhão azul precisou de ajuste pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 57: o relatório mensal atrasou por causa da chuva pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 58: a fila de atendimento foi adiado pelo pessoal da manhã, e o cliente foi avisado por telefone.
+Ocorrência 59: a agenda do técnico foi adiado pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 60: a reunião de segunda foi revisado pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 61: a câmera do galpão passou sem problemas pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 62: a câmera do galpão gerou uma dúvida pelo Renan, mas ainda falta registrar no sistema.
+Ocorrência 63: a planilha de custos ficou pendente pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 64: a planilha de custos gerou uma dúvida pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 65: a fila de atendimento foi aprovado sem ressalvas pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 66: o caminhão azul gerou uma dúvida pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 67: o caminhão azul foi conferido duas vezes pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 68: o caminhão azul precisou de ajuste pelo fornecedor, só que a nota fiscal veio com o valor errado.
+Ocorrência 69: a rota de entrega foi conferido duas vezes pela contabilidade, e o cliente foi avisado por telefone.
+Ocorrência 70: a agenda do técnico ficou pendente pela equipe do depósito, e o custo ficou dentro do previsto.
+Ocorrência 71: o turno da noite foi revisado pela equipe do depósito, mas o cadeado novo ainda não chegou.
+Ocorrência 72: o lote de etiquetas precisou de ajuste pela contabilidade, só que a nota fiscal veio com o valor errado.
+Ocorrência 73: o turno da noite atrasou por causa da chuva pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 74: o estoque de peças ficou pendente pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 75: a senha do portão foi adiado pelo pessoal da manhã, e ninguém reclamou depois.
+Ocorrência 76: o servidor de arquivos foi adiado pela Dona Célia, embora o prazo tenha estourado em dois dias.
+Ocorrência 77: o lote de etiquetas foi aprovado sem ressalvas pelo Renan, e isso resolveu a pendência da semana anterior.
+Ocorrência 78: o relatório mensal foi conferido duas vezes pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 79: o caminhão azul gerou uma dúvida pela contabilidade, e o cliente foi avisado por telefone.
+Ocorrência 80: a senha do portão atrasou por causa da chuva pela equipe do depósito, e o custo ficou dentro do previsto.
+Ocorrência 81: o relatório mensal atrasou por causa da chuva pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 82: o lote de etiquetas precisou de ajuste pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 83: o turno da noite precisou de ajuste pela contabilidade, mas ainda falta registrar no sistema.
+Ocorrência 84: o relatório mensal foi revisado pelo Renan, mas o cadeado novo ainda não chegou.
+Ocorrência 85: o lote de etiquetas ficou pendente pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 86: a planilha de custos passou sem problemas pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 87: o relatório mensal mudou de responsável pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 88: a câmera do galpão gerou uma dúvida pelo pessoal da manhã, e isso resolveu a pendência da semana anterior.
+Ocorrência 89: a câmera do galpão atrasou por causa da chuva pela contabilidade, embora o prazo tenha estourado em dois dias.
+Ocorrência 90: a agenda do técnico atrasou por causa da chuva pela Dona Célia, embora o prazo tenha estourado em dois dias.
+Ocorrência 91: a senha do portão mudou de responsável pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 92: a rota de entrega foi conferido duas vezes pela contabilidade, só que a nota fiscal veio com o valor errado.
+Ocorrência 93: a rota de entrega foi adiado pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 94: a planilha de custos passou sem problemas pelo Otávio, e o custo ficou dentro do previsto.
+Ocorrência 95: a agenda do técnico gerou uma dúvida pela equipe do depósito, e isso resolveu a pendência da semana anterior.
+Ocorrência 96: o caminhão azul precisou de ajuste pela contabilidade, embora o prazo tenha estourado em dois dias.
+Ocorrência 97: a agenda do técnico ficou pendente pelo fornecedor, mas o cadeado novo ainda não chegou.
+Ocorrência 98: o turno da noite foi adiado pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 99: o relatório mensal foi conferido duas vezes pelo Renan, e o cliente foi avisado por telefone.
+Ocorrência 100: a planilha de custos gerou uma dúvida pelo Renan, mas ainda falta registrar no sistema.
+Ocorrência 101: a agenda do técnico gerou uma dúvida pela Marta, só que a nota fiscal veio com o valor errado.
+Ocorrência 102: o relatório mensal mudou de responsável pela contabilidade, e ninguém reclamou depois.
+Ocorrência 103: o contrato de aluguel gerou uma dúvida pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 104: a rota de entrega foi adiado pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 105: o servidor de arquivos passou sem problemas pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 106: o servidor de arquivos precisou de ajuste pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 107: o contrato de aluguel precisou de ajuste pela contabilidade, só que a nota fiscal veio com o valor errado.
+Ocorrência 108: a rota de entrega passou sem problemas pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 109: o contrato de aluguel ficou pendente pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 110: o gerador reserva ficou pendente pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 111: a fila de atendimento foi adiado pelo Otávio, e isso resolveu a pendência da semana anterior.
+Ocorrência 112: a senha do portão ficou pendente pela contabilidade, e ninguém reclamou depois.
+Ocorrência 113: a reunião de segunda atrasou por causa da chuva pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 114: a fila de atendimento precisou de ajuste pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 115: a rota de entrega precisou de ajuste pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 116: o turno da noite foi adiado pela Dona Célia, e isso resolveu a pendência da semana anterior.
+Ocorrência 117: o relatório mensal foi adiado pela Dona Célia, mas o cadeado novo ainda não chegou.
+Ocorrência 118: o relatório mensal precisou de ajuste pela Dona Célia, só que a nota fiscal veio com o valor errado.
+Ocorrência 119: o lote de etiquetas foi revisado pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 120: o estoque de peças foi revisado pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 121: a planilha de custos mudou de responsável pelo Otávio, e o cliente foi avisado por telefone.
+Ocorrência 122: o gerador reserva mudou de responsável pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 123: a agenda do técnico foi adiado pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 124: a planilha de custos precisou de ajuste pelo fornecedor, só que a nota fiscal veio com o valor errado.
+Ocorrência 125: o estoque de peças precisou de ajuste pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 126: o gerador reserva passou sem problemas pelo fornecedor, e o custo ficou dentro do previsto.
+Ocorrência 127: o estoque de peças ficou pendente pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 128: a fila de atendimento foi adiado pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 129: a câmera do galpão precisou de ajuste pela equipe do depósito, e isso resolveu a pendência da semana anterior.
+Ocorrência 130: a câmera do galpão foi revisado pela Dona Célia, só que a nota fiscal veio com o valor errado.
+Ocorrência 131: a reunião de segunda atrasou por causa da chuva pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 132: o estoque de peças passou sem problemas pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 133: o turno da noite foi revisado pelo Renan, e o cliente foi avisado por telefone.
+Ocorrência 134: a rota de entrega mudou de responsável pela Dona Célia, embora o prazo tenha estourado em dois dias.
+Ocorrência 135: a planilha de custos atrasou por causa da chuva pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 136: o servidor de arquivos ficou pendente pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 137: a fila de atendimento foi revisado pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 138: o servidor de arquivos passou sem problemas pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 139: a fila de atendimento atrasou por causa da chuva pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 140: o lote de etiquetas gerou uma dúvida pela contabilidade, e o custo ficou dentro do previsto.
+Ocorrência 141: o servidor de arquivos foi aprovado sem ressalvas pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 142: a senha do portão atrasou por causa da chuva pelo fornecedor, e o custo ficou dentro do previsto.
+Ocorrência 143: o caminhão azul atrasou por causa da chuva pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 144: a rota de entrega foi revisado pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 145: o gerador reserva gerou uma dúvida pelo Otávio, e o cliente foi avisado por telefone.
+Ocorrência 146: a senha do portão mudou de responsável pela Marta, e ninguém reclamou depois.
+Ocorrência 147: o gerador reserva atrasou por causa da chuva pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 148: o servidor de arquivos foi revisado pela contabilidade, mas ainda falta registrar no sistema.
+INFORMAÇÃO B (meio do registro): a chave reserva fica com o porteiro chamado Belmiro.
+Ocorrência 149: a agenda do técnico atrasou por causa da chuva pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 150: a agenda do técnico mudou de responsável pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 151: a senha do portão passou sem problemas pelo pessoal da manhã, embora o prazo tenha estourado em dois dias.
+Ocorrência 152: a planilha de custos mudou de responsável pela contabilidade, e o cliente foi avisado por telefone.
+Ocorrência 153: a rota de entrega mudou de responsável pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 154: a fila de atendimento foi adiado pelo Otávio, e o custo ficou dentro do previsto.
+Ocorrência 155: a reunião de segunda passou sem problemas pela Dona Célia, e o custo ficou dentro do previsto.
+Ocorrência 156: o estoque de peças mudou de responsável pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 157: o servidor de arquivos ficou pendente pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 158: o servidor de arquivos atrasou por causa da chuva pela Dona Célia, mas o cadeado novo ainda não chegou.
+Ocorrência 159: a câmera do galpão mudou de responsável pelo Otávio, embora o prazo tenha estourado em dois dias.
+Ocorrência 160: o servidor de arquivos ficou pendente pela contabilidade, e ninguém reclamou depois.
+Ocorrência 161: o servidor de arquivos mudou de responsável pelo Otávio, mas o cadeado novo ainda não chegou.
+Ocorrência 162: o servidor de arquivos foi conferido duas vezes pelo pessoal da manhã, embora o prazo tenha estourado em dois dias.
+Ocorrência 163: a rota de entrega foi aprovado sem ressalvas pelo Otávio, e o custo ficou dentro do previsto.
+Ocorrência 164: a agenda do técnico atrasou por causa da chuva pela Dona Célia, só que a nota fiscal veio com o valor errado.
+Ocorrência 165: o turno da noite foi aprovado sem ressalvas pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 166: a agenda do técnico gerou uma dúvida pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 167: o caminhão azul mudou de responsável pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 168: o turno da noite foi revisado pela contabilidade, mas o cadeado novo ainda não chegou.
+Ocorrência 169: o contrato de aluguel passou sem problemas pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 170: a reunião de segunda foi conferido duas vezes pelo Renan, mas ainda falta registrar no sistema.
+Ocorrência 171: a senha do portão gerou uma dúvida pela Marta, só que a nota fiscal veio com o valor errado.
+Ocorrência 172: o lote de etiquetas gerou uma dúvida pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 173: o caminhão azul foi adiado pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 174: o servidor de arquivos gerou uma dúvida pelo Otávio, e o cliente foi avisado por telefone.
+Ocorrência 175: o contrato de aluguel foi aprovado sem ressalvas pelo Otávio, só que a nota fiscal veio com o valor errado.
+Ocorrência 176: o caminhão azul foi conferido duas vezes pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 177: o servidor de arquivos ficou pendente pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 178: o gerador reserva precisou de ajuste pelo pessoal da manhã, e isso resolveu a pendência da semana anterior.
+Ocorrência 179: o contrato de aluguel atrasou por causa da chuva pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 180: o lote de etiquetas gerou uma dúvida pelo fornecedor, e ninguém reclamou depois.
+Ocorrência 181: o lote de etiquetas foi conferido duas vezes pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 182: o estoque de peças foi conferido duas vezes pela contabilidade, e o custo ficou dentro do previsto.
+Ocorrência 183: o gerador reserva passou sem problemas pela contabilidade, e ninguém reclamou depois.
+Ocorrência 184: o caminhão azul atrasou por causa da chuva pela equipe do depósito, e o custo ficou dentro do previsto.
+Ocorrência 185: a câmera do galpão foi conferido duas vezes pelo Renan, e isso resolveu a pendência da semana anterior.
+Ocorrência 186: o servidor de arquivos passou sem problemas pela Dona Célia, e o cliente foi avisado por telefone.
+Ocorrência 187: o gerador reserva foi adiado pela Dona Célia, mas o cadeado novo ainda não chegou.
+Ocorrência 188: o relatório mensal foi conferido duas vezes pelo Otávio, e o custo ficou dentro do previsto.
+Ocorrência 189: o gerador reserva precisou de ajuste pelo Otávio, embora o prazo tenha estourado em dois dias.
+Ocorrência 190: o relatório mensal mudou de responsável pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 191: o caminhão azul gerou uma dúvida pela contabilidade, e o cliente foi avisado por telefone.
+Ocorrência 192: o turno da noite atrasou por causa da chuva pelo pessoal da manhã, embora o prazo tenha estourado em dois dias.
+Ocorrência 193: a rota de entrega precisou de ajuste pelo Renan, mas ainda falta registrar no sistema.
+Ocorrência 194: a reunião de segunda foi adiado pelo Renan, e isso resolveu a pendência da semana anterior.
+Ocorrência 195: o lote de etiquetas foi aprovado sem ressalvas pelo pessoal da manhã, e ninguém reclamou depois.
+Ocorrência 196: a agenda do técnico foi conferido duas vezes pelo fornecedor, e o cliente foi avisado por telefone.
+Ocorrência 197: a agenda do técnico atrasou por causa da chuva pelo pessoal da manhã, e o cliente foi avisado por telefone.
+Ocorrência 198: o servidor de arquivos gerou uma dúvida pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 199: o servidor de arquivos foi aprovado sem ressalvas pelo Renan, e o custo ficou dentro do previsto.
+Ocorrência 200: o gerador reserva atrasou por causa da chuva pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 201: o servidor de arquivos foi adiado pelo fornecedor, e o cliente foi avisado por telefone.
+Ocorrência 202: o gerador reserva mudou de responsável pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 203: a senha do portão foi revisado pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 204: o contrato de aluguel mudou de responsável pela contabilidade, e ninguém reclamou depois.
+Ocorrência 205: a rota de entrega foi conferido duas vezes pela contabilidade, mas o cadeado novo ainda não chegou.
+Ocorrência 206: a planilha de custos ficou pendente pelo pessoal da manhã, e o custo ficou dentro do previsto.
+Ocorrência 207: o turno da noite atrasou por causa da chuva pelo Otávio, mas o cadeado novo ainda não chegou.
+Ocorrência 208: a rota de entrega atrasou por causa da chuva pela Marta, e ninguém reclamou depois.
+Ocorrência 209: o lote de etiquetas precisou de ajuste pelo pessoal da manhã, e ninguém reclamou depois.
+Ocorrência 210: o gerador reserva passou sem problemas pela equipe do depósito, e isso resolveu a pendência da semana anterior.
+Ocorrência 211: o relatório mensal foi conferido duas vezes pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 212: a rota de entrega passou sem problemas pelo pessoal da manhã, e o cliente foi avisado por telefone.
+Ocorrência 213: o servidor de arquivos foi adiado pela Marta, e ninguém reclamou depois.
+Ocorrência 214: o relatório mensal passou sem problemas pela contabilidade, e isso resolveu a pendência da semana anterior.
+Ocorrência 215: a reunião de segunda foi adiado pela contabilidade, embora o prazo tenha estourado em dois dias.
+Ocorrência 216: o relatório mensal foi adiado pela Marta, e o cliente foi avisado por telefone.
+Ocorrência 217: a agenda do técnico passou sem problemas pela Marta, e ninguém reclamou depois.
+Ocorrência 218: a planilha de custos mudou de responsável pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 219: o servidor de arquivos foi adiado pelo fornecedor, só que a nota fiscal veio com o valor errado.
+Ocorrência 220: a planilha de custos mudou de responsável pela Marta, só que a nota fiscal veio com o valor errado.
+Ocorrência 221: a agenda do técnico foi conferido duas vezes pelo Renan, e o cliente foi avisado por telefone.
+Ocorrência 222: a planilha de custos foi revisado pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 223: a planilha de custos mudou de responsável pelo pessoal da manhã, e isso resolveu a pendência da semana anterior.
+Ocorrência 224: o lote de etiquetas foi adiado pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 225: a planilha de custos passou sem problemas pela Dona Célia, mas ainda falta registrar no sistema.
+Ocorrência 226: a fila de atendimento mudou de responsável pela equipe do depósito, embora o prazo tenha estourado em dois dias.
+Ocorrência 227: a câmera do galpão foi conferido duas vezes pela Marta, e o custo ficou dentro do previsto.
+Ocorrência 228: o caminhão azul foi conferido duas vezes pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 229: o estoque de peças foi aprovado sem ressalvas pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 230: o estoque de peças foi revisado pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 231: a câmera do galpão gerou uma dúvida pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 232: o caminhão azul precisou de ajuste pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 233: o turno da noite atrasou por causa da chuva pela contabilidade, e ninguém reclamou depois.
+Ocorrência 234: o servidor de arquivos foi conferido duas vezes pelo Renan, só que a nota fiscal veio com o valor errado.
+Ocorrência 235: a câmera do galpão precisou de ajuste pelo Otávio, e ninguém reclamou depois.
+Ocorrência 236: a rota de entrega passou sem problemas pelo Otávio, só que a nota fiscal veio com o valor errado.
+Ocorrência 237: o contrato de aluguel ficou pendente pelo pessoal da manhã, e o cliente foi avisado por telefone.
+Ocorrência 238: a reunião de segunda passou sem problemas pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 239: o estoque de peças mudou de responsável pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 240: o relatório mensal mudou de responsável pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 241: a reunião de segunda mudou de responsável pela Marta, e o cliente foi avisado por telefone.
+Ocorrência 242: a planilha de custos foi conferido duas vezes pela Marta, e o cliente foi avisado por telefone.
+Ocorrência 243: o estoque de peças mudou de responsável pelo Otávio, e ninguém reclamou depois.
+Ocorrência 244: o servidor de arquivos foi adiado pelo Otávio, só que a nota fiscal veio com o valor errado.
+Ocorrência 245: a reunião de segunda passou sem problemas pelo Renan, e ninguém reclamou depois.
+Ocorrência 246: o servidor de arquivos gerou uma dúvida pela Dona Célia, e isso resolveu a pendência da semana anterior.
+Ocorrência 247: o estoque de peças foi aprovado sem ressalvas pelo Otávio, e ninguém reclamou depois.
+Ocorrência 248: a senha do portão foi adiado pelo Otávio, mas o cadeado novo ainda não chegou.
+Ocorrência 249: a agenda do técnico mudou de responsável pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 250: o caminhão azul foi conferido duas vezes pela contabilidade, e o custo ficou dentro do previsto.
+Ocorrência 251: o caminhão azul mudou de responsável pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 252: o lote de etiquetas passou sem problemas pela equipe do depósito, embora o prazo tenha estourado em dois dias.
+Ocorrência 253: a reunião de segunda gerou uma dúvida pela contabilidade, só que a nota fiscal veio com o valor errado.
+Ocorrência 254: o lote de etiquetas foi aprovado sem ressalvas pelo Otávio, embora o prazo tenha estourado em dois dias.
+Ocorrência 255: o contrato de aluguel precisou de ajuste pelo pessoal da manhã, e o cliente foi avisado por telefone.
+Ocorrência 256: a rota de entrega foi revisado pela contabilidade, só que a nota fiscal veio com o valor errado.
+Ocorrência 257: o turno da noite foi conferido duas vezes pelo Otávio, mas ainda falta registrar no sistema.
+Ocorrência 258: o servidor de arquivos foi aprovado sem ressalvas pelo Otávio, embora o prazo tenha estourado em dois dias.
+Ocorrência 259: a rota de entrega foi conferido duas vezes pela contabilidade, mas o cadeado novo ainda não chegou.
+Ocorrência 260: o turno da noite foi adiado pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 261: a câmera do galpão foi aprovado sem ressalvas pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 262: o lote de etiquetas passou sem problemas pela Dona Célia, e isso resolveu a pendência da semana anterior.
+Ocorrência 263: a fila de atendimento passou sem problemas pelo Renan, e isso resolveu a pendência da semana anterior.
+Ocorrência 264: a agenda do técnico passou sem problemas pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 265: a planilha de custos precisou de ajuste pelo pessoal da manhã, embora o prazo tenha estourado em dois dias.
+Ocorrência 266: o turno da noite passou sem problemas pelo pessoal da manhã, só que a nota fiscal veio com o valor errado.
+Ocorrência 267: a rota de entrega foi conferido duas vezes pela Dona Célia, embora o prazo tenha estourado em dois dias.
+Ocorrência 268: o relatório mensal atrasou por causa da chuva pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 269: o gerador reserva mudou de responsável pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 270: o estoque de peças mudou de responsável pelo pessoal da manhã, mas o cadeado novo ainda não chegou.
+Ocorrência 271: o caminhão azul gerou uma dúvida pela Marta, e isso resolveu a pendência da semana anterior.
+Ocorrência 272: a planilha de custos ficou pendente pela Marta, embora o prazo tenha estourado em dois dias.
+Ocorrência 273: a fila de atendimento foi aprovado sem ressalvas pelo pessoal da manhã, mas ainda falta registrar no sistema.
+Ocorrência 274: a reunião de segunda atrasou por causa da chuva pela equipe do depósito, mas o cadeado novo ainda não chegou.
+Ocorrência 275: a fila de atendimento passou sem problemas pela Marta, mas ainda falta registrar no sistema.
+Ocorrência 276: o gerador reserva foi aprovado sem ressalvas pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 277: o estoque de peças gerou uma dúvida pelo Renan, e o custo ficou dentro do previsto.
+Ocorrência 278: o estoque de peças foi adiado pela Dona Célia, e ninguém reclamou depois.
+Ocorrência 279: a fila de atendimento foi adiado pela Marta, só que a nota fiscal veio com o valor errado.
+Ocorrência 280: o contrato de aluguel gerou uma dúvida pela equipe do depósito, e isso resolveu a pendência da semana anterior.
+Ocorrência 281: a rota de entrega foi adiado pela Marta, mas o cadeado novo ainda não chegou.
+Ocorrência 282: o relatório mensal mudou de responsável pelo Otávio, e o cliente foi avisado por telefone.
+Ocorrência 283: a rota de entrega foi conferido duas vezes pela equipe do depósito, mas ainda falta registrar no sistema.
+Ocorrência 284: o gerador reserva precisou de ajuste pelo fornecedor, e isso resolveu a pendência da semana anterior.
+Ocorrência 285: o contrato de aluguel passou sem problemas pela Dona Célia, e o cliente foi avisado por telefone.
+Ocorrência 286: o estoque de peças passou sem problemas pelo Renan, e o cliente foi avisado por telefone.
+Ocorrência 287: o contrato de aluguel foi revisado pelo Renan, embora o prazo tenha estourado em dois dias.
+Ocorrência 288: o contrato de aluguel foi conferido duas vezes pelo pessoal da manhã, e ninguém reclamou depois.
+Ocorrência 289: o contrato de aluguel precisou de ajuste pelo fornecedor, mas ainda falta registrar no sistema.
+Ocorrência 290: a senha do portão ficou pendente pelo fornecedor, só que a nota fiscal veio com o valor errado.
+Ocorrência 291: a câmera do galpão precisou de ajuste pela equipe do depósito, e ninguém reclamou depois.
+Ocorrência 292: o estoque de peças atrasou por causa da chuva pela equipe do depósito, e o cliente foi avisado por telefone.
+Ocorrência 293: a rota de entrega foi aprovado sem ressalvas pelo Renan, e o custo ficou dentro do previsto.
+Ocorrência 294: o turno da noite gerou uma dúvida pela Dona Célia, e o custo ficou dentro do previsto.
+
+Fim do registro. Foram 294 ocorrências.
+INFORMAÇÃO C (fim do registro): a entrega especial está marcada para o dia 23.
+
+Responda em português, em três linhas curtas, sem explicar:
+1) Qual é o código do armário?
+2) Com quem fica a chave reserva?
+3) Em que dia está marcada a entrega especial?
+/no_think

@@ -1,0 +1,12 @@
+﻿{
+  "name": "youtube-shorts-playwright-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shot": "node screenshot.mjs",
+    "install:browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "1.49.1"
+  }
+}

@@ -11,6 +11,9 @@ Antes de implementar ou alterar qualquer funcionalidade no backend, leia integra
 1. **[`DESIGN.md`](./DESIGN.md)** — Especificação completa da API REST, contratos HTTP/JSON, streaming HTTP Range (`206 Partial Content`), envelope de erros e compatibilidade com [`shared/contracts.ts`](./shared/contracts.ts) e [`frontend/src/api/`](./frontend/src/api).
 2. **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — Desenho técnico do motor de IA local em **Python (`FastAPI`)**, pipeline algorítmico em 5 estágios, escalonador de recursos por hardware (`IOQueue`, `GPUMutex` + `ActiveVRAMBudgetManager`, `RenderWorkerPool`), máquina de estados do Cinegrafista Virtual 9:16, `pyproject.toml`, templates canônicos de prompts/schemas JSON e persistência atômica em arquivos `.json`.
 3. **[`shared/contracts.ts`](./shared/contracts.ts)** — Contratos compartilhados entre Frontend e Backend.
+4. **[`docs/analysis-v2/`](./docs/analysis-v2/README.md)** — Especificação da reescrita da segmentação e da análise de cortes (pipeline v2), com harness de avaliação, contratos por etapa e um arquivo por fase. **Qualquer trabalho em `backend/app/domain/segmentation/`, `backend/app/domain/analysis/` ou `backend/evals/` segue essa spec**, incluindo as regras para quem implementa e o status das fases no `README.md` de lá.
+   - O critério de pronto dessas fases é a tabela do harness, não o `pytest`.
+   - A regra de testes 100% mockados da Seção 5 continua valendo para `backend/tests/`. O harness em `backend/evals/` fica fora do `pytest`, usa o LLM local real sobre transcrições já salvas e só roda no PC do usuário, com autorização dele.
 
 ---
 

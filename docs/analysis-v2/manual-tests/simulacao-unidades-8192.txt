@@ -1,0 +1,104 @@
+Você está segmentando a transcrição de um vídeo em unidades.
+
+Uma UNIDADE é um trecho contínuo que trata de uma coisa só e faz sentido sozinho, de acordo com a descrição do vídeo abaixo. Sua tarefa é dizer em qual frase cada unidade COMEÇA.
+
+DESCRIÇÃO DO VÍDEO
+- Formato: uma pessoa falando sozinha para a câmera, dando conselhos a partir da própria experiência.
+- O que é uma unidade neste vídeo: um conselho ou uma história completa, do momento em que o assunto é apresentado até a conclusão dele.
+- O que não é conteúdo: abertura e pedidos de inscrição, leitura de patrocínio, despedida e chamadas para outros vídeos.
+
+RESUMO DO TRECHO
+- Do início ao fim: abertura do canal, três assuntos sobre trabalhar por conta própria, um patrocínio no meio e a despedida.
+
+REGRAS
+- Use apenas os IDs que aparecem na transcrição.
+- A primeira frase (s1) sempre começa uma unidade.
+- Marque cada unidade como "content" ou "non_content".
+- "label" é uma descrição curta do assunto, em português.
+- Não invente frases, não resuma, não devolva horários.
+
+TRANSCRIÇÃO
+s1 [SPEAKER_00]: Fala, pessoal, sejam muito bem-vindos a mais um episódio do canal.
+s2 [SPEAKER_00]: Antes de começar, já deixa o seu like e se inscreve aqui embaixo.
+s3 [SPEAKER_00]: Ativa o sininho também, porque toda semana tem vídeo novo.
+s4 [SPEAKER_00]: Hoje o episódio está bem recheado, então fica até o final.
+s5 [SPEAKER_00]: Se você está chegando agora, eu falo aqui sobre a vida de quem trabalha por conta própria.
+s6 [SPEAKER_00]: Bora para o conteúdo.
+s7 [SPEAKER_00]: Eu quero começar contando como eu perdi o meu primeiro cliente grande.
+s8 [SPEAKER_00]: Isso foi em 2016, eu tinha acabado de sair do emprego.
+s9 [SPEAKER_00]: Um amigo me indicou para uma rede de padarias que queria refazer o site inteiro.
+s10 [SPEAKER_00]: Era o maior contrato que eu já tinha visto na vida.
+s11 [SPEAKER_00]: Eu fiquei tão animado que aceitei tudo o que eles pediram na primeira reunião.
+s12 [SPEAKER_00]: Prazo de três semanas, sem contrato assinado, só na conversa.
+s13 [SPEAKER_00]: Na primeira semana eles mudaram o que queriam duas vezes.
+s14 [SPEAKER_00]: Na segunda, o dono sumiu e quem passou a falar comigo foi o sobrinho dele.
+s15 [SPEAKER_00]: O sobrinho tinha outra ideia completamente diferente para o projeto.
+s16 [SPEAKER_00]: Eu refiz tudo, virei noite, e não cobrei nada a mais por isso.
+s17 [SPEAKER_00]: Quando chegou o dia da entrega, o site estava pronto, mas não era o que o dono tinha pedido.
+s18 [SPEAKER_00]: Ele olhou, não gostou e disse que não ia pagar a segunda parcela.
+s19 [SPEAKER_00]: Eu não tinha nada escrito para mostrar o que tinha sido combinado.
+s20 [SPEAKER_00]: Perdi o cliente, perdi o dinheiro e ainda fiquei mal com o amigo que me indicou.
+s21 [SPEAKER_00]: Fiquei umas duas semanas achando que eu não servia para trabalhar sozinho.
+s22 [SPEAKER_00]: Só depois eu entendi que o problema não foi o meu trabalho.
+s23 [SPEAKER_00]: O problema foi eu ter começado sem definir quem decidia e o que estava incluído.
+s24 [SPEAKER_00]: Desde então, eu não escrevo uma linha de código sem um documento de escopo assinado.
+s25 [SPEAKER_00]: Pode ser uma página só, mas tem que dizer o que entra, o que não entra e quem aprova.
+s26 [SPEAKER_00]: Essa única página teria salvado aquele contrato inteiro.
+s27 [SPEAKER_00]: Agora, um recado rápido de quem apoia o canal.
+s28 [SPEAKER_00]: O episódio de hoje tem o oferecimento da ContaFácil.
+s29 [SPEAKER_00]: É uma plataforma de contabilidade online feita para autônomo e pequena empresa.
+s30 [SPEAKER_00]: Eles cuidam das suas notas e dos seus impostos por uma mensalidade fixa.
+s31 [SPEAKER_00]: Usando o cupom do canal, você ganha dois meses grátis.
+s32 [SPEAKER_00]: O link está na descrição do vídeo.
+s33 [SPEAKER_00]: Obrigado, ContaFácil, e vamos voltar para o assunto.
+s34 [SPEAKER_00]: A segunda coisa que eu quero falar hoje é sobre como colocar preço no seu serviço.
+s35 [SPEAKER_00]: A maioria das pessoas começa cobrando por hora.
+s36 [SPEAKER_00]: Parece justo, mas tem um defeito grave.
+s37 [SPEAKER_00]: Quanto melhor você fica, mais rápido você entrega, e menos você ganha.
+s38 [SPEAKER_00]: Você é punido por ser bom.
+s39 [SPEAKER_00]: O que eu faço hoje é cobrar pelo resultado que o cliente vai ter.
+s40 [SPEAKER_00]: Se o site novo vai trazer dez pedidos a mais por dia, isso tem um valor para ele.
+s41 [SPEAKER_00]: O meu preço é uma fração desse valor, não a soma das minhas horas.
+s42 [SPEAKER_00]: Para isso funcionar, você precisa fazer perguntas antes de mandar a proposta.
+s43 [SPEAKER_00]: Quanto esse problema custa para você hoje?
+s44 [SPEAKER_00]: O que muda no seu negócio se isso for resolvido?
+s45 [SPEAKER_00]: Com essas respostas, o cliente mesmo te diz quanto vale.
+s46 [SPEAKER_00]: Na prática, eu monto três opções de pacote.
+s47 [SPEAKER_00]: Uma básica, uma intermediária e uma completa.
+s48 [SPEAKER_00]: Quase todo mundo escolhe a do meio, e é nela que eu coloco o que eu realmente quero vender.
+s49 [SPEAKER_00]: Quando eu mudei para esse modelo, meu faturamento dobrou em oito meses.
+s50 [SPEAKER_00]: E eu passei a trabalhar menos horas por semana.
+s51 [SPEAKER_00]: Então, se você ainda cobra por hora, faz o teste na próxima proposta.
+s52 [SPEAKER_00]: Pergunta primeiro, calcula o valor e só depois fala de preço.
+s53 [SPEAKER_00]: O terceiro ponto é um erro que eu vejo muita gente cometer, que é contratar cedo demais.
+s54 [SPEAKER_00]: Quando o trabalho aperta, a primeira reação é chamar alguém para ajudar.
+s55 [SPEAKER_00]: Eu fiz isso no meu segundo ano.
+s56 [SPEAKER_00]: Contratei um designer e um programador júnior no mesmo mês.
+s57 [SPEAKER_00]: De repente eu tinha uma folha de pagamento e nenhum processo.
+s58 [SPEAKER_00]: Eu passava o dia explicando tarefa e revisando o que eles faziam.
+s59 [SPEAKER_00]: O meu próprio trabalho, que era o que pagava as contas, ficou para a noite.
+s60 [SPEAKER_00]: Em três meses eu estava mais cansado e ganhando menos do que sozinho.
+s61 [SPEAKER_00]: O erro não foi contratar, foi contratar antes de ter o que delegar.
+s62 [SPEAKER_00]: Hoje a minha regra é simples.
+s63 [SPEAKER_00]: Primeiro eu faço a tarefa sozinho até ela ficar repetitiva.
+s64 [SPEAKER_00]: Depois eu escrevo o passo a passo, como se fosse uma receita.
+s65 [SPEAKER_00]: Só então eu passo para outra pessoa.
+s66 [SPEAKER_00]: Se eu não consigo escrever a receita, eu ainda não entendi a tarefa bem o bastante para delegar.
+s67 [SPEAKER_00]: Outra coisa é começar com alguém por projeto, não com salário fixo.
+s68 [SPEAKER_00]: Assim você descobre se o volume de trabalho se sustenta.
+s69 [SPEAKER_00]: Eu só fui ter um funcionário de verdade no quarto ano.
+s70 [SPEAKER_00]: E a essa altura eu já tinha doze processos documentados.
+s71 [SPEAKER_00]: A pessoa entrou e em duas semanas estava produzindo.
+s72 [SPEAKER_00]: Então, antes de contratar, documenta.
+s73 [SPEAKER_00]: Bom, pessoal, esses eram os três pontos de hoje.
+s74 [SPEAKER_00]: Se esse vídeo te ajudou, compartilha com alguém que está começando.
+s75 [SPEAKER_00]: Comenta aqui embaixo qual desses erros você já cometeu.
+s76 [SPEAKER_00]: Eu leio todos os comentários.
+s77 [SPEAKER_00]: Semana que vem tem episódio novo, falando sobre como lidar com cliente que atrasa pagamento.
+s78 [SPEAKER_00]: Me segue também nas outras redes, o endereço está na descrição.
+s79 [SPEAKER_00]: Muito obrigado por assistir até aqui.
+s80 [SPEAKER_00]: Um abraço e até a próxima.
+
+Responda SOMENTE com JSON, sem texto antes ou depois, neste formato:
+{"units": [{"start_sentence_id": "s1", "label": "...", "kind": "content ou non_content"}]}
+/no_think

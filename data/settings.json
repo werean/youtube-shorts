@@ -6,7 +6,7 @@
   "preferences": {
     "ask_move_on_upload": true,
     "move_uploads": true,
-    "ask_delete_cut_confirm": false
+    "ask_delete_cut_confirm": true
   },
   "whisper": {
     "device": "cuda",
