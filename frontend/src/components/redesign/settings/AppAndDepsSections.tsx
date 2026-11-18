@@ -716,13 +716,13 @@ export function DependenciesSection({
                     onClick={() =>
                       row.autoInstall ? startInstall(row) : onShowInstallInstructions(row.name)
                     }
-                    className="group/status cursor-pointer rounded-pill border border-amber-400/35 bg-amber-400/[0.08] px-3 py-1 text-sm font-medium text-warning transition-[background-color,border-color,box-shadow,color,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[rgba(91,156,255,0.8)] hover:bg-[rgba(91,156,255,0.18)] hover:shadow-[0_0_0_1px_rgba(91,156,255,0.28),0_4px_14px_rgba(91,156,255,0.22)] focus-visible:border-[rgba(91,156,255,0.8)] focus-visible:bg-[rgba(91,156,255,0.18)] focus-visible:shadow-[0_0_0_1px_rgba(91,156,255,0.28),0_4px_14px_rgba(91,156,255,0.22)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
+                    className="group/status cursor-pointer rounded-sm border-0 bg-transparent px-1 py-1 text-sm font-medium text-warning transition-[color,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
                   >
                     <span className="relative inline-grid place-items-center whitespace-nowrap [&>*]:col-start-1 [&>*]:row-start-1">
-                      <span className="transition-[opacity,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:-translate-y-1 group-hover/status:opacity-0 group-focus-visible/status:-translate-y-1 group-focus-visible/status:opacity-0">
+                      <span className="text-warning underline decoration-amber-400/45 decoration-dotted underline-offset-[5px] transition-[opacity,transform,color] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:-translate-y-1 group-hover/status:opacity-0 group-focus-visible/status:-translate-y-1 group-focus-visible/status:opacity-0">
                         Não instalado
                       </span>
-                      <span className="translate-y-1 font-semibold text-[#dbe9ff] opacity-0 transition-[opacity,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:translate-y-0 group-hover/status:opacity-100 group-focus-visible/status:translate-y-0 group-focus-visible/status:opacity-100">
+                      <span className="translate-y-1 font-semibold text-[#7cb2ff] opacity-0 drop-shadow-[0_0_10px_rgba(91,156,255,0.45)] transition-[opacity,transform,color] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:translate-y-0 group-hover/status:opacity-100 group-focus-visible/status:translate-y-0 group-focus-visible/status:opacity-100">
                         {row.autoInstall ? "Instalar" : "Como instalar"}
                       </span>
                     </span>
@@ -737,7 +737,7 @@ export function DependenciesSection({
                   key={row.name}
                   className={`${TABLE_GRID} relative px-4 py-0`}
                 >
-                  <div className={`flex min-w-0 items-center justify-start gap-3 py-2.5 pr-3 ${CELL_DIVIDER}`}>
+                  <div className="flex min-w-0 items-center justify-start gap-3 py-2.5 pr-3">
                     <span
                       aria-hidden="true"
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-item bg-glass-hover text-text-2"
