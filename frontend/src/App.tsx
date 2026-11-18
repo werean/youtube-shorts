@@ -1,15 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AttemptDetail,
-  AttemptSummary,
-  Cut,
-  Job,
-  JobStatus,
-  Segment,
-  VideoItem,
-  VideoRecord,
-} from "./types";
-import { recordToVideoItem } from "./utils/videoHelpers";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Segment } from "./types";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
@@ -23,24 +13,16 @@ import { useTranscriptionWorkflow } from "./hooks/useTranscriptionWorkflow";
 import {
   analyzeJob,
   apiBaseUrl,
-  archiveJobAttempt,
   archiveVideo,
   buildBlocks,
-  cancelJob,
-  cancelRendering,
-  cancelTranscription,
-  createJob,
-  deleteJobAttempt,
   deleteVideo,
+  getBatchPipelineStatus,
   getJob,
-  getJobAttempt,
-  ingestJob,
+  getTranscription,
   listArchivedVideos,
-  listJobAttempts,
   listVideos,
   openVideoFolder,
   renameVideo,
-  runJobPipeline,
   updateCuts,
   uploadVideoFile,
   getSettings,
@@ -50,51 +32,33 @@ import {
   registerOllamaModel,
   removeOllamaModel,
   saveToolConfigs,
-  resetAllToolConfigs,
-  resetToolConfigSection,
-  importToolConfigs,
-  getCommonFolders,
-  selectFolder,
   type AppSettings,
 } from "./api";
-import { getJobLogs } from "./api/logs";
 import { useBatchPipelineWorkflow } from "./hooks/useBatchPipelineWorkflow";
-import { WhisperConfigDialog } from "./components/dialogs/WhisperConfigDialog";
-import { FFmpegConfigDialog } from "./components/dialogs/FFmpegConfigDialog";
 import { InstallationInstructionsDialog } from "./components/dialogs/InstallationInstructionsDialog";
-import { ConfigurationSection } from "./components/ConfigurationSection";
 import { AppSupportDialogs } from "./components/app/AppSupportDialogs";
 import { BatchPipelineControls } from "./components/app/BatchPipelineControls";
 import { CutTimestampDialogs } from "./components/app/CutTimestampDialogs";
-import { SelectedVideoWorkspace } from "./components/app/SelectedVideoWorkspace";
 import { TranscriptionDialogs } from "./components/app/TranscriptionDialogs";
-import { DependenciesDialog } from "./components/dialogs/DependenciesDialog";
-import { LLMConfigDialog } from "./components/dialogs/LLMConfigDialog";
-import { ConfigureAppDialog } from "./components/dialogs/ConfigureAppDialog";
 import { SimpleDialogs } from "./components/dialogs/SimpleDialogs";
-import { RenderingSection } from "./components/RenderingSection";
-import { UploadSection } from "./components/UploadSection";
-import { VideoListSection } from "./components/VideoListSection";
 import { BlocksDialog } from "./components/dialogs/BlocksDialog";
 import { AiResponseDialog } from "./components/dialogs/AiResponseDialog";
 import { RegenerateAnalyzeDialog } from "./components/dialogs/RegenerateAnalyzeDialog";
-import { AppDialog } from "./components/shared";
-import { formatTimestamp, parseTimestampInput } from "./utils/formatters";
-import { cn } from "./lib/utils";
-import { GlassWindow, GlassToast, GlassToastContainer, GlassCard, GlassButton } from "./components/ui/glass";
-import {
-  StudioTopbar,
-  type StudioTab,
-  VideoLibrarySidebar,
-  type WorkspaceVideoItem,
-  VideoPlayerView,
-  type VideoPlayerViewHandle,
-  TranscriptInteractiveView,
-  ShortInspectorView,
-  TerminalLogsView,
-  LiveTaskFeedbackCard,
-} from "./components/workspace";
-import { getTranscription } from "./api/transcription";
+import { ArcSidebar } from "./components/redesign/ArcSidebar";
+import { FloatingChrome } from "./components/redesign/FloatingChrome";
+import { GlassDock, type DockCutItem } from "./components/redesign/GlassDock";
+import { ImmersiveVideoStage } from "./components/redesign/ImmersiveVideoStage";
+import { NewVideoModal } from "./components/redesign/NewVideoModal";
+import { SettingsHubModal } from "./components/redesign/SettingsHubModal";
+import type { LLMAutoSavePatch } from "./components/redesign/settings/AISections";
+import type {
+  AppSettingsPatch,
+  DownloadResolution,
+  SectionId,
+} from "./components/redesign/settings/settingsShared";
+import { TranscriptPopover } from "./components/redesign/TranscriptPopover";
+import { CUT_PRESETS, isJobProcessingStatus, type CutPreset } from "./components/redesign/presets";
+import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
 
 interface ActionState {
   busy: boolean;
@@ -102,6 +66,7 @@ interface ActionState {
 }
 
 const initialAction: ActionState = { busy: false };
+const SPEED_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4] as const;
 
 interface OllamaModelCatalogItem {
   name: string;
@@ -110,28 +75,6 @@ interface OllamaModelCatalogItem {
   running: boolean;
   needsDownload: boolean;
   size?: number;
-}
-
-const STATUS_DESCRIPTIONS: Record<string, string> = {
-  CREATED: "Vídeo criado",
-  DOWNLOADING: "Baixando vídeo fonte via yt-dlp",
-  DOWNLOADED: "Pronto para processar",
-  TRANSCRIBING: "Transcrevendo áudio na GPU (Whisper + VAD)",
-  BUILDING_BLOCKS: "Construindo blocos semânticos e prosódicos",
-  BUILDING_TOPICS: "Segmentando tópicos contextuais (TextTiling)",
-  ANALYZING: "Minerando cortes virais via IA (LLM)",
-  WAITING_APPROVAL: "Aguardando aprovação de cortes",
-  RENDERING: "Renderizando Shorts 9:16 (NVENC)",
-  DONE: "Processamento concluído com sucesso",
-  ERROR: "Erro durante o processamento",
-};
-
-function formatEtaSeconds(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || seconds < 0) return "";
-  if (seconds < 60) return `~${Math.round(seconds)}s restantes`;
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.round(seconds % 60);
-  return `~${mins}m ${secs}s restantes`;
 }
 
 function formatTimestampForFilename(seconds: number): string {
@@ -144,83 +87,45 @@ function buildCutFilenameFromRange(start: number, end: number): string {
   return `${formatTimestampForFilename(start)}-${formatTimestampForFilename(end)}.mp4`;
 }
 
-function toCatchyTitle(cut: Cut): string {
-  const base = String(cut.title || "")
-    .replace(/\s+/g, " ")
-    .replace(/[.]+$/g, "")
-    .trim();
-
-  if (!base) {
-    return "Corte em destaque";
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const val = window.localStorage.getItem(key);
+    if (val === "true") return true;
+    if (val === "false") return false;
+  } catch {
+    // ignore storage errors
   }
-
-  if (base.length <= 72) {
-    return base;
-  }
-
-  return `${base.slice(0, 69).trimEnd()}...`;
+  return fallback;
 }
 
-function normalizeArchivedRenderPath(jobId: string, attemptId: string, path: string): string {
-  const trimmed = String(path || "").trim();
-  if (!trimmed) return "";
-  if (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("/")
-  ) {
-    return trimmed;
+function readStoredPreset(): CutPreset["id"] {
+  try {
+    const val = window.localStorage.getItem("ui.cutPreset");
+    if (val === "podcast" || val === "dinamico" || val === "curtos") {
+      return val;
+    }
+  } catch {
+    // ignore
   }
-  return `/media/shorts/${encodeURIComponent(jobId)}/attempts/${encodeURIComponent(attemptId)}/${encodeURIComponent(trimmed)}`;
-}
-
-function formatAttemptTimestamp(iso?: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return "dinamico";
 }
 
 export default function App() {
-  const toolConfigsInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const {
-    uploadMode,
-    youtubeUrl,
     selectedFiles,
-    isDraggingFile,
-    setUploadMode,
-    setYoutubeUrl,
     setSelectedFiles,
-    setIsDraggingFile,
     videoView,
-    menuOpenId,
     setVideoView,
-    setMenuOpenId,
     showBlocksDialog,
     showAiResponseDialog,
     showAiResponseOnAnalyze,
     showRegenerateAnalyzeDialog,
     setShowBlocksDialog,
     setShowAiResponseDialog,
-    setShowAiResponseOnAnalyze,
     setShowRegenerateAnalyzeDialog,
-    showLLMConfigDialog,
-    showWhisperConfigDialog,
-    showFFmpegConfigDialog,
-    showDependenciesDialog,
     showInstallationDialog,
-    showConfigureAppDialog,
-    setShowLLMConfigDialog,
-    setShowWhisperConfigDialog,
-    setShowFFmpegConfigDialog,
-    setShowDependenciesDialog,
     setShowInstallationDialog,
-    setShowConfigureAppDialog,
     renameVideoId,
     renameVideoNewName,
     showMoveUploadDialog,
@@ -232,15 +137,46 @@ export default function App() {
     selectedDependencyForInstall,
     setSelectedDependencyForInstall,
   } = useUIState();
+
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [archivedVideos, setArchivedVideos] = useState<VideoItem[]>([]);
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
-  const ingestLogsPollRef = useRef<number | null>(null);
-  const ingestLogsContainerRef = useRef<HTMLDivElement>(null);
+  const activeVideoIdRef = useRef<string | null>(activeVideoId);
+  activeVideoIdRef.current = activeVideoId;
+  const blocksJobIdRef = useRef<string | null>(null);
+  const hydrateTranscriptionsRef = useRef<
+    ((items: VideoItem[], updater: (jobId: string, updates: Partial<VideoItem>) => void) => Promise<void>) | null
+  >(null);
+  const [localProcessingJobs, setLocalProcessingJobs] = useState<Set<string>>(() => new Set());
+  const localProcessingJobsRef = useRef<Set<string>>(localProcessingJobs);
+  localProcessingJobsRef.current = localProcessingJobs;
+  const [activeBatchJobId, setActiveBatchJobId] = useState<string | null>(null);
+  const activeBatchJobIdRef = useRef<string | null>(null);
+  const analyzingJobIdRef = useRef<string | null>(null);
+  const renderingJobIdRef = useRef<string | null>(null);
+
+  const markJobProcessing = useCallback((jobId: string | null | undefined, active: boolean) => {
+    const id = String(jobId ?? "").trim();
+    if (!id) return;
+    setLocalProcessingJobs((prev) => {
+      const has = prev.has(id);
+      if (active && has) return prev;
+      if (!active && !has) return prev;
+      const next = new Set(prev);
+      if (active) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
   const [action, setAction] = useState<ActionState>(initialAction);
   const [blocks, setBlocks] = useState<Record<string, unknown>[]>([]);
   const [aiResponseRaw, setAiResponseRaw] = useState<string | null>(null);
-  const [showHowToUseDialog, setShowHowToUseDialog] = useState(false);
+
+  // Tool & app config state
   const [llmModel, setLlmModel] = useState<string>("");
   const [embeddingModel, setEmbeddingModel] = useState<string>("nomic-embed-text");
   const [registeredEmbeddingModels, setRegisteredEmbeddingModels] = useState<string[]>([]);
@@ -253,29 +189,52 @@ export default function App() {
   const [whisperFormats, setWhisperFormats] = useState<string[]>(["json", "vtt", "txt"]);
   const [whisperConfig, setWhisperConfig] = useState<Partial<WhisperConfig>>({});
   const [ffmpegConfig, setFfmpegConfig] = useState<FFmpegConfig | null>(null);
-  const [expandUploadSection, setExpandUploadSection] = useState(true);
-  const [expandVideoListSection, setExpandVideoListSection] = useState(true);
-  const [expandVideoPlayerSection, setExpandVideoPlayerSection] = useState(true);
-  const [expandTerminalSection, setExpandTerminalSection] = useState(true);
-  const [expandTranscriptSection, setExpandTranscriptSection] = useState(true);
-  const [expandRenderingSection, setExpandRenderingSection] = useState(true);
-  const [studioTab, setStudioTab] = useState<StudioTab>("workspace");
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [currentVideoTime, setCurrentVideoTime] = useState(0);
-  const [toastNotification, setToastNotification] = useState<string | null>(null);
-  const videoPlayerHandleRef = useRef<VideoPlayerViewHandle>(null);
-  const [ingestLogs, setIngestLogs] = useState<string[]>([]);
-  const [expandIngestLogs, setExpandIngestLogs] = useState(false);
-  const [ingestJobId, setIngestJobId] = useState<string | null>(null);
-  const [isIngesting, setIsIngesting] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [configBaseDir, setConfigBaseDir] = useState<string>("");
   const [configDownloadResolution, setConfigDownloadResolution] = useState<
     "1080p" | "1440p" | "4k"
   >("1080p");
-  const [commonFolders, setCommonFolders] = useState<
-    { name: string; path: string; exists: boolean }[]
-  >([]);
+
+  // Arc redesign UI state
+  const [sidebarPinned, setSidebarPinned] = useState<boolean>(() =>
+    readStoredBoolean("ui.sidebarPinned", false),
+  );
+  const [sidebarSide, setSidebarSide] = useState<"left" | "right">(() => {
+    try {
+      return window.localStorage.getItem("ui.sidebarSide") === "right" ? "right" : "left";
+    } catch {
+      return "left";
+    }
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState<boolean>(() =>
+    readStoredBoolean("ui.dockCollapsed", false),
+  );
+  const [dockMinimizedVisible, setDockMinimizedVisible] = useState(true);
+  const [selectedPreset, setSelectedPreset] = useState<CutPreset["id"]>(readStoredPreset);
+  const [reviewBeforeRender, setReviewBeforeRender] = useState<boolean>(() =>
+    readStoredBoolean("ui.reviewBeforeRender", true),
+  );
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [showDiscarded, setShowDiscarded] = useState(false);
+  const [showSettingsHub, setShowSettingsHub] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SectionId>("app-folders");
+  const [showNewVideoModal, setShowNewVideoModal] = useState(false);
+
+  // Immersive cut playback state
+  const [immersiveCutId, setImmersiveCutId] = useState<string | null>(null);
+  const immersiveRestoreTimeRef = useRef<number>(0);
+  const [immersiveIdle, setImmersiveIdle] = useState(false);
+  const [cutResumePositions, setCutResumePositions] = useState<Record<string, number>>({});
+
+  // HTML5 Video Player state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [volume, setVolume] = useState<number>(1);
+  const [muted, setMuted] = useState<boolean>(false);
+
   const {
     dependencies,
     loadingDependencies,
@@ -296,16 +255,19 @@ export default function App() {
     cancelActiveDependencyInstallSession,
     downloadDependencyLogsAsTxt,
   } = useDependencyManagementWorkflow();
+
   const activeVideo = useMemo(
-    () => videos.find((v) => v.job.job_id === activeVideoId),
-    [videos, activeVideoId],
+    () =>
+      videos.find((v) => v.job.job_id === activeVideoId) ??
+      archivedVideos.find((v) => v.job.job_id === activeVideoId),
+    [videos, archivedVideos, activeVideoId],
   );
+
   const {
-    showBatchPipelineDialog,
     selectedVideosForBatch,
     batchPipelineOptions,
     isBatchProcessing,
-    batchProcessingLogs,
+    currentBatchVideoIndex,
     activeBatchId,
     showBatchCompletionNotification,
     batchCompletionMessage,
@@ -317,8 +279,15 @@ export default function App() {
     updateBatchPipelineOptions,
     cancelBatchPipelineDialog,
     startBatchPipelineDialog,
+    startSingleJobPipeline,
     closeBatchCompletionNotification,
-  } = useBatchPipelineWorkflow({ onActiveVideosLoaded: setVideos });
+  } = useBatchPipelineWorkflow({
+    onActiveVideosLoaded: (items) => {
+      setVideos(items);
+      void hydrateTranscriptionsRef.current?.(items, updateVideo);
+    },
+  });
+
   const {
     cuts,
     setCuts,
@@ -328,9 +297,6 @@ export default function App() {
     setSelectedSuggestedCutId,
     isAnalyzing,
     setIsAnalyzing,
-    isLoadingCuts,
-    hoveredCutId,
-    hoveredCutAction,
     showDeleteCutConfirmDialog,
     dontAskDeleteCutAgain,
     setDontAskDeleteCutAgain,
@@ -341,16 +307,10 @@ export default function App() {
     loadCutsForActiveJob,
     loadCutsForVideo,
     handleAnalyzeResult,
-    requestDeleteSuggestedCut,
     closeDeleteCutConfirmDialog,
     confirmDeleteSuggestedCut,
-    selectSuggestedCut,
-    setCutActionHover,
-    clearCutActionHover,
-    approveSingleCut,
-    rejectSingleCut,
-    approveAllSuggestedCuts,
-    rejectAllSuggestedCuts,
+    requestDeleteSuggestedCut,
+    pendingDeleteCutTitle,
   } = useCutsWorkflow({
     activeJobId: activeVideo?.job.job_id ?? null,
     appSettings,
@@ -360,154 +320,26 @@ export default function App() {
     onAiResponseRawChange: setAiResponseRaw,
     onShowAiResponseDialogChange: setShowAiResponseDialog,
     onRefreshVideo: refreshVideo,
-    onPausePlayback: () => {
-      videoPlayerHandleRef.current?.pause();
-    },
+    onPausePlayback: () => videoRef.current?.pause(),
     onSeekAndPlay: (seconds) => {
-      if (videoPlayerHandleRef.current) {
-        videoPlayerHandleRef.current.seek(seconds);
-        void videoPlayerHandleRef.current.play();
+      if (videoRef.current) {
+        videoRef.current.currentTime = seconds;
+        void videoRef.current.play().catch(() => {});
+      }
+    },
+    onCutDeleted: (cutId) => {
+      if (immersiveCutId === cutId) {
+        setImmersiveCutId(null);
+        setDockCollapsed(false);
       }
     },
   });
 
-  const [is1ClickRunning, setIs1ClickRunning] = useState(false);
-  const pipelineIncludeRenderRef = useRef<boolean>(true);
-  const [attemptsByJobId, setAttemptsByJobId] = useState<Record<string, AttemptSummary[]>>({});
-  const [attemptsCountByJobId, setAttemptsCountByJobId] = useState<Record<string, number>>({});
-  const [loadingAttemptsByJobId, setLoadingAttemptsByJobId] = useState<Record<string, boolean>>({});
-  const [archivingJobId, setArchivingJobId] = useState<string | null>(null);
-  const [inspectingAttempt, setInspectingAttempt] = useState<{
-    jobId: string;
-    attemptId: string;
-    detail: AttemptDetail;
-  } | null>(null);
-  const [selectedArchivedCutId, setSelectedArchivedCutId] = useState<string | null>(null);
-  const [isLoadingAttemptDetail, setIsLoadingAttemptDetail] = useState(false);
-
-  const {
-    progress,
-    etaSeconds,
-    currentMessage,
-    jobStatus: sseJobStatus,
-    logs: sseLogs,
-    resetProgress,
-  } = useJobEvents(activeVideoId, (newStatus) => {
-    const normalizedStatus = String(newStatus).replace(/^JobStatus\./i, "").toUpperCase() as JobStatus;
-    console.log(`[SSE] Status alterado para ${activeVideoId}: ${normalizedStatus}`);
-    if (activeVideoId) {
-      updateVideo(activeVideoId, {
-        job: {
-          ...(videos.find((v) => v.job.job_id === activeVideoId)?.job ?? {
-            job_id: activeVideoId,
-            youtube_url: "",
-            status: normalizedStatus,
-            created_at: new Date().toISOString(),
-          }),
-          status: normalizedStatus,
-        },
-        isTranscribing: normalizedStatus === "TRANSCRIBING",
-      });
-
-      if (normalizedStatus === "WAITING_APPROVAL") {
-        void loadCutsForActiveJob(activeVideoId);
-        void refreshVideo(activeVideoId);
-        if (!pipelineIncludeRenderRef.current) {
-          setIs1ClickRunning(false);
-          setToastNotification(
-            "Cortes prontos! Revise, aprove ou recuse no menu à direita antes de renderizar.",
-          );
-          void loadVideos();
-        }
-      }
-      if (normalizedStatus === "DONE") {
-        void loadCutsForActiveJob(activeVideoId);
-        void refreshRenderOutputs(activeVideoId);
-        void refreshVideo(activeVideoId);
-      }
-      if (normalizedStatus === "DOWNLOADED" || normalizedStatus === "DONE" || normalizedStatus === "ERROR") {
-        setIs1ClickRunning(false);
-        pipelineIncludeRenderRef.current = true;
-        void refreshVideo(activeVideoId);
-        void loadVideos();
-      }
-    }
+  const sharedTaskLogs = useSharedTaskLogWorkflow({
+    activeJobId: activeVideo?.job.job_id ?? null,
+    isTranscribing: activeVideo?.isTranscribing,
+    isRendering: false,
   });
-
-  const selectedSuggestedCut = useMemo(() => {
-    if (!suggestedCuts.length) return null;
-    return suggestedCuts.find((c) => c.cut_id === selectedSuggestedCutId) || suggestedCuts[0];
-  }, [suggestedCuts, selectedSuggestedCutId]);
-
-  const handleQuickAdjustStart = (newStart: number) => {
-    if (!activeVideo || !selectedSuggestedCut) return;
-    const updatedCut = { ...selectedSuggestedCut, start: newStart };
-    const updatedSuggested = suggestedCuts.map((c) =>
-      c.cut_id === updatedCut.cut_id ? updatedCut : c,
-    );
-    setSuggestedCuts(updatedSuggested);
-    const updatedCuts = cuts.map((c) => (c.cut_id === updatedCut.cut_id ? updatedCut : c));
-    setCuts(updatedCuts);
-    void updateCuts(activeVideo.job.job_id, updatedSuggested);
-  };
-
-  const handleQuickAdjustEnd = (newEnd: number) => {
-    if (!activeVideo || !selectedSuggestedCut) return;
-    const updatedCut = { ...selectedSuggestedCut, end: newEnd };
-    const updatedSuggested = suggestedCuts.map((c) =>
-      c.cut_id === updatedCut.cut_id ? updatedCut : c,
-    );
-    setSuggestedCuts(updatedSuggested);
-    const updatedCuts = cuts.map((c) => (c.cut_id === updatedCut.cut_id ? updatedCut : c));
-    setCuts(updatedCuts);
-    void updateCuts(activeVideo.job.job_id, updatedSuggested);
-  };
-
-  const handleCreateCutFromTranscript = (start: number, end: number, text?: string) => {
-    if (!activeVideo) return;
-    const newCut: Cut = {
-      cut_id: `manual_${Date.now()}`,
-      start,
-      end,
-      explanation: text || "Corte criado manualmente a partir da transcrição",
-      viral_score: 90,
-    };
-    const nextSuggested = [...suggestedCuts, newCut];
-    setSuggestedCuts(nextSuggested);
-    setSelectedSuggestedCutId(newCut.cut_id);
-    setCuts([...cuts, newCut]);
-    void updateCuts(activeVideo.job.job_id, nextSuggested);
-    setToastNotification(
-      `Novo corte criado (${formatTimestamp(start)} - ${formatTimestamp(end)})`,
-    );
-  };
-
-  useEffect(() => {
-    if (!activeVideoId) return;
-    const video = videos.find((v) => v.job.job_id === activeVideoId);
-    if (!video) return;
-
-    if (
-      video.hasTranscription &&
-      (!video.transcriptionSegments || video.transcriptionSegments.length === 0)
-    ) {
-      getTranscription(activeVideoId)
-        .then((data) => {
-          if (data?.segments && Array.isArray(data.segments)) {
-            const segments: Segment[] = data.segments.map((s: any, idx: number) => ({
-              segment_id: String(s.segment_id || `seg_${idx}`),
-              start: Number(s.start) || 0,
-              end: Number(s.end) || 0,
-              text: String(s.text || "").trim(),
-            }));
-            updateVideo(activeVideoId, { transcriptionSegments: segments });
-          }
-        })
-        .catch((err) => {
-          console.warn("[UI] Falha ao carregar segmentos da transcrição:", err);
-        });
-    }
-  }, [activeVideoId, videos]);
 
   function prepareTranscriptionTaskLog() {
     sharedTaskLogs.prepareTaskLog("transcription");
@@ -533,14 +365,11 @@ export default function App() {
     selectedTranscriptionFormat,
     pendingDeleteFormat,
     transcriptionContent,
-    hasAnyTranscription,
     activeVideoHasText,
     activeVideoHasVtt,
     activeVideoHasSegments,
     hydrateTranscriptions,
-    requestTranscriptionStart,
     cancelActiveTranscription,
-    openTranscriptionFormatList,
     closeTranscriptionFormatList,
     closeTranscriptionContent,
     requestDeleteTranscriptionFormat,
@@ -556,12 +385,17 @@ export default function App() {
     updateVideo,
     refreshVideo,
     closeBlocksDialog: () => setShowBlocksDialog(false),
-    clearBlocks: () => setBlocks([]),
+    clearBlocks: () => {
+      blocksJobIdRef.current = null;
+      setBlocks([]);
+    },
     clearSelectedCut: clearSelectedSuggestedCut,
     clearSuggestedCuts,
     prepareTranscriptionTaskLog,
     stopTaskLogsPolling: stopSharedTaskLogsPolling,
   });
+  hydrateTranscriptionsRef.current = hydrateTranscriptions;
+
   const {
     showCutEditDialog,
     editingCutId,
@@ -573,7 +407,6 @@ export default function App() {
     openEditCutDialog,
     closeEditCutDialog,
     saveEditedCutTimestamps,
-    openAddManualCutDialog,
     closeAddManualCutDialog,
     saveManualCutTimestamps,
   } = useCutTimestampWorkflow({
@@ -583,26 +416,23 @@ export default function App() {
     setCuts,
     setSuggestedCuts,
     setSelectedSuggestedCutId,
-    persistCuts: async (jobId, cutsToPersist) => {
-      await updateCuts(jobId, cutsToPersist);
+    persistCuts: async (jobId, nextCuts) => {
+      await updateCuts(jobId, nextCuts);
     },
     seekTo: (seconds) => {
-      if (videoPlayerHandleRef.current) {
-        videoPlayerHandleRef.current.seek(seconds);
-        void videoPlayerHandleRef.current.play();
+      if (videoRef.current) {
+        videoRef.current.currentTime = seconds;
+        void videoRef.current.play().catch(() => {});
       }
     },
   });
+
   const {
     renderOutputs,
     isRendering,
-    isLoadingRenderOutputs,
-    expectedRenderCount,
-    renderTitlesByFileName,
+    renderingJobId,
     buildRenderUrl,
     clearRenderOutputs,
-    refreshRenderOutputs,
-    startRenderFlow,
     cancelActiveRendering,
     openRenderOutputFolder,
     deleteRenderOutputFile,
@@ -620,558 +450,265 @@ export default function App() {
       });
     },
   });
-  const rawActiveStatus = (activeVideoId && sseJobStatus) ? sseJobStatus : activeVideo?.job.status;
-  const activeStatus = rawActiveStatus ? String(rawActiveStatus).replace(/^JobStatus\./i, "").toUpperCase() : "";
 
-  const isVideoProcessing = [
-    "DOWNLOADING",
-    "TRANSCRIBING",
-    "BUILDING_BLOCKS",
-    "BUILDING_TOPICS",
-    "ANALYZING",
-    "RENDERING",
-  ].includes(activeStatus || "");
-
-  const isAnyOperationRunning =
-    isVideoProcessing ||
-    is1ClickRunning ||
-    isRendering ||
-    Boolean(activeVideo?.isTranscribing) ||
-    isIngesting ||
-    action.busy;
-
-  const isInspectingArchive = Boolean(
-    inspectingAttempt && inspectingAttempt.jobId === activeVideoId,
-  );
-
-  const archivedCuts = useMemo(() => {
-    if (!isInspectingArchive || !inspectingAttempt) return [];
-    return inspectingAttempt.detail.cuts || [];
-  }, [isInspectingArchive, inspectingAttempt]);
-
-  const selectedArchivedCut = useMemo(() => {
-    if (!isInspectingArchive || !archivedCuts.length) return null;
-    return archivedCuts.find((c) => c.cut_id === selectedArchivedCutId) || archivedCuts[0];
-  }, [isInspectingArchive, archivedCuts, selectedArchivedCutId]);
-
-  const archivedSegments: Segment[] = useMemo(() => {
-    if (!isInspectingArchive || !inspectingAttempt) return [];
-    const rawSegs = inspectingAttempt.detail.transcription?.segments || [];
-    return rawSegs.map((s, idx) => ({
-      segment_id: String(s.segment_id || `arch_seg_${idx}`),
-      start: Number(s.start) || 0,
-      end: Number(s.end) || 0,
-      text: String(s.text || "").trim(),
-    }));
-  }, [isInspectingArchive, inspectingAttempt]);
-
-  const archivedRenderOutputs = useMemo(() => {
-    if (!isInspectingArchive || !inspectingAttempt) return [];
-    const raw =
-      inspectingAttempt.detail.renders && inspectingAttempt.detail.renders.length > 0
-        ? inspectingAttempt.detail.renders
-        : inspectingAttempt.detail.attempt.rendered_urls || [];
-    return raw
-      .map((item) =>
-        normalizeArchivedRenderPath(inspectingAttempt.jobId, inspectingAttempt.attemptId, item),
-      )
-      .filter(Boolean);
-  }, [isInspectingArchive, inspectingAttempt]);
-
-  const archivedRenderTitlesByFileName = useMemo(() => {
-    const next: Record<string, string> = {};
-    for (const cut of archivedCuts) {
-      const filename = buildCutFilenameFromRange(cut.start, cut.end);
-      next[filename] = toCatchyTitle(cut);
-    }
-    return next;
-  }, [archivedCuts]);
-
-  const effectiveCuts = isInspectingArchive ? archivedCuts : suggestedCuts;
-  const effectiveSelectedCut = isInspectingArchive ? selectedArchivedCut : selectedSuggestedCut;
-  const effectiveSelectedCutId = isInspectingArchive
-    ? (selectedArchivedCutId && archivedCuts.some((c) => c.cut_id === selectedArchivedCutId)
-        ? selectedArchivedCutId
-        : null)
-    : selectedSuggestedCutId;
-  const effectiveSegments = isInspectingArchive
-    ? archivedSegments
-    : activeVideo?.transcriptionSegments || [];
-  const effectiveRenderOutputs = isInspectingArchive ? archivedRenderOutputs : renderOutputs;
-  const effectiveRenderTitlesByFileName = isInspectingArchive
-    ? archivedRenderTitlesByFileName
-    : renderTitlesByFileName;
-
-  const workspaceVideos: WorkspaceVideoItem[] = useMemo(() => {
-    return videos.map((v) => {
-      const jobId = v.job.job_id;
-      const isCurrentActive = jobId === activeVideoId;
-      const cutsCount = isCurrentActive ? suggestedCuts.length : 0;
-      const rawStatus = isCurrentActive && sseJobStatus ? sseJobStatus : v.job.status;
-      const status = rawStatus ? String(rawStatus).replace(/^JobStatus\./i, "").toUpperCase() : "";
-      const isProcessing = [
-        "DOWNLOADING",
-        "TRANSCRIBING",
-        "BUILDING_BLOCKS",
-        "BUILDING_TOPICS",
-        "ANALYZING",
-        "RENDERING",
-      ].includes(status);
-      const hasTranscriptionContent = Boolean(
-        v.hasTranscription ||
-          v.transcription ||
-          (v.transcriptionSegments && v.transcriptionSegments.length > 0),
-      );
-      const hasActiveContent = Boolean(
-        hasTranscriptionContent ||
-          v.hasAnalysis ||
-          (isCurrentActive && (suggestedCuts.length > 0 || renderOutputs.length > 0)) ||
-          status === "WAITING_APPROVAL" ||
-          status === "DONE",
-      );
-      const attemptsCount =
-        attemptsCountByJobId[jobId] ??
-        attemptsByJobId[jobId]?.length ??
-        v.attemptsCount ??
-        0;
-
-      return {
-        id: jobId,
-        title: String(v.job.video_name || v.job.youtube_url || "Vídeo sem título").trim(),
-        durationSeconds: v.job.video_duration_seconds ?? null,
-        cutsCount,
-        status,
-        isProcessing,
-        attemptsCount,
-        canArchive: !isProcessing && hasActiveContent,
-      };
-    });
-  }, [
-    videos,
-    activeVideoId,
-    suggestedCuts,
-    sseJobStatus,
-    renderOutputs.length,
-    attemptsCountByJobId,
-    attemptsByJobId,
-  ]);
-
-  async function loadAttemptsForJob(jobId: string) {
-    setLoadingAttemptsByJobId((prev) => ({ ...prev, [jobId]: true }));
-    try {
-      const list = await listJobAttempts(jobId);
-      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: list }));
-      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: list.length }));
-    } catch (error) {
-      console.error("[UI] Falha ao carregar tentativas arquivadas:", error);
-    } finally {
-      setLoadingAttemptsByJobId((prev) => ({ ...prev, [jobId]: false }));
-    }
-  }
-
-  function handleExitArchivedInspection() {
-    setInspectingAttempt(null);
-    setSelectedArchivedCutId(null);
-  }
-
-  async function handleSelectArchivedAttempt(jobId: string, attemptId: string) {
-    if (activeVideoId !== jobId) {
-      const validation = canStartOperation(jobId);
-      if (!validation.allowed) {
-        alert(validation.message);
-        return;
-      }
-    }
-
-    setIsLoadingAttemptDetail(true);
-    try {
-      const detail = await getJobAttempt(jobId, attemptId);
-      if (activeVideoId !== jobId) {
-        setActiveVideoId(jobId);
-      }
-      setInspectingAttempt({ jobId, attemptId, detail });
-      setSelectedArchivedCutId(detail.cuts?.[0]?.cut_id ?? null);
-      videoPlayerHandleRef.current?.pause();
-    } catch (error: unknown) {
-      console.error("[UI] Erro ao carregar tentativa arquivada:", error);
-      const msg = error instanceof Error ? error.message : "Falha ao carregar tentativa arquivada";
-      setAction({ busy: false, error: msg });
-    } finally {
-      setIsLoadingAttemptDetail(false);
-    }
-  }
-
-  async function handleArchiveAttempt(jobId: string, resetActive: boolean) {
-    const targetVideo = videos.find((v) => v.job.job_id === jobId);
-    const targetStatus = String(targetVideo?.job.status || "")
-      .replace(/^JobStatus\./i, "")
-      .toUpperCase();
-    const isTargetProcessing = [
-      "DOWNLOADING",
-      "TRANSCRIBING",
-      "BUILDING_BLOCKS",
-      "BUILDING_TOPICS",
-      "ANALYZING",
-      "RENDERING",
-    ].includes(targetStatus);
-
-    if (isTargetProcessing || (jobId === activeVideoId && isAnyOperationRunning)) {
-      setToastNotification("Aguarde ou cancele o processamento antes de arquivar.");
-      return;
-    }
-
-    setArchivingJobId(jobId);
-    try {
-      const result = await archiveJobAttempt(jobId, { reset_active: resetActive });
-      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: result.attempts }));
-      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: result.attempts.length }));
-
-      if (resetActive) {
-        updateVideo(jobId, {
-          job: result.job,
-          hasTranscription: false,
-          transcription: "",
-          transcriptionSegments: [],
-          transcriptionFormats: undefined,
-          attemptsCount: result.attempts.length,
-        });
-
-        if (jobId === activeVideoId) {
-          clearCuts();
-          clearRenderOutputs();
-          setBlocks([]);
-          setAiResponseRaw(null);
-          setShowAiResponseDialog(false);
-          handleExitArchivedInspection();
-          resetProgress();
-        } else if (inspectingAttempt?.jobId === jobId) {
-          handleExitArchivedInspection();
-        }
-
-        setToastNotification(
-          `Tentativa "${result.attempt.label}" arquivada! Workspace pronto em DOWNLOADED para nova tentativa.`,
-        );
-      } else {
-        updateVideo(jobId, {
-          job: result.job,
-          attemptsCount: result.attempts.length,
-        });
-        setToastNotification(`Cópia "${result.attempt.label}" salva nos arquivados!`);
-      }
-    } catch (error: unknown) {
-      console.error("[UI] Erro ao arquivar tentativa:", error);
-      const msg = error instanceof Error ? error.message : "Falha ao arquivar tentativa";
-      setAction({ busy: false, error: msg });
-    } finally {
-      setArchivingJobId(null);
-    }
-  }
-
-  async function handleDeleteAttempt(jobId: string, attemptId: string) {
-    try {
-      const result = await deleteJobAttempt(jobId, attemptId);
-      setAttemptsByJobId((prev) => ({ ...prev, [jobId]: result.attempts }));
-      setAttemptsCountByJobId((prev) => ({ ...prev, [jobId]: result.attempts.length }));
-      updateVideo(jobId, { attemptsCount: result.attempts.length });
-
-      if (inspectingAttempt?.jobId === jobId && inspectingAttempt?.attemptId === attemptId) {
-        handleExitArchivedInspection();
-      }
-      setToastNotification("Tentativa arquivada removida.");
-    } catch (error: unknown) {
-      console.error("[UI] Erro ao excluir tentativa arquivada:", error);
-      const msg = error instanceof Error ? error.message : "Falha ao excluir tentativa arquivada";
-      setAction({ busy: false, error: msg });
-    }
-  }
-
-  async function handleStartNewAttemptFromBanner() {
-    if (!activeVideo) return;
-    const jobId = activeVideo.job.job_id;
-    const activeItem = workspaceVideos.find((v) => v.id === jobId);
-
-    if (activeItem?.isProcessing || isAnyOperationRunning) {
-      setToastNotification("Aguarde ou cancele o processamento ativo antes de iniciar nova tentativa.");
-      return;
-    }
-
-    if (activeItem?.canArchive) {
-      await handleArchiveAttempt(jobId, true);
-      return;
-    }
-
-    handleExitArchivedInspection();
-    setToastNotification("Workspace ativo pronto em DOWNLOADED para iniciar nova tentativa.");
-  }
-
-  const sharedTaskLogs = useSharedTaskLogWorkflow({
-    activeJobId: activeVideo?.job.job_id ?? null,
-    isTranscribing: activeVideo?.isTranscribing,
-    isRendering,
-    isProcessing: Boolean(isAnyOperationRunning),
-  });
   const {
-    taskLogsContainerRef,
-    activeTaskLogs,
-    activeTaskLogType,
-    appendLogLine,
-    clearLogs,
-  } = sharedTaskLogs;
+    progress: sseProgress,
+    currentMessage: sseMessage,
+    jobStatus: sseJobStatus,
+  } = useJobEvents(activeVideoId);
 
   useEffect(() => {
-    if (currentMessage) {
-      appendLogLine(currentMessage);
-    }
-  }, [currentMessage, appendLogLine]);
+    if (!activeVideoId || !sseJobStatus) return;
+    const hasLiveActivity = sseProgress > 0 || Boolean(sseMessage);
+    const isActiveStatus = isJobProcessingStatus(sseJobStatus);
+    const isTrackedLocally =
+      localProcessingJobsRef.current.has(activeVideoId) ||
+      activeBatchJobIdRef.current === activeVideoId;
 
-  const statusLabel = useMemo(
-    () => videos.find((v) => v.job.job_id === activeVideoId)?.job.status ?? "NENHUM VÍDEO",
-    [videos, activeVideoId],
-  );
-
-  const showProgressBanner = Boolean(
-    activeVideo &&
-      (isVideoProcessing || is1ClickRunning) &&
-      activeStatus !== "DOWNLOADED" &&
-      activeStatus !== "ERROR" &&
-      activeStatus !== "DONE",
-  );
-
-  const allLogs = useMemo(() => {
-    const combined = [...activeTaskLogs];
-    for (const log of sseLogs) {
-      if (!combined.includes(log)) {
-        combined.push(log);
-      }
-    }
-    return combined.length > 0 ? combined : sseLogs;
-  }, [activeTaskLogs, sseLogs]);
-
-  async function handleRunPipeline(includeRender: boolean) {
-    if (!activeVideoId) {
-      setToastNotification("Selecione um vídeo na biblioteca primeiro.");
-      return;
-    }
-
-    if (isInspectingArchive) {
-      setToastNotification("Volte para a tentativa ativa para iniciar um processamento.");
-      return;
-    }
-
-    const validation = canStartOperation(activeVideoId);
-    if (!validation.allowed) {
-      alert(validation.message);
-      return;
-    }
-
-    pipelineIncludeRenderRef.current = includeRender;
-    setIs1ClickRunning(true);
-    try {
-      setToastNotification(
-        includeRender
-          ? "Pipeline 1-Clique iniciado com sucesso!"
-          : "Pipeline iniciado até curadoria (pausará antes de renderizar).",
+    if (isActiveStatus && (hasLiveActivity || isTrackedLocally)) {
+      markJobProcessing(activeVideoId, true);
+      setVideos((current) =>
+        current.map((v) =>
+          v.job.job_id === activeVideoId && v.job.status !== sseJobStatus
+            ? { ...v, job: { ...v.job, status: sseJobStatus } }
+            : v,
+        ),
       );
-      await runJobPipeline(activeVideoId, { include_render: includeRender });
-      await refreshVideo(activeVideoId);
-    } catch (error: unknown) {
-      console.error("[UI] Erro ao iniciar pipeline:", error);
-      const message = error instanceof Error ? error.message : "Falha ao iniciar pipeline";
-      setAction({ busy: false, error: message });
-      setIs1ClickRunning(false);
-      pipelineIncludeRenderRef.current = true;
-    }
-  }
-
-  function handleRun1ClickPipeline() {
-    void handleRunPipeline(true);
-  }
-
-  function handleRunCuratePipeline() {
-    void handleRunPipeline(false);
-  }
-
-  async function handleDirectTranscribe(targetJobId?: string) {
-    const jobId = targetJobId || activeVideoId;
-    if (!jobId) {
-      setToastNotification("Selecione um vídeo primeiro.");
       return;
     }
 
-    if (isInspectingArchive && jobId === activeVideoId) {
-      setToastNotification("Volte para a tentativa ativa para transcrever.");
-      return;
-    }
-
-    const validation = canStartOperation(jobId);
-    if (!validation.allowed) {
-      alert(validation.message);
-      return;
-    }
-
-    if (jobId !== activeVideoId) {
-      handleExitArchivedInspection();
-      setActiveVideoId(jobId);
-    }
-
-    setToastNotification("Iniciando transcrição de áudio (Whisper)...");
-    requestTranscriptionStart();
-  }
-
-  async function handleDirectAnalyze(targetJobId?: string) {
-    const jobId = targetJobId || activeVideoId;
-    if (!jobId) {
-      setToastNotification("Selecione um vídeo primeiro.");
-      return;
-    }
-
-    if (isInspectingArchive && jobId === activeVideoId) {
-      setToastNotification("Volte para a tentativa ativa para gerar cortes.");
-      return;
-    }
-
-    const validation = canStartOperation(jobId);
-    if (!validation.allowed) {
-      alert(validation.message);
-      return;
-    }
-
-    if (jobId !== activeVideoId) {
-      handleExitArchivedInspection();
-      setActiveVideoId(jobId);
-    }
-
-    const targetVideo = videos.find((v) => v.job.job_id === jobId);
-    if (!targetVideo?.hasTranscription) {
-      setToastNotification("É necessário transcrever o áudio antes de minerar os cortes.");
-      return;
-    }
-
-    try {
-      setIsAnalyzing(true);
-      setToastNotification("Minerando cortes virais com IA...");
-      const result = await analyzeJob(jobId);
-      handleAnalyzeResult(result);
-      await loadCutsForActiveJob(jobId);
-      await refreshVideo(jobId);
-      setToastNotification("Cortes minerados com sucesso!");
-    } catch (err: any) {
-      console.error("[UI] Erro ao minerar cortes com IA:", err);
-      const msg = err?.message || "Falha ao minerar cortes com IA";
-      setAction({ busy: false, error: msg });
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }
-
-  async function handleCancelActiveOperation() {
-    if (!activeVideoId) return;
-    console.log(`[UI] Cancelando operação ativa para ${activeVideoId}`);
-    try {
-      // 1. Aciona o cancelamento unificado do job no backend
-      try {
-        await cancelJob(activeVideoId);
-      } catch (e) {
-        console.warn("[UI] cancelJob fallback:", e);
-      }
-
-      // 2. Aciona cancelamentos específicos adicionais por garantia
-      try {
-        await cancelTranscription(activeVideoId);
-      } catch {}
-      try {
-        await cancelRendering(activeVideoId);
-      } catch {}
-
-      // 3. Reseta estados visuais de loading do frontend imediatamente
-      pipelineIncludeRenderRef.current = true;
-      setIs1ClickRunning(false);
-      setIsRendering(false);
-      updateVideo(activeVideoId, {
-        isTranscribing: false,
-      });
-
-      setToastNotification("Operação cancelada com sucesso.");
-    } catch (err: any) {
-      console.error("[UI] Erro ao cancelar cooperativamente:", err);
-      setToastNotification("Falha ao cancelar operação.");
-    } finally {
-      setIs1ClickRunning(false);
-      setIsRendering(false);
-      resetProgress();
-      if (activeVideoId) {
-        await refreshVideo(activeVideoId);
-        await loadVideos();
+    if (!isActiveStatus) {
+      markJobProcessing(activeVideoId, false);
+      if (hasLiveActivity || isTrackedLocally) {
+        setVideos((current) =>
+          current.map((v) =>
+            v.job.job_id === activeVideoId && v.job.status !== sseJobStatus
+              ? { ...v, job: { ...v.job, status: sseJobStatus } }
+              : v,
+          ),
+        );
       }
     }
-  }
+  }, [activeVideoId, sseJobStatus, sseProgress, sseMessage, markJobProcessing]);
 
-  const hasAnyBlocks = useMemo(() => {
-    if (!activeVideo) return false;
-    return blocks.length > 0;
-  }, [blocks, activeVideo]);
+  useEffect(() => {
+    if (isAnalyzing) {
+      if (!analyzingJobIdRef.current && activeVideoId) {
+        analyzingJobIdRef.current = activeVideoId;
+        markJobProcessing(activeVideoId, true);
+      }
+    } else if (analyzingJobIdRef.current) {
+      markJobProcessing(analyzingJobIdRef.current, false);
+      analyzingJobIdRef.current = null;
+    }
+  }, [isAnalyzing, activeVideoId, markJobProcessing]);
 
+  useEffect(() => {
+    if (isRendering && renderingJobId) {
+      if (renderingJobIdRef.current && renderingJobIdRef.current !== renderingJobId) {
+        markJobProcessing(renderingJobIdRef.current, false);
+      }
+      renderingJobIdRef.current = renderingJobId;
+      markJobProcessing(renderingJobId, true);
+    } else if ((!isRendering || !renderingJobId) && renderingJobIdRef.current) {
+      markJobProcessing(renderingJobIdRef.current, false);
+      renderingJobIdRef.current = null;
+    }
+  }, [isRendering, renderingJobId, markJobProcessing]);
+
+  useEffect(() => {
+    if (!isBatchProcessing || batchWaitingForApproval) {
+      if (activeBatchJobIdRef.current) {
+        markJobProcessing(activeBatchJobIdRef.current, false);
+        activeBatchJobIdRef.current = null;
+      }
+      setActiveBatchJobId(null);
+      return;
+    }
+
+    if (!activeBatchId) {
+      return;
+    }
+
+    const fallbackJobId = selectedVideosForBatch[currentBatchVideoIndex] ?? null;
+    if (fallbackJobId && !activeBatchJobIdRef.current) {
+      activeBatchJobIdRef.current = fallbackJobId;
+      setActiveBatchJobId(fallbackJobId);
+      markJobProcessing(fallbackJobId, true);
+    }
+
+    let cancelled = false;
+    const syncBatchCurrentJob = async () => {
+      try {
+        const progress = await getBatchPipelineStatus(activeBatchId);
+        if (cancelled) return;
+        if (progress.is_running && !progress.waiting_for_approval && progress.current_job_id) {
+          const nextJobId = progress.current_job_id;
+          if (activeBatchJobIdRef.current && activeBatchJobIdRef.current !== nextJobId) {
+            markJobProcessing(activeBatchJobIdRef.current, false);
+          }
+          activeBatchJobIdRef.current = nextJobId;
+          setActiveBatchJobId(nextJobId);
+          markJobProcessing(nextJobId, true);
+        } else {
+          if (activeBatchJobIdRef.current) {
+            markJobProcessing(activeBatchJobIdRef.current, false);
+            activeBatchJobIdRef.current = null;
+          }
+          setActiveBatchJobId(null);
+        }
+      } catch {
+        // ignore transient poll error; useBatchPipelineWorkflow handles lifecycle
+      }
+    };
+
+    void syncBatchCurrentJob();
+    const timer = window.setInterval(() => {
+      void syncBatchCurrentJob();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    isBatchProcessing,
+    activeBatchId,
+    batchWaitingForApproval,
+    selectedVideosForBatch,
+    currentBatchVideoIndex,
+    markJobProcessing,
+  ]);
+
+  const processingJobIds = useMemo(() => {
+    const ids = new Set<string>(localProcessingJobs);
+    for (const v of videos) {
+      const isProcessingFlag = (v as { is_processing?: boolean }).is_processing === true;
+      if (isProcessingFlag || v.isTranscribing === true) {
+        ids.add(v.job.job_id);
+      }
+    }
+    for (const v of archivedVideos) {
+      const isProcessingFlag = (v as { is_processing?: boolean }).is_processing === true;
+      if (isProcessingFlag || v.isTranscribing === true) {
+        ids.add(v.job.job_id);
+      }
+    }
+    if (isBatchProcessing && !batchWaitingForApproval && activeBatchJobId) {
+      ids.add(activeBatchJobId);
+    }
+    if (isRendering && renderingJobId) {
+      ids.add(renderingJobId);
+    }
+    return ids;
+  }, [
+    localProcessingJobs,
+    videos,
+    archivedVideos,
+    isBatchProcessing,
+    batchWaitingForApproval,
+    activeBatchJobId,
+    isRendering,
+    renderingJobId,
+  ]);
+
+  // Persist UI preferences
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.sidebarPinned", String(sidebarPinned));
+    } catch {
+      // ignore
+    }
+  }, [sidebarPinned]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.sidebarSide", sidebarSide);
+    } catch {
+      // ignore
+    }
+  }, [sidebarSide]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.dockCollapsed", String(dockCollapsed));
+    } catch {
+      // ignore
+    }
+  }, [dockCollapsed]);
+
+  useEffect(() => {
+    if (!dockCollapsed) {
+      setDockMinimizedVisible(true);
+    }
+  }, [dockCollapsed]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.cutPreset", selectedPreset);
+    } catch {
+      // ignore
+    }
+  }, [selectedPreset]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.reviewBeforeRender", String(reviewBeforeRender));
+    } catch {
+      // ignore
+    }
+  }, [reviewBeforeRender]);
+
+  // Body scroll lock when any legacy modal is open
   useEffect(() => {
     const updateBodyScrollLock = () => {
       const hasDialog = document.querySelectorAll(".dialog-overlay").length > 0;
       document.body.classList.toggle("modal-open", hasDialog);
     };
-
     updateBodyScrollLock();
-
-    const observer = new MutationObserver(() => {
-      updateBodyScrollLock();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
+    const observer = new MutationObserver(updateBodyScrollLock);
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
       document.body.classList.remove("modal-open");
     };
   }, []);
 
+  // Auto-dismiss error toast after 6s
+  useEffect(() => {
+    if (!action.error) return;
+    const timer = window.setTimeout(() => {
+      setAction((prev) => ({ ...prev, error: undefined }));
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [action.error]);
+
   async function runAction<T>(fn: () => Promise<T>, onSuccess?: (value: T) => void) {
-    console.log(`\n[App] Executando ação...`);
     setAction({ busy: true });
     try {
-      console.log(`[App] Chamando função...`);
       const result = await fn();
-      console.log(`[App] Ação completada com sucesso`);
       onSuccess?.(result);
       setAction({ busy: false });
     } catch (error: any) {
-      console.error(`[App] Erro na ação:`, error);
-      console.error(`[App] Mensagem:`, error.message);
-      console.error(`[App] Stack:`, error.stack);
       const errorMessage = error instanceof Error ? error.message : "Erro inesperado";
-      console.error(`[App] Será exibido ao usuário:`, errorMessage);
       setAction({ busy: false, error: errorMessage });
     }
   }
 
   function mergeModelOptions(...modelLists: Array<Array<string | null | undefined>>): string[] {
     const merged = new Set<string>();
-
     for (const modelList of modelLists) {
       for (const candidate of modelList) {
         const model = String(candidate || "").trim();
-        if (model) {
-          merged.add(model);
-        }
+        if (model) merged.add(model);
       }
     }
-
     return Array.from(merged);
   }
 
-  async function refreshOllamaModelOptions(showAlertOnError = false): Promise<void> {
+  async function refreshOllamaModelOptions(showErrorToast = false): Promise<void> {
     try {
       const result = await getOllamaModels();
-
       const backendCatalog = result.catalog || [];
       setOllamaModelCatalog(backendCatalog);
       setOllamaModels(
@@ -1187,45 +724,40 @@ export default function App() {
       console.error("Failed to load Ollama models:", error);
       setOllamaLocalAvailable(false);
       setOllamaRemoteAvailable(false);
-      if (showAlertOnError) {
-        alert("Não foi possível carregar a lista de modelos do Ollama.");
+      if (showErrorToast) {
+        setAction({
+          busy: false,
+          error: "Não foi possível carregar a lista de modelos do Ollama.",
+        });
       }
     }
   }
 
-  async function pollIngestLogs(jobId: string) {
-    try {
-      const result = await getJobLogs(jobId, "ingest");
-      setIngestLogs(result.logs || []);
-    } catch (error) {
-      console.error("[logs] Failed to fetch ingest logs:", error);
+  function mergeVideoUpdates(video: VideoItem, updates: Partial<VideoItem>): VideoItem {
+    const next = { ...video, ...updates };
+    if (
+      updates.hasTranscription === undefined &&
+      ("transcription" in updates || "transcriptionSegments" in updates)
+    ) {
+      next.hasTranscription = Boolean(
+        next.transcription || (next.transcriptionSegments?.length ?? 0) > 0,
+      );
     }
-  }
-
-  function startIngestLogsPolling(jobId: string) {
-    if (ingestLogsPollRef.current) {
-      window.clearInterval(ingestLogsPollRef.current);
-    }
-    void pollIngestLogs(jobId);
-    ingestLogsPollRef.current = window.setInterval(() => {
-      void pollIngestLogs(jobId);
-    }, 1500);
-  }
-
-  function stopIngestLogsPolling() {
-    if (ingestLogsPollRef.current) {
-      window.clearInterval(ingestLogsPollRef.current);
-      ingestLogsPollRef.current = null;
-    }
+    return next;
   }
 
   function updateVideo(jobId: string, updates: Partial<VideoItem>) {
-    setVideos((current) => current.map((v) => (v.job.job_id === jobId ? { ...v, ...updates } : v)));
+    setVideos((current) =>
+      current.map((v) => (v.job.job_id === jobId ? mergeVideoUpdates(v, updates) : v)),
+    );
+    if ("isTranscribing" in updates) {
+      markJobProcessing(jobId, Boolean(updates.isTranscribing));
+    }
   }
 
   function updateArchivedVideo(jobId: string, updates: Partial<VideoItem>) {
     setArchivedVideos((current) =>
-      current.map((v) => (v.job.job_id === jobId ? { ...v, ...updates } : v)),
+      current.map((v) => (v.job.job_id === jobId ? mergeVideoUpdates(v, updates) : v)),
     );
   }
 
@@ -1238,99 +770,59 @@ export default function App() {
     );
   }
 
-  // Find any video currently transcribing or rendering
   function findActiveTranscriptionOrRendering(): string | null {
-    // Check if any video is transcribing
     const transcribingVideo = videos.find((v) => v.isTranscribing);
     if (transcribingVideo) return transcribingVideo.job.job_id;
-
-    // Check if rendering is in progress (applies to activeVideo)
-    if (isRendering && activeVideoId) return activeVideoId;
-
+    if (isRendering && (renderingJobId || activeVideoId)) {
+      return renderingJobId ?? activeVideoId;
+    }
     return null;
   }
 
   function canStartOperation(targetJobId: string): { allowed: boolean; message?: string } {
-    const activeJobId = findActiveTranscriptionOrRendering();
-    if (!activeJobId) return { allowed: true };
-    if (activeJobId === targetJobId) return { allowed: true }; // Same video can continue
+    const busyJobId = findActiveTranscriptionOrRendering();
+    if (!busyJobId || busyJobId === targetJobId) return { allowed: true };
     return {
       allowed: false,
-      message: `Transcrição ou renderização já em andamento. Cancele para iniciar outra operação.`,
+      message: "Já existe um vídeo em processamento. Cancele antes de iniciar outro.",
     };
   }
 
-  // Auto-scroll ingest logs to bottom when new logs arrive
-  useEffect(() => {
-    if (ingestLogsContainerRef.current) {
-      ingestLogsContainerRef.current.scrollTop = ingestLogsContainerRef.current.scrollHeight;
-    }
-  }, [ingestLogs]);
-
-  useEffect(() => {
-    return () => {
-      if (ingestLogsPollRef.current) {
-        window.clearInterval(ingestLogsPollRef.current);
+  const selectVideo = useCallback(
+    (jobId: string, keepTranscriptOpen = false) => {
+      setImmersiveCutId(null);
+      if (!keepTranscriptOpen) {
+        setTranscriptOpen(false);
       }
-    };
-  }, []);
+      activeVideoIdRef.current = jobId;
+      setActiveVideoId(jobId);
+    },
+    [],
+  );
 
-  useEffect(() => {
-    if (!ingestJobId || !isIngesting || uploadMode !== "url") {
-      stopIngestLogsPolling();
-      return;
-    }
-
-    if (!ingestLogsPollRef.current) {
-      startIngestLogsPolling(ingestJobId);
-    }
-  }, [ingestJobId, isIngesting, uploadMode]);
-
-  // Poll progressive render outputs during 1-click pipeline RENDERING stage
-  useEffect(() => {
-    if (!activeVideoId || activeStatus !== "RENDERING" || isRendering) return;
-    void refreshRenderOutputs(activeVideoId);
-    const intervalId = window.setInterval(() => {
-      void refreshRenderOutputs(activeVideoId);
-    }, 2000);
-    return () => window.clearInterval(intervalId);
-  }, [activeVideoId, activeStatus, isRendering]);
-
-  // Load cuts when active video changes
-  useEffect(() => {
-    if (activeVideo?.job?.job_id) {
-      clearRenderOutputs();
-      loadCutsForActiveJob(activeVideo.job.job_id);
-    }
-  }, [activeVideo?.job?.job_id]);
-
-  function loadVideos() {
-    return runAction(
+  async function loadVideos() {
+    await runAction(
       async () => {
         const [active, archived] = await Promise.all([listVideos(), listArchivedVideos()]);
         return { active, archived };
       },
       ({ active, archived }) => {
-        const activeItems = active.map(recordToVideoItem);
-        const archivedItems = archived.map(recordToVideoItem);
+        const activeItems = active.map((record) => ({
+          ...recordToVideoItem(record),
+          is_processing: (record as { is_processing?: boolean }).is_processing,
+        }));
+        const archivedItems = archived.map((record) => ({
+          ...recordToVideoItem(record),
+          is_processing: (record as { is_processing?: boolean }).is_processing,
+        }));
         setVideos(activeItems);
         setArchivedVideos(archivedItems);
-        setAttemptsCountByJobId((prev) => {
-          const next = { ...prev };
-          for (const record of active) {
-            if (typeof record.attempts_count === "number") {
-              next[record.job_id] = record.attempts_count;
-            }
-          }
-          return next;
-        });
         hydrateTranscriptions(activeItems, updateVideo);
         hydrateTranscriptions(archivedItems, updateArchivedVideo);
 
-        // Auto-selecionar o primeiro vídeo (mais antigo) se nenhum estiver selecionado
         if (activeItems.length > 0 && !activeVideoId) {
-          const firstVideo = activeItems[0]; // Primeiro do array = mais antigo (ordenado por created_at)
-          setActiveVideoId(firstVideo.job.job_id);
+          const firstId = activeItems[0].job.job_id;
+          setActiveVideoId(firstId);
         }
       },
     );
@@ -1338,269 +830,27 @@ export default function App() {
 
   function upsertVideoIntoList(video: VideoItem) {
     const jobId = String(video?.job?.job_id ?? "").trim();
-    if (!jobId) {
-      console.warn("[UI] Ignorando vídeo inválido (sem job_id)", video);
+    const title = String(video?.job?.video_name ?? video?.job?.source_file_name ?? "").trim();
+    const videoPath = String(video?.videoPath ?? "").trim();
+    if (!jobId || !title || !videoPath) {
+      void loadVideos();
       return;
     }
 
-    const rawTitle = String(
-      video?.job?.video_name ??
-      video?.job?.source_file_name ??
-      video?.job?.youtube_url ??
-      ""
-    ).trim();
-    const title = rawTitle || "Vídeo sem título";
-
-    const videoPath = String(video?.videoPath ?? "").trim() || `/media/videos/${jobId}`;
-
     const normalized: VideoItem = {
       ...video,
-      job: {
-        ...video.job,
-        video_name: title,
-      },
+      job: { ...video.job, video_name: title },
       videoPath,
     };
 
     setVideos((current) => [normalized, ...current.filter((v) => v.job.job_id !== jobId)]);
-    handleExitArchivedInspection();
-    setActiveVideoId(jobId);
+    selectVideo(jobId);
   }
 
-  function setView(next: "active" | "archived") {
-    setVideoView(next);
-    setMenuOpenId(null);
-    if (next === "archived") {
-      handleExitArchivedInspection();
-      setActiveVideoId(null);
-    }
-    if (next === "archived") {
-      window.history.pushState({}, "", "/arquivados");
-    } else {
-      window.history.pushState({}, "", "/");
-    }
-  }
-
+  // Load initial data
   useEffect(() => {
-    if (activeVideoId) {
-      const count = attemptsCountByJobId[activeVideoId];
-      if (typeof count === "number" && count > 0 && !attemptsByJobId[activeVideoId]) {
-        void loadAttemptsForJob(activeVideoId);
-      }
-    }
-  }, [activeVideoId, attemptsCountByJobId]);
+    void loadVideos();
 
-  useEffect(() => {
-    setBlocks([]);
-    resetForActiveVideoChange();
-    setAiResponseRaw(null);
-    setShowAiResponseDialog(false);
-    resetSharedTaskLogs();
-    if (activeVideoId) {
-      loadCutsForVideo(activeVideoId);
-    } else {
-      clearCuts();
-    }
-  }, [activeVideoId]);
-
-  useEffect(() => {
-    if (showAiResponseOnAnalyze && aiResponseRaw) {
-      setShowAiResponseDialog(true);
-    }
-  }, [showAiResponseOnAnalyze, aiResponseRaw]);
-
-  function startUploadSelectedFiles() {
-    if (selectedFiles.length === 0) return;
-
-    console.log(`\n[UI] Botão "Upload de arquivos" clicado`);
-    console.log(`[UI] Arquivos: ${selectedFiles.length}`);
-
-    // Upload all files sequentially
-    const uploadSequentially = async () => {
-      for (const file of selectedFiles) {
-        try {
-          await new Promise<void>((resolve, reject) => {
-            runAction(
-              () => uploadVideoFile(file),
-              (result) => {
-                console.log(`[UI] Upload completado: ${result.job.job_id}`);
-                const newVideo: VideoItem = {
-                  job: result.job,
-                  transcriptionLogs: [],
-                  videoPath: result.video_path,
-                };
-                setVideos((current) => [newVideo, ...current]);
-                setActiveVideoId(result.job.job_id);
-                resolve();
-              },
-            );
-          });
-        } catch (error) {
-          console.error(`[UI] Erro ao fazer upload de ${file.name}:`, error);
-        }
-      }
-
-      setSelectedFiles([]);
-      const fileInput = document.getElementById("video-file-input") as HTMLInputElement;
-      if (fileInput) fileInput.value = "";
-      loadVideos();
-    };
-
-    uploadSequentially();
-  }
-
-  async function handleMoveUploadDecision(moveUploads: boolean) {
-    const askAgain = !dontAskMoveUpload;
-    try {
-      const updated = await saveSettings({
-        preferences: {
-          ask_move_on_upload: askAgain,
-          move_uploads: moveUploads,
-          ask_delete_cut_confirm: appSettings?.preferences?.ask_delete_cut_confirm ?? true,
-        },
-      });
-      setAppSettings(updated);
-    } catch (error) {
-      console.error("Failed to save upload preferences:", error);
-    }
-
-    setShowMoveUploadDialog(false);
-    setDontAskMoveUpload(false);
-    startUploadSelectedFiles();
-  }
-
-  function applyToolConfigs(response: { active: ToolConfigs; source?: "default" | "custom" }) {
-    const active = response.active;
-    setWhisperConfig(active.whisper || {});
-    const device = active.whisper.device === "cpu" ? "cpu" : "cuda";
-    setWhisperDevice(device);
-    const formats = Array.isArray(active.whisper.output_format)
-      ? active.whisper.output_format
-      : ["json", "vtt", "txt"];
-    setWhisperFormats(formats);
-    setFfmpegConfig(active.ffmpeg || null);
-    const configuredModel = String(active.llm.model || "").trim();
-    const configuredEmbeddingModel =
-      String(active.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
-    const configuredEmbeddingModels = Array.isArray(active.llm.registered_embedding_models)
-      ? active.llm.registered_embedding_models
-          .map((item) => String(item || "").trim())
-          .filter(Boolean)
-      : [];
-
-    const embeddingModelSet = new Set(configuredEmbeddingModels);
-    embeddingModelSet.add(configuredEmbeddingModel);
-
-    setLlmModel(configuredModel);
-    setEmbeddingModel(configuredEmbeddingModel);
-    setRegisteredEmbeddingModels(Array.from(embeddingModelSet));
-    setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
-    setLlmSystemPrompt(active.llm.system_prompt || "");
-  }
-
-  async function saveWhisperConfig(config: Partial<WhisperConfig>) {
-    try {
-      const outputFormats = (
-        Array.isArray(config.output_format) ? config.output_format : whisperFormats
-      ) as WhisperConfig["output_format"];
-      const device = config.device === "cpu" ? "cpu" : "cuda";
-      const response = await saveToolConfigs({
-        whisper: {
-          ...config,
-          device,
-          output_format: outputFormats,
-        },
-      });
-      applyToolConfigs(response);
-      console.log("[UI] Configurações do Whisper salvas");
-      setShowWhisperConfigDialog(false);
-    } catch (error) {
-      console.error("[UI] Erro ao salvar configurações do Whisper:", error);
-    }
-  }
-
-  async function saveLLMConfig(
-    model: string,
-    prompt: string,
-    nextEmbeddingModel: string,
-    nextRegisteredEmbeddingModels: string[],
-  ) {
-    try {
-      const response = await saveToolConfigs({
-        llm: {
-          model,
-          system_prompt: prompt,
-          embedding_model: nextEmbeddingModel,
-          registered_embedding_models: nextRegisteredEmbeddingModels,
-        },
-      });
-      applyToolConfigs(response);
-      console.log("[UI] Configurações do LLM salvas");
-      setShowLLMConfigDialog(false);
-    } catch (error) {
-      console.error("[UI] Erro ao salvar configurações do LLM:", error);
-    }
-  }
-
-  async function registerNewOllamaModel(name: string, source: "cloud" | "local") {
-    return registerOllamaModel({ name, source });
-  }
-
-  async function removeRegisteredOllamaModel(name: string) {
-    return removeOllamaModel(name);
-  }
-
-  async function saveFFmpegConfig(config: FFmpegConfig) {
-    try {
-      const response = await saveToolConfigs({ ffmpeg: config });
-      applyToolConfigs(response);
-      console.log("[UI] Configurações do FFmpeg salvas");
-      setShowFFmpegConfigDialog(false);
-    } catch (error) {
-      console.error("[UI] Erro ao salvar configurações do FFmpeg:", error);
-    }
-  }
-
-  async function resetAllConfigs() {
-    try {
-      const response = await resetAllToolConfigs();
-      applyToolConfigs(response);
-      console.log("[UI] Configurações resetadas");
-    } catch (error) {
-      console.error("[UI] Erro ao resetar configurações:", error);
-    }
-  }
-
-  async function resetConfigSection(section: "whisper" | "ffmpeg" | "llm") {
-    try {
-      const response = await resetToolConfigSection(section);
-      applyToolConfigs(response);
-      console.log(`[UI] Configuração resetada: ${section}`);
-    } catch (error) {
-      console.error(`[UI] Erro ao resetar ${section}:`, error);
-    }
-  }
-
-  async function handleImportToolConfigs(file: File) {
-    try {
-      const content = await file.text();
-      const parsed = JSON.parse(content) as ToolConfigs;
-      const response = await importToolConfigs(parsed);
-      applyToolConfigs(response);
-      console.log("[UI] Configurações importadas");
-    } catch (error) {
-      console.error("[UI] Erro ao importar configurações:", error);
-    }
-  }
-
-  useEffect(() => {
-    const pathname = window.location.pathname;
-    if (pathname === "/arquivados") {
-      setVideoView("archived");
-    }
-    loadVideos();
-
-    // Load tool configs
     (async () => {
       try {
         const toolConfigs = await getToolConfigs();
@@ -1620,736 +870,1117 @@ export default function App() {
       } catch (error) {
         console.error("Failed to load app settings:", error);
       }
-
-      try {
-        const foldersData = await getCommonFolders();
-        setCommonFolders(foldersData.folders);
-      } catch (error) {
-        console.error("Failed to load common folders:", error);
-      }
     })();
-
-    const onPopState = () => {
-      setVideoView(window.location.pathname === "/arquivados" ? "archived" : "active");
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  return (
-    <div className="h-[100dvh] w-[100dvw] bg-[#07080b] text-[#f5f5f7] flex flex-col overflow-hidden relative select-none">
-      {/* Ambient Light Mesh Background */}
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute -top-32 -left-32 w-[460px] h-[460px] bg-blue-600/10 rounded-full blur-[140px]" />
-        <div className="absolute top-1/3 -right-24 w-[480px] h-[480px] bg-indigo-500/10 rounded-full blur-[160px]" />
-        <div className="absolute -bottom-24 left-1/4 w-[540px] h-[540px] bg-slate-300/5 rounded-full blur-[150px]" />
-      </div>
+  // Load cuts & reset video-scoped UI when active video changes
+  useEffect(() => {
+    if (blocksJobIdRef.current !== activeVideoId) {
+      blocksJobIdRef.current = null;
+      setBlocks([]);
+    }
+    resetForActiveVideoChange();
+    setAiResponseRaw(null);
+    setShowAiResponseDialog(false);
+    resetSharedTaskLogs();
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+    setDockMinimizedVisible(true);
+    setCutResumePositions({});
+    clearRenderOutputs();
 
-      {/* Janela Unificada Liquid Glass Edge-to-Edge */}
-      <GlassWindow className="w-full h-full flex flex-col">
-        <StudioTopbar
-          activeTab={studioTab}
-          onTabChange={setStudioTab}
-          activeVideoTitle={activeVideo ? String(activeVideo.job.video_name || activeVideo.job.youtube_url) : null}
-          gpuStatus={isAnyOperationRunning ? "busy" : "online"}
-          gpuLabel={isAnyOperationRunning ? (STATUS_DESCRIPTIONS[activeStatus || ""] ? (activeStatus || "PROCESSANDO") : "PROCESSANDO") : "GPU ONLINE"}
-          onConfigureApp={() => setShowConfigureAppDialog(true)}
-          onManageDependencies={() => setShowDependenciesDialog(true)}
-          onConfigureLLM={() => setShowLLMConfigDialog(true)}
-          onConfigureWhisper={() => setShowWhisperConfigDialog(true)}
-          onConfigureFFmpeg={() => setShowFFmpegConfigDialog(true)}
-          onShowHowToUse={() => setShowHowToUseDialog(true)}
-          actions={
-            <div className="flex items-center gap-2">
-              {activeVideo && (
-                <>
-                  <GlassButton
-                    variant="glass"
-                    size="sm"
-                    onClick={() => handleDirectTranscribe()}
-                    disabled={isAnyOperationRunning || isInspectingArchive}
-                    leadingIcon={
-                      <svg className="w-3.5 h-3.5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                        <line x1="12" y1="19" x2="12" y2="23" />
-                        <line x1="8" y1="23" x2="16" y2="23" />
-                      </svg>
-                    }
-                    className="text-xs font-medium border-white/10 hover:border-cyan-500/40 disabled:opacity-40"
-                    title={
-                      isInspectingArchive
-                        ? "Volte para a tentativa ativa para transcrever"
-                        : "Transcrever áudio deste vídeo com Whisper na GPU"
-                    }
-                  >
-                    Transcrever
-                  </GlassButton>
+    if (activeVideoId) {
+      loadCutsForActiveJob(activeVideoId);
+      void loadCutsForVideo(activeVideoId);
+    } else {
+      clearCuts();
+    }
+  }, [activeVideoId]);
 
-                  <GlassButton
-                    variant="glass"
-                    size="sm"
-                    onClick={() => handleDirectAnalyze()}
-                    disabled={isAnyOperationRunning || isInspectingArchive || !activeVideo.hasTranscription}
-                    leadingIcon={
-                      <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="6" cy="6" r="3" />
-                        <circle cx="6" cy="18" r="3" />
-                        <line x1="20" y1="4" x2="8.12" y2="15.88" />
-                      </svg>
-                    }
-                    className="text-xs font-medium border-white/10 hover:border-amber-500/40 disabled:opacity-40"
-                    title={
-                      isInspectingArchive
-                        ? "Volte para a tentativa ativa para gerar cortes"
-                        : activeVideo.hasTranscription
-                          ? "Minerar cortes narrativos com IA (LLM)"
-                          : "Transcreva o áudio primeiro para habilitar a mineração de cortes"
-                    }
-                  >
-                    Gerar Cortes
-                  </GlassButton>
+  // Refresh active job & cuts when batch processing completes or waits for approval
+  useEffect(() => {
+    if (!activeVideoId) return;
+    if (batchWaitingForApproval || !isBatchProcessing) {
+      loadCutsForActiveJob(activeVideoId);
+    }
+  }, [batchWaitingForApproval, isBatchProcessing, activeVideoId]);
 
-                  <GlassButton
-                    variant="glass"
-                    size="sm"
-                    onClick={handleRunCuratePipeline}
-                    disabled={isAnyOperationRunning || isInspectingArchive}
-                    leadingIcon={
-                      <svg className="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M9 11l3 3L22 4" />
-                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                      </svg>
-                    }
-                    className="text-xs font-medium border-white/10 hover:border-emerald-500/40 disabled:opacity-40"
-                    title={
-                      isInspectingArchive
-                        ? "Volte para a tentativa ativa para gerar e revisar cortes"
-                        : "Transcrever, gerar cortes e pausar para sua revisão antes de renderizar"
-                    }
-                  >
-                    Gerar e Revisar
-                  </GlassButton>
+  // Build DockCutItem list with rendered MP4 filenames matched
+  const dockCuts: DockCutItem[] = useMemo(() => {
+    return cuts.map((cut) => {
+      const expectedFile = buildCutFilenameFromRange(cut.start, cut.end);
+      const matched = renderOutputs.find((p) => p.endsWith(expectedFile));
+      return {
+        ...cut,
+        renderedFileName: matched ? expectedFile : null,
+      };
+    });
+  }, [cuts, renderOutputs]);
 
-                  <GlassButton
-                    variant="primary"
-                    size="sm"
-                    onClick={handleRun1ClickPipeline}
-                    disabled={isAnyOperationRunning || isInspectingArchive}
-                    leadingIcon={
-                      isAnyOperationRunning ? (
-                        <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-3.5 h-3.5 text-amber-300" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                        </svg>
-                      )
-                    }
-                    className={cn(
-                      "shadow-[0_0_16px_rgba(59,130,246,0.35)] hover:shadow-[0_0_24px_rgba(59,130,246,0.55)] transition-all font-semibold text-sm",
-                      (isAnyOperationRunning || isInspectingArchive) && "opacity-60 cursor-not-allowed",
-                    )}
-                    title={
-                      isInspectingArchive
-                        ? "Volte para a tentativa ativa para iniciar o pipeline 1-Clique"
-                        : undefined
-                    }
-                  >
-                    {isAnyOperationRunning ? "Processando..." : "Gerar Shorts com 1-Clique"}
-                  </GlassButton>
-                </>
-              )}
-            </div>
+  const immersiveCut = useMemo(
+    () => (immersiveCutId ? dockCuts.find((c) => c.cut_id === immersiveCutId) ?? null : null),
+    [immersiveCutId, dockCuts],
+  );
+
+  // Determine video source URL (either rendered short MP4 or source video)
+  const isPlayingRenderedFile = Boolean(
+    immersiveCut?.renderedFileName &&
+      renderOutputs.some((p) => p.endsWith(immersiveCut.renderedFileName!)),
+  );
+
+  const videoSrc = useMemo(() => {
+    if (!activeVideo?.job?.job_id) return null;
+    if (immersiveCut?.renderedFileName) {
+      const matchedPath = renderOutputs.find((p) => p.endsWith(immersiveCut.renderedFileName!));
+      if (matchedPath) {
+        return buildRenderUrl(matchedPath);
+      }
+    }
+    return `${apiBaseUrl}/media/videos/${activeVideo.job.job_id}`;
+  }, [activeVideo?.job?.job_id, immersiveCut?.renderedFileName, renderOutputs, buildRenderUrl]);
+
+  // Single unified HTML5 video event listener (fixes duplicate timeupdate bug)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onLoadedMetadata = () => {
+      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      video.playbackRate = playbackRate;
+      video.volume = volume;
+      video.muted = muted;
+    };
+    const onTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+
+      if (immersiveCut && !isPlayingRenderedFile) {
+        if (video.currentTime >= immersiveCut.end) {
+          video.pause();
+          video.currentTime = immersiveCut.end;
+        }
+        return;
+      }
+
+      if (!immersiveCut && selectedSuggestedCutId) {
+        const selectedCut =
+          cuts.find((c) => c.cut_id === selectedSuggestedCutId) ??
+          suggestedCuts.find((c) => c.cut_id === selectedSuggestedCutId);
+        if (selectedCut && video.currentTime >= selectedCut.end && !video.paused) {
+          video.pause();
+          setSelectedSuggestedCutId(null);
+          setCutResumePositions((prev) => {
+            if (prev[selectedCut.cut_id] === undefined) return prev;
+            const next = { ...prev };
+            delete next[selectedCut.cut_id];
+            return next;
+          });
+        }
+      }
+    };
+
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("durationchange", onLoadedMetadata);
+    video.addEventListener("timeupdate", onTimeUpdate);
+
+    return () => {
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("durationchange", onLoadedMetadata);
+      video.removeEventListener("timeupdate", onTimeUpdate);
+    };
+  }, [
+    videoSrc,
+    immersiveCut,
+    isPlayingRenderedFile,
+    selectedSuggestedCutId,
+    cuts,
+    suggestedCuts,
+    playbackRate,
+    volume,
+    muted,
+  ]);
+
+  // Hide sidebar edge hint after 2s of mouse inactivity in immersive mode
+  useEffect(() => {
+    if (!immersiveCutId) {
+      setImmersiveIdle(false);
+      return;
+    }
+
+    let timer: number | null = null;
+    const resetIdle = () => {
+      setImmersiveIdle(false);
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setImmersiveIdle(true), 2000);
+    };
+
+    resetIdle();
+    window.addEventListener("mousemove", resetIdle);
+    return () => {
+      window.removeEventListener("mousemove", resetIdle);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [immersiveCutId]);
+
+  // Global keyboard shortcuts (DESIGN.md)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable;
+      const hasOpenModal =
+        showSettingsHub ||
+        showNewVideoModal ||
+        showDeleteCutConfirmDialog ||
+        Boolean(document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"]'));
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setSidebarPinned((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (hasOpenModal) return;
+        if (transcriptOpen) {
+          setTranscriptOpen(false);
+          return;
+        }
+        if (immersiveCutId) {
+          handleExitImmersive();
+          return;
+        }
+      }
+
+      if (isTyping) return;
+      if (hasOpenModal) return;
+
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "a"
+      ) {
+        if (
+          selectedSuggestedCutId &&
+          dockCuts.some((c) => c.cut_id === selectedSuggestedCutId)
+        ) {
+          e.preventDefault();
+          void handleApproveCut(selectedSuggestedCutId);
+        }
+        return;
+      }
+
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "d"
+      ) {
+        if (
+          selectedSuggestedCutId &&
+          dockCuts.some((c) => c.cut_id === selectedSuggestedCutId)
+        ) {
+          e.preventDefault();
+          void handleDiscardCut(selectedSuggestedCutId);
+        }
+        return;
+      }
+
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const buttonTarget = target?.closest('button, [role="button"]');
+        const keepNativeEnter =
+          Boolean(
+            target?.closest(
+              'a, input, textarea, select, [role="menuitem"], [role="switch"]',
+            ),
+          ) ||
+          (Boolean(buttonTarget) &&
+            !buttonTarget?.hasAttribute("data-enter-watch"));
+        if (keepNativeEnter) {
+          return;
+        }
+        if (selectedSuggestedCutId && !immersiveCutId) {
+          const selectedCut = dockCuts.find(
+            (c) => c.cut_id === selectedSuggestedCutId,
+          );
+          if (selectedCut) {
+            e.preventDefault();
+            handleWatchCut(selectedCut);
           }
+        }
+        return;
+      }
+
+      if (
+        e.key === "Delete" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        if (
+          activeVideo &&
+          selectedSuggestedCutId &&
+          dockCuts.some((c) => c.cut_id === selectedSuggestedCutId)
+        ) {
+          e.preventDefault();
+          requestDeleteSuggestedCut(selectedSuggestedCutId);
+        }
+        return;
+      }
+
+      if (e.code === "Space") {
+        if (
+          target?.closest(
+            'button, a, [role="button"], [role="menuitem"], [role="switch"], [role="slider"]',
+          )
+        ) {
+          return;
+        }
+        e.preventDefault();
+        handleTogglePlay();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        handleSeek(Math.max(0, displayedCurrentTime - 5));
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        handleSeek(Math.min(displayedDuration, displayedCurrentTime + 5));
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        if (!activeVideo) return;
+        const visible = showDiscarded ? cuts : cuts.filter((c) => c.status !== "rejected");
+        if (visible.length === 0) return;
+        const sorted = visible.slice().sort((a, b) => a.start - b.start);
+        const idx = sorted.findIndex((c) => c.cut_id === selectedSuggestedCutId);
+        if (e.key === "Home") {
+          if (idx !== -1) {
+            if (idx > 0) handleSelectCut(sorted[idx - 1].cut_id);
+          } else {
+            const prev = [...sorted].reverse().find((c) => c.start < currentTime - 0.5);
+            if (prev) handleSelectCut(prev.cut_id);
+          }
+        } else {
+          if (idx !== -1) {
+            if (idx < sorted.length - 1) handleSelectCut(sorted[idx + 1].cut_id);
+          } else {
+            const next =
+              currentTime < sorted[0].start
+                ? sorted[0]
+                : sorted.find((c) => c.start > currentTime + 0.5);
+            if (next) handleSelectCut(next.cut_id);
+          }
+        }
+      } else if (e.key === "PageUp" || e.key === "PageDown") {
+        e.preventDefault();
+        if (videoView !== "active") return;
+        const orderedVideos = videos.slice().reverse();
+        if (orderedVideos.length === 0) return;
+        const currentIdx = orderedVideos.findIndex((v) => v.job.job_id === activeVideoId);
+        if (e.key === "PageUp") {
+          if (currentIdx > 0) {
+            selectVideo(orderedVideos[currentIdx - 1].job.job_id);
+          }
+        } else {
+          if (currentIdx !== -1 && currentIdx < orderedVideos.length - 1) {
+            selectVideo(orderedVideos[currentIdx + 1].job.job_id);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  // Displayed time/duration (relative to cut when in source-based immersive mode)
+  const displayedCurrentTime =
+    immersiveCut && !isPlayingRenderedFile
+      ? Math.max(0, currentTime - immersiveCut.start)
+      : currentTime;
+
+  const displayedDuration =
+    immersiveCut && !isPlayingRenderedFile
+      ? Math.max(1, immersiveCut.end - immersiveCut.start)
+      : duration;
+
+  function handleTogglePlay() {
+    const video = videoRef.current;
+    if (!video || !videoSrc) return;
+    if (video.paused) {
+      if (immersiveCut && !isPlayingRenderedFile) {
+        if (video.currentTime < immersiveCut.start || video.currentTime >= immersiveCut.end) {
+          video.currentTime = immersiveCut.start;
+        }
+      }
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }
+
+  function handleSeek(seconds: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    if (immersiveCut && !isPlayingRenderedFile) {
+      const clamped = Math.min(
+        immersiveCut.end,
+        Math.max(immersiveCut.start, immersiveCut.start + seconds),
+      );
+      video.currentTime = clamped;
+      setCurrentTime(clamped);
+    } else {
+      const clamped = Math.max(0, Math.min(duration || seconds, seconds));
+      video.currentTime = clamped;
+      setCurrentTime(clamped);
+    }
+  }
+
+  function handleCycleSpeed() {
+    const idx = SPEED_STEPS.indexOf(playbackRate as (typeof SPEED_STEPS)[number]);
+    const next = SPEED_STEPS[(idx + 1) % SPEED_STEPS.length];
+    setPlaybackRate(next);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = next;
+    }
+  }
+
+  function handleToggleMute() {
+    const next = !muted;
+    setMuted(next);
+    if (videoRef.current) {
+      videoRef.current.muted = next;
+    }
+  }
+
+  function handleVolumeChange(vol: number) {
+    setVolume(vol);
+    if (vol > 0 && muted) setMuted(false);
+    if (videoRef.current) {
+      videoRef.current.volume = vol;
+      if (vol > 0) videoRef.current.muted = false;
+    }
+  }
+
+  function saveResumePositionForCut(cutId: string | null) {
+    if (!cutId) return;
+    const cut = cuts.find((c) => c.cut_id === cutId);
+    const t = videoRef.current?.currentTime;
+    if (!cut || typeof t !== "number" || !Number.isFinite(t)) return;
+    if (t > cut.start + 0.5 && t < cut.end - 0.5) {
+      setCutResumePositions((prev) => ({ ...prev, [cutId]: t }));
+    }
+  }
+
+  function handleSelectCut(cutId: string, options?: { seekTo?: number }) {
+    if (selectedSuggestedCutId && selectedSuggestedCutId !== cutId) {
+      saveResumePositionForCut(selectedSuggestedCutId);
+    }
+    setSelectedSuggestedCutId(cutId);
+    const cut = cuts.find((c) => c.cut_id === cutId);
+    if (cut && videoRef.current) {
+      const targetTime =
+        options?.seekTo !== undefined && Number.isFinite(options.seekTo)
+          ? Math.max(0, Math.min(duration || options.seekTo, options.seekTo))
+          : cut.start;
+      videoRef.current.currentTime = targetTime;
+      setCurrentTime(targetTime);
+      void videoRef.current.play().catch(() => {});
+    }
+  }
+
+  function handleResumeCut(cutId: string) {
+    if (selectedSuggestedCutId && selectedSuggestedCutId !== cutId) {
+      saveResumePositionForCut(selectedSuggestedCutId);
+    }
+    const cut = cuts.find((c) => c.cut_id === cutId);
+    if (!cut) return;
+    const saved = cutResumePositions[cutId];
+    const maxResume = Math.max(cut.start, cut.end - 0.5);
+    const resumeAt =
+      typeof saved === "number" && Number.isFinite(saved)
+        ? Math.min(maxResume, Math.max(cut.start, saved))
+        : cut.start;
+    setSelectedSuggestedCutId(cutId);
+    if (videoRef.current) {
+      videoRef.current.currentTime = resumeAt;
+      setCurrentTime(resumeAt);
+      void videoRef.current.play().catch(() => {});
+    }
+  }
+
+  function handlePrevNextCut(direction: -1 | 1) {
+    const visible = showDiscarded ? cuts : cuts.filter((c) => c.status !== "rejected");
+    if (visible.length === 0) return;
+    const sorted = visible.slice().sort((a, b) => a.start - b.start);
+    const idx = sorted.findIndex((c) => c.cut_id === selectedSuggestedCutId);
+    const nextIdx =
+      idx === -1
+        ? direction === 1
+          ? 0
+          : sorted.length - 1
+        : (idx + direction + sorted.length) % sorted.length;
+    handleSelectCut(sorted[nextIdx].cut_id);
+  }
+
+  function handleWatchCut(cut: DockCutItem) {
+    if (videoRef.current) {
+      immersiveRestoreTimeRef.current = videoRef.current.currentTime;
+    }
+    setSelectedSuggestedCutId(cut.cut_id);
+    setImmersiveCutId(cut.cut_id);
+    setDockCollapsed(true);
+
+    if (!cut.renderedFileName && videoRef.current) {
+      videoRef.current.currentTime = cut.start;
+      void videoRef.current.play().catch(() => {});
+    }
+  }
+
+  function handleExitImmersive() {
+    setImmersiveCutId(null);
+    setDockCollapsed(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = immersiveRestoreTimeRef.current || 0;
+    }
+  }
+
+  async function persistUpdatedCuts(nextCuts: typeof cuts) {
+    setCuts(nextCuts);
+    setSuggestedCuts(nextCuts);
+    if (activeVideo?.job.job_id) {
+      try {
+        await updateCuts(activeVideo.job.job_id, nextCuts);
+      } catch (err: any) {
+        setAction({
+          busy: false,
+          error: err?.message || "Não foi possível salvar as alterações no corte.",
+        });
+      }
+    }
+  }
+
+  function handleApproveCut(cutId: string) {
+    const nextCuts = cuts.map((c) =>
+      c.cut_id === cutId ? { ...c, status: "approved" as const } : c,
+    );
+    void persistUpdatedCuts(nextCuts);
+  }
+
+  function handleDiscardCut(cutId: string) {
+    const nextCuts = cuts.map((c) =>
+      c.cut_id === cutId ? { ...c, status: "rejected" as const } : c,
+    );
+    if (selectedSuggestedCutId === cutId) {
+      setSelectedSuggestedCutId(null);
+    }
+    void persistUpdatedCuts(nextCuts);
+  }
+
+  function handleAdjustCutTime(cutId: string, field: "start" | "end", delta: number) {
+    const nextCuts = cuts.map((c) => {
+      if (c.cut_id !== cutId) return c;
+      if (field === "start") {
+        const nextStart = Math.max(0, Math.min(c.end - 5, c.start + delta));
+        return { ...c, start: nextStart };
+      } else {
+        const maxEnd = duration > 0 ? duration : c.end + 60;
+        const nextEnd = Math.min(maxEnd, Math.max(c.start + 5, c.end + delta));
+        return { ...c, end: nextEnd };
+      }
+    });
+    void persistUpdatedCuts(nextCuts);
+  }
+
+  function handleRenameCut(cutId: string, title: string) {
+    const nextCuts = cuts.map((c) => (c.cut_id === cutId ? { ...c, title } : c));
+    void persistUpdatedCuts(nextCuts);
+  }
+
+  function handleDownloadRenderedCut(fileName: string) {
+    const matchedPath = renderOutputs.find((p) => p.endsWith(fileName));
+    if (!matchedPath) return;
+    const url = buildRenderUrl(matchedPath);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+  }
+
+  async function handleGenerateCuts() {
+    if (!activeVideo) return;
+    const targetJobId = activeVideo.job.job_id;
+    const check = canStartOperation(targetJobId);
+    if (!check.allowed) {
+      setAction({ busy: false, error: check.message });
+      return;
+    }
+
+    activeBatchJobIdRef.current = targetJobId;
+    setActiveBatchJobId(targetJobId);
+    markJobProcessing(targetJobId, true);
+    try {
+      await startSingleJobPipeline(targetJobId, {
+        transcription: true,
+        analysis: true,
+        render: true,
+        preApprove: reviewBeforeRender,
+      });
+    } catch (err: any) {
+      if (activeBatchJobIdRef.current === targetJobId) {
+        activeBatchJobIdRef.current = null;
+      }
+      setActiveBatchJobId((prev) => (prev === targetJobId ? null : prev));
+      markJobProcessing(targetJobId, false);
+      setAction({
+        busy: false,
+        error: err?.message || "Não foi possível iniciar a geração de cortes.",
+      });
+    }
+  }
+
+  async function handleCancelProcessing() {
+    const currentTargetJobId = activeBatchJobIdRef.current ?? activeVideo?.job.job_id ?? null;
+    if (activeBatchId && isBatchProcessing) {
+      await cancelBatchPipelineDialog();
+      if (currentTargetJobId) {
+        markJobProcessing(currentTargetJobId, false);
+      }
+      activeBatchJobIdRef.current = null;
+      setActiveBatchJobId(null);
+      return;
+    }
+    if (activeVideo?.isTranscribing) {
+      await cancelActiveTranscription();
+      markJobProcessing(activeVideo.job.job_id, false);
+      return;
+    }
+    if (isRendering) {
+      const targetRenderJobId =
+        renderingJobId ?? renderingJobIdRef.current ?? activeVideo?.job.job_id ?? null;
+      await cancelActiveRendering();
+      if (targetRenderJobId) {
+        markJobProcessing(targetRenderJobId, false);
+      }
+      renderingJobIdRef.current = null;
+    }
+  }
+
+  async function loadTranscriptAndBlocksForJob(jobId: string, shouldLoadBlocks: boolean) {
+    const isArchived =
+      !videos.some((v) => v.job.job_id === jobId) &&
+      archivedVideos.some((v) => v.job.job_id === jobId);
+    const targetVideo =
+      videos.find((v) => v.job.job_id === jobId) ??
+      archivedVideos.find((v) => v.job.job_id === jobId);
+    const needsTranscriptionHydration =
+      !targetVideo?.transcription && !(targetVideo?.transcriptionSegments?.length);
+
+    const tasks: Promise<void>[] = [];
+
+    if (needsTranscriptionHydration) {
+      tasks.push(
+        getTranscription(jobId)
+          .then((result) => {
+            if (!result?.transcription && !(result?.segments?.length)) return;
+            const updater = isArchived ? updateArchivedVideo : updateVideo;
+            updater(jobId, {
+              transcription: result.transcription || "",
+              transcriptionSegments: (result.segments as unknown as Segment[]) || [],
+              transcriptionFormats: result.available_formats,
+              hasTranscription: true,
+            });
+          })
+          .catch(() => {
+            // Silent fallback when transcription is not yet generated
+          }),
+      );
+    }
+
+    if (shouldLoadBlocks) {
+      markJobProcessing(jobId, true);
+      tasks.push(
+        buildBlocks(jobId)
+          .then((res) => {
+            if (activeVideoIdRef.current === jobId && Array.isArray(res)) {
+              blocksJobIdRef.current = jobId;
+              setBlocks(res);
+            }
+          })
+          .catch(() => {
+            // Silent fallback when blocks are not yet generated
+          })
+          .finally(() => {
+            markJobProcessing(jobId, false);
+          }),
+      );
+    }
+
+    await Promise.all(tasks);
+  }
+
+  async function handleOpenVideoTranscript(jobId: string) {
+    if (jobId !== activeVideoId) {
+      activeVideoIdRef.current = jobId;
+      blocksJobIdRef.current = null;
+      setBlocks([]);
+      setTranscriptOpen(true);
+      selectVideo(jobId, true);
+      await loadTranscriptAndBlocksForJob(jobId, true);
+      return;
+    }
+
+    const nextOpen = !transcriptOpen;
+    setTranscriptOpen(nextOpen);
+    if (nextOpen) {
+      await loadTranscriptAndBlocksForJob(jobId, blocks.length === 0);
+    }
+  }
+
+  async function handleToggleTranscript() {
+    const next = !transcriptOpen;
+    setTranscriptOpen(next);
+    if (next && activeVideo) {
+      await loadTranscriptAndBlocksForJob(activeVideo.job.job_id, blocks.length === 0);
+    }
+  }
+
+  function applyToolConfigs(response: { active: ToolConfigs; source?: "default" | "custom" }) {
+    const active = response.active;
+    setWhisperConfig(active.whisper || {});
+    setWhisperDevice(active.whisper.device === "cpu" ? "cpu" : "cuda");
+    setWhisperFormats(
+      Array.isArray(active.whisper.output_format)
+        ? active.whisper.output_format
+        : ["json", "vtt", "txt"],
+    );
+    setFfmpegConfig(active.ffmpeg || null);
+    const configuredModel = String(active.llm.model || "").trim();
+    const configuredEmbeddingModel =
+      String(active.llm.embedding_model || "nomic-embed-text").trim() || "nomic-embed-text";
+    const configuredEmbeddingModels = Array.isArray(active.llm.registered_embedding_models)
+      ? active.llm.registered_embedding_models
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+      : [];
+    const embeddingModelSet = new Set(configuredEmbeddingModels);
+    embeddingModelSet.add(configuredEmbeddingModel);
+
+    setLlmModel(configuredModel);
+    setEmbeddingModel(configuredEmbeddingModel);
+    setRegisteredEmbeddingModels(Array.from(embeddingModelSet));
+    setOllamaModels((prev) => mergeModelOptions(prev, [configuredModel]));
+    setLlmSystemPrompt(active.llm.system_prompt || "");
+  }
+
+  function prepareSettingsSection(section: SectionId) {
+    if (section === "dependencies") {
+      void prepareDependenciesDialog();
+    } else if (section === "ai-model" || section === "ai-search") {
+      void refreshOllamaModelOptions(false);
+    } else if (section === "batch") {
+      if (!isBatchProcessing) {
+        openBatchPipelineDialog();
+        setShowBatchPipelineDialog(false);
+      }
+    }
+  }
+
+  function openSettingsAt(section: SectionId = "app-folders") {
+    setSettingsInitialSection(section);
+    setShowSettingsHub(true);
+    prepareSettingsSection(section);
+  }
+
+  async function handleAutoSaveAppSettings(patch: AppSettingsPatch): Promise<void> {
+    const updated = await saveSettings({
+      media: {
+        base_dir: patch.baseDir ?? configBaseDir,
+        download_resolution:
+          patch.downloadResolution ??
+          (configDownloadResolution as DownloadResolution),
+      },
+      preferences: {
+        ask_move_on_upload: appSettings?.preferences?.ask_move_on_upload ?? true,
+        move_uploads: appSettings?.preferences?.move_uploads ?? false,
+        ask_delete_cut_confirm:
+          patch.askDeleteCutConfirm ??
+          appSettings?.preferences?.ask_delete_cut_confirm ??
+          true,
+      },
+    });
+    setAppSettings(updated);
+    setConfigBaseDir(updated.media.base_dir);
+    setConfigDownloadResolution(updated.media.download_resolution || "1080p");
+  }
+
+  async function handleAutoSaveLLM(patch: LLMAutoSavePatch): Promise<void> {
+    const nextModel = patch.model ?? llmModel;
+    const nextPrompt = patch.system_prompt ?? llmSystemPrompt;
+    const nextEmbeddingModel = patch.embedding_model ?? embeddingModel;
+    const nextRegisteredEmbeddingModels =
+      patch.registered_embedding_models ?? registeredEmbeddingModels;
+
+    setLlmModel(nextModel);
+    setLlmSystemPrompt(nextPrompt);
+    setEmbeddingModel(nextEmbeddingModel);
+    setRegisteredEmbeddingModels(nextRegisteredEmbeddingModels);
+
+    const response = await saveToolConfigs({
+      llm: {
+        model: nextModel,
+        system_prompt: nextPrompt,
+        embedding_model: nextEmbeddingModel,
+        registered_embedding_models: nextRegisteredEmbeddingModels,
+      },
+    });
+    applyToolConfigs(response);
+  }
+
+  async function handleAutoSaveWhisper(patch: Partial<WhisperConfig>): Promise<void> {
+    const merged: Partial<WhisperConfig> = {
+      ...(whisperConfig || {}),
+      ...patch,
+    };
+    const device =
+      merged.device === "cpu"
+        ? "cpu"
+        : merged.device === "cuda"
+          ? "cuda"
+          : whisperDevice;
+    const outputFormats = (
+      Array.isArray(merged.output_format) ? merged.output_format : whisperFormats
+    ) as WhisperConfig["output_format"];
+
+    const response = await saveToolConfigs({
+      whisper: { ...merged, device, output_format: outputFormats },
+    });
+    applyToolConfigs(response);
+  }
+
+  async function handleAutoSaveFFmpeg(nextConfig: FFmpegConfig): Promise<void> {
+    const response = await saveToolConfigs({ ffmpeg: nextConfig });
+    applyToolConfigs(response);
+  }
+
+  async function handleMoveUploadDecision(moveUploads: boolean) {
+    const askAgain = !dontAskMoveUpload;
+    try {
+      const updated = await saveSettings({
+        preferences: {
+          ask_move_on_upload: askAgain,
+          move_uploads: moveUploads,
+          ask_delete_cut_confirm: appSettings?.preferences?.ask_delete_cut_confirm ?? true,
+        },
+      });
+      setAppSettings(updated);
+    } catch (error) {
+      console.error("Failed to save upload preferences:", error);
+    }
+    setShowMoveUploadDialog(false);
+    setDontAskMoveUpload(false);
+
+    if (selectedFiles.length > 0) {
+      for (const file of selectedFiles) {
+        await runAction(
+          () => uploadVideoFile(file),
+          (result) => {
+            upsertVideoIntoList({
+              job: result.job,
+              transcriptionLogs: [],
+              videoPath: result.video_path,
+            });
+          },
+        );
+      }
+      setSelectedFiles([]);
+      await loadVideos();
+    }
+  }
+
+  const discardedCount = useMemo(
+    () => cuts.filter((c) => c.status === "rejected").length,
+    [cuts],
+  );
+
+  // Sync preset selection with active preset metadata if needed
+  const activePresetObj = useMemo(
+    () => CUT_PRESETS.find((p) => p.id === selectedPreset) ?? CUT_PRESETS[1],
+    [selectedPreset],
+  );
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-bg text-text-1 select-none">
+      {/* Palco principal de vídeo */}
+      <ImmersiveVideoStage
+        videoRef={videoRef}
+        videoSrc={videoSrc}
+        sidebarPinned={sidebarPinned}
+        sidebarSide={sidebarSide}
+        hasActiveVideo={Boolean(activeVideo)}
+        dockCollapsed={dockCollapsed}
+        dockHidden={dockCollapsed && !dockMinimizedVisible}
+        onTogglePlay={handleTogglePlay}
+        onVideoAdded={upsertVideoIntoList}
+        onLoadVideos={loadVideos}
+        onError={(msg) => setAction({ busy: false, error: msg })}
+      />
+
+      {/* Barra lateral estilo Arc */}
+      <ArcSidebar
+        videos={videos}
+        archivedVideos={archivedVideos}
+        activeVideoId={activeVideoId}
+        videoView={videoView}
+        apiBaseUrl={apiBaseUrl}
+        pinned={sidebarPinned}
+        side={sidebarSide}
+        open={sidebarOpen}
+        immersiveIdle={immersiveIdle}
+        activeVideoHasTranscription={Boolean(
+          activeVideo?.transcription || (activeVideo?.transcriptionSegments?.length ?? 0) > 0,
+        )}
+        processingJobIds={processingJobIds}
+        onSetOpen={setSidebarOpen}
+        onTogglePin={() => setSidebarPinned((p) => !p)}
+        onToggleSide={() => setSidebarSide((s) => (s === "left" ? "right" : "left"))}
+        onSelectVideo={(jobId) => selectVideo(jobId)}
+        onOpenTranscript={(jobId) => void handleOpenVideoTranscript(jobId)}
+        onSetView={setVideoView}
+        onNewVideo={() => setShowNewVideoModal(true)}
+        onOpenSettings={() => openSettingsAt("app-folders")}
+        onOpenFolder={(jobId) => void runAction(() => openVideoFolder(jobId))}
+        onRenameVideo={(jobId, currentName) => {
+          setRenameVideoId(jobId);
+          setRenameVideoNewName(currentName);
+        }}
+        onArchiveVideo={(jobId) =>
+          void runAction(
+            () => archiveVideo(jobId),
+            () => {
+              if (activeVideoId === jobId) setActiveVideoId(null);
+              void loadVideos();
+            },
+          )
+        }
+        onDeleteVideo={(jobId) =>
+          void runAction(
+            () => deleteVideo(jobId),
+            () => {
+              if (activeVideoId === jobId) setActiveVideoId(null);
+              void loadVideos();
+            },
+          )
+        }
+      />
+
+      {/* Controles flutuantes superiores */}
+      <FloatingChrome
+        sidebarPinned={sidebarPinned}
+        sidebarSide={sidebarSide}
+        sidebarOpen={sidebarOpen}
+        immersiveCutTitle={immersiveCut?.title ?? null}
+        onExitImmersive={handleExitImmersive}
+        onOpenSettings={() => openSettingsAt("app-folders")}
+      />
+
+      {/* Dock inferior de vidro fosco */}
+      {activeVideo && (
+        <GlassDock
+          key={activeVideo.job.job_id}
+          sidebarPinned={sidebarPinned}
+          sidebarSide={sidebarSide}
+          collapsed={dockCollapsed}
+          isImmersive={Boolean(immersiveCut)}
+          isPlaying={isPlaying}
+          currentTime={displayedCurrentTime}
+          duration={displayedDuration}
+          playbackRate={playbackRate}
+          volume={volume}
+          muted={muted}
+          videoSrc={videoSrc}
+          jobStatus={activeVideo.job.status}
+          isActivelyProcessing={Boolean(
+            activeVideo && processingJobIds.has(activeVideo.job.job_id),
+          )}
+          jobError={
+            (activeVideo.job as { error_message?: string | null; error?: string | null })
+              .error_message ??
+            (activeVideo.job as { error?: string | null }).error ??
+            null
+          }
+          cuts={dockCuts}
+          selectedCutId={selectedSuggestedCutId}
+          showDiscarded={showDiscarded}
+          selectedPreset={activePresetObj.id}
+          reviewBeforeRender={reviewBeforeRender}
+          waitingApproval={batchWaitingForApproval}
+          transcriptOpen={transcriptOpen}
+          cutResumePositions={cutResumePositions}
+          onResumeCut={handleResumeCut}
+          isRenderingCuts={
+            Boolean(isRendering && renderingJobId === activeVideo.job.job_id) ||
+            Boolean(
+              isBatchProcessing &&
+                activeVideo &&
+                (activeVideo.job.status === "RENDERING" || sseJobStatus === "RENDERING") &&
+                processingJobIds.has(activeVideo.job.job_id),
+            )
+          }
+          onToggleCollapsed={() => setDockCollapsed((c) => !c)}
+          onMinimizedVisibilityChange={setDockMinimizedVisible}
+          onTogglePlay={handleTogglePlay}
+          onSeek={handleSeek}
+          onPrevCut={() => handlePrevNextCut(-1)}
+          onNextCut={() => handlePrevNextCut(1)}
+          onCycleSpeed={handleCycleSpeed}
+          onToggleMute={handleToggleMute}
+          onVolumeChange={handleVolumeChange}
+          onToggleTranscript={() => void handleToggleTranscript()}
+          onSelectCut={handleSelectCut}
+          onWatchCut={handleWatchCut}
+          onApproveCut={handleApproveCut}
+          onDiscardCut={handleDiscardCut}
+          onAdjustCutTime={handleAdjustCutTime}
+          onRenameCut={handleRenameCut}
+          onDeleteCut={requestDeleteSuggestedCut}
+          onDownloadRenderedCut={handleDownloadRenderedCut}
+          onOpenRenderedFolder={(fileName) => void openRenderOutputFolder(fileName)}
+          onOpenVideoFolder={() =>
+            activeVideo && void runAction(() => openVideoFolder(activeVideo.job.job_id))
+          }
+          onDeleteRenderedCut={(fileName) => void deleteRenderOutputFile(fileName)}
+          onChangePreset={setSelectedPreset}
+          onToggleReviewBefore={() => setReviewBeforeRender((r) => !r)}
+          onGenerateCuts={() => void handleGenerateCuts()}
+          onContinueApproval={() => void continueActiveBatchPipeline()}
+          onCancelProcessing={() => void handleCancelProcessing()}
+          onRetryError={() => void handleGenerateCuts()}
         />
-
-        {/* Real-time SSE Progress Banner */}
-        {showProgressBanner && (
-          <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-blue-950/80 via-[#0d1224]/90 to-[#07080b]/90 border-b border-blue-500/25 backdrop-blur-xl flex items-center justify-between gap-4 z-30 transition-all duration-300 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex-none">
-                <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping absolute" />
-                <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-xs tracking-wide uppercase text-blue-300">
-                    {STATUS_DESCRIPTIONS[activeStatus || ""] || activeStatus || "Processando"}
-                  </span>
-                  {etaSeconds !== null && etaSeconds !== undefined && etaSeconds > 0 && (
-                    <span className="text-xs font-mono font-medium text-cyan-300 bg-cyan-950/60 px-2.5 py-0.5 rounded-md border border-cyan-500/30">
-                      {formatEtaSeconds(etaSeconds)}
-                    </span>
-                  )}
-                </div>
-                {currentMessage && (
-                  <p className="text-xs text-zinc-200 truncate max-w-md sm:max-w-xl mt-0.5">
-                    {currentMessage}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Barra de Progresso + % e Botão de Cancelar Cooperativo */}
-            <div className="flex items-center gap-4 flex-none">
-              <div className="flex items-center gap-2.5">
-                <div className="w-28 sm:w-48 h-2 rounded-full bg-white/10 overflow-hidden border border-white/10 relative">
-                  <div
-                    className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out"
-                    style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                  />
-                </div>
-                <span className="font-mono text-sm font-bold text-white min-w-[3rem] text-right">
-                  {progress.toFixed(0)}%
-                </span>
-              </div>
-
-              <GlassButton
-                variant="danger"
-                size="sm"
-                onClick={handleCancelActiveOperation}
-                leadingIcon={
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                }
-              >
-                Cancelar
-              </GlassButton>
-            </div>
-          </div>
-        )}
-
-        {/* Banner de Inspeção de Tentativa Arquivada (Somente Leitura) */}
-        {isInspectingArchive && inspectingAttempt && (
-          <div className="flex-none px-4 py-2.5 bg-gradient-to-r from-amber-950/80 via-[#1c1608]/90 to-[#0c0c0e]/95 border-b border-amber-400/30 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
-            <div className="flex items-center gap-3 min-w-0 flex-wrap">
-              <div className="flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-200">
-                <svg
-                  className="w-3.5 h-3.5 text-amber-300 flex-shrink-0"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="21 8 21 21 3 21 3 8" />
-                  <rect x="1" y="3" width="22" height="5" />
-                  <line x1="10" y1="12" x2="14" y2="12" />
-                </svg>
-                <span>Tentativa Arquivada: {inspectingAttempt.detail.attempt.label}</span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs text-zinc-300 flex-wrap">
-                {formatAttemptTimestamp(
-                  inspectingAttempt.detail.attempt.archived_at ||
-                    inspectingAttempt.detail.attempt.created_at,
-                ) && (
-                  <span className="text-zinc-400">
-                    {formatAttemptTimestamp(
-                      inspectingAttempt.detail.attempt.archived_at ||
-                        inspectingAttempt.detail.attempt.created_at,
-                    )}
-                  </span>
-                )}
-                <span className="rounded bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 text-[11px]">
-                  {archivedCuts.length} {archivedCuts.length === 1 ? "corte" : "cortes"}
-                </span>
-                <span className="rounded bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[11px] text-emerald-300">
-                  {archivedRenderOutputs.length}{" "}
-                  {archivedRenderOutputs.length === 1 ? "render" : "renders"}
-                </span>
-                <span className="rounded bg-zinc-800/80 border border-white/10 px-2 py-0.5 text-[11px] text-zinc-300">
-                  Somente leitura
-                </span>
-              </div>
-
-              {studioTab === "workspace" && archivedCuts.length > 0 && (
-                <div className="flex items-center gap-1 flex-wrap">
-                  {archivedCuts.map((cut, idx) => {
-                    const isCutActive = cut.cut_id === effectiveSelectedCutId;
-                    return (
-                      <button
-                        key={cut.cut_id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedArchivedCutId(cut.cut_id);
-                          videoPlayerHandleRef.current?.seek(cut.start);
-                          void videoPlayerHandleRef.current?.play();
-                        }}
-                        title={
-                          cut.title ||
-                          `Corte ${idx + 1} (${formatTimestamp(cut.start)} - ${formatTimestamp(cut.end)})`
-                        }
-                        className={cn(
-                          "rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
-                          isCutActive
-                            ? "border-amber-400/50 bg-amber-400/20 text-amber-200"
-                            : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-amber-400/30 hover:text-white",
-                        )}
-                      >
-                        #{idx + 1} · {formatTimestamp(cut.start)}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 flex-none">
-              <GlassButton
-                variant="glass"
-                size="sm"
-                onClick={handleExitArchivedInspection}
-                className="text-xs border-white/15 hover:border-white/30"
-              >
-                Voltar para tentativa ativa
-              </GlassButton>
-              <GlassButton
-                variant="primary"
-                size="sm"
-                disabled={archivingJobId === activeVideoId || isAnyOperationRunning}
-                onClick={() => void handleStartNewAttemptFromBanner()}
-                className="text-xs"
-              >
-                {archivingJobId === activeVideoId ? "Preparando..." : "Iniciar nova tentativa"}
-              </GlassButton>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex overflow-hidden @container/workspace">
-          {studioTab === "workspace" && (
-            <>
-              {/* Coluna 1: Biblioteca de Vídeos */}
-              <VideoLibrarySidebar
-                videos={workspaceVideos}
-                selectedVideoId={activeVideoId}
-                onSelectVideo={(id) => {
-                  const validation = canStartOperation(id);
-                  if (!validation.allowed) {
-                    console.warn(`[UI] ${validation.message}`);
-                    alert(validation.message);
-                    return;
-                  }
-                  handleExitArchivedInspection();
-                  setActiveVideoId(id);
-                }}
-                onImportClick={() => setShowUploadModal(true)}
-                onTranscribeVideo={(id) => handleDirectTranscribe(id)}
-                onGenerateCuts={(id) => handleDirectAnalyze(id)}
-                attemptsByVideoId={attemptsByJobId}
-                loadingAttemptsByVideoId={loadingAttemptsByJobId}
-                selectedAttemptKey={
-                  isInspectingArchive && inspectingAttempt
-                    ? { jobId: inspectingAttempt.jobId, attemptId: inspectingAttempt.attemptId }
-                    : null
-                }
-                onToggleAttemptsDrawer={(videoId, expanded) => {
-                  if (expanded) {
-                    void loadAttemptsForJob(videoId);
-                  }
-                }}
-                onSelectAttempt={(jobId, attemptId) => void handleSelectArchivedAttempt(jobId, attemptId)}
-                onArchiveAndReset={(jobId) => void handleArchiveAttempt(jobId, true)}
-                onArchiveCopy={(jobId) => void handleArchiveAttempt(jobId, false)}
-                onDeleteAttempt={(jobId, attemptId) => void handleDeleteAttempt(jobId, attemptId)}
-                archivingVideoId={archivingJobId}
-              />
-
-              {/* Coluna 2: Player, Terminal de Logs e Transcrição Interativa com Painéis Estruturados e Colapsáveis */}
-              <main className="flex-1 flex flex-col min-w-0 overflow-hidden p-[clamp(0.5rem,1.2cqi,0.75rem)] gap-[clamp(0.5rem,1.2cqi,0.75rem)]">
-                {/* 1. Card do Player de Vídeo Master 16:9 */}
-                <div
-                  className={cn(
-                    "flex flex-col min-h-0 overflow-hidden transition-all duration-300",
-                    expandVideoPlayerSection && expandTranscriptSection
-                      ? "flex-1 min-h-[160px]"
-                      : expandVideoPlayerSection && !expandTranscriptSection
-                        ? "flex-1 h-full min-h-[220px]"
-                        : "h-auto flex-none",
-                  )}
-                >
-                  <VideoPlayerView
-                    ref={videoPlayerHandleRef}
-                    className="h-full flex flex-col justify-between"
-                    src={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
-                    title={activeVideo?.job.video_name || activeVideo?.job.youtube_url}
-                    status={activeStatus}
-                    archiveLabel={
-                      isInspectingArchive && inspectingAttempt
-                        ? inspectingAttempt.detail.attempt.label
-                        : null
-                    }
-                    cuts={effectiveCuts}
-                    selectedCutId={effectiveSelectedCutId}
-                    onSelectCut={(cutId) => {
-                      if (isInspectingArchive) {
-                        const found = archivedCuts.find((c) => c.cut_id === cutId);
-                        if (found) {
-                          setSelectedArchivedCutId(found.cut_id);
-                          videoPlayerHandleRef.current?.seek(found.start);
-                          void videoPlayerHandleRef.current?.play();
-                        }
-                        return;
-                      }
-                      const found = suggestedCuts.find((c) => c.cut_id === cutId);
-                      if (found) selectSuggestedCut(found);
-                    }}
-                    onClearSelectedCut={() => {
-                      if (isInspectingArchive) {
-                        setSelectedArchivedCutId(null);
-                        return;
-                      }
-                      clearSelectedSuggestedCut();
-                    }}
-                    onTimeUpdate={setCurrentVideoTime}
-                    isExpanded={expandVideoPlayerSection}
-                    onToggleExpanded={() => setExpandVideoPlayerSection((prev) => !prev)}
-                  />
-                </div>
-
-                {/* 2. Card de Feedback em Tempo Real Durante Processamento (Liquid Glass com Ponto Pulsante, ETA, Barra e Mini Console) */}
-                {(isVideoProcessing || is1ClickRunning) && (
-                  <div className="flex-none transition-all duration-300">
-                    <LiveTaskFeedbackCard
-                      status={activeStatus}
-                      progress={progress}
-                      etaSeconds={etaSeconds}
-                      currentMessage={currentMessage}
-                      logs={allLogs}
-                      onCancel={handleCancelActiveOperation}
-                      isExpanded={expandTerminalSection}
-                      onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
-                    />
-                  </div>
-                )}
-
-                {/* 3. Card de Terminal / Logs de Execução Histórico (Abaixo do Vídeo e Acima da Transcrição) */}
-                {!(isVideoProcessing || is1ClickRunning) && (
-                  <div className="flex-none transition-all duration-300">
-                    <TerminalLogsView
-                      logs={allLogs}
-                      activeTask={activeTaskLogType || (is1ClickRunning ? "1-Clique" : isRendering ? "Render" : activeVideo?.isTranscribing ? "Whisper" : null)}
-                      isProcessing={Boolean(isAnyOperationRunning)}
-                      isExpanded={expandTerminalSection}
-                      onToggleExpanded={() => setExpandTerminalSection((prev) => !prev)}
-                      onClearLogs={clearLogs}
-                    />
-                  </div>
-                )}
-
-                {/* 3. Card de Transcrição Interativa */}
-                <div
-                  className={cn(
-                    "flex flex-col min-h-0 overflow-hidden transition-all duration-300",
-                    expandVideoPlayerSection && expandTranscriptSection
-                      ? "flex-1 min-h-[160px]"
-                      : !expandVideoPlayerSection && expandTranscriptSection
-                        ? "flex-1 h-full min-h-[220px]"
-                        : "h-auto flex-none",
-                  )}
-                >
-                  <TranscriptInteractiveView
-                    segments={effectiveSegments}
-                    currentTime={currentVideoTime}
-                    activeCut={effectiveSelectedCut}
-                    onSeek={(seconds) => videoPlayerHandleRef.current?.seek(seconds)}
-                    onCreateCutFromSelection={
-                      isInspectingArchive ? undefined : handleCreateCutFromTranscript
-                    }
-                    onRequestTranscription={
-                      isInspectingArchive ? undefined : () => handleDirectTranscribe()
-                    }
-                    onGenerateCuts={
-                      isInspectingArchive ? undefined : () => handleDirectAnalyze()
-                    }
-                    isLoading={
-                      isInspectingArchive
-                        ? isLoadingAttemptDetail
-                        : action.busy || isAnalyzing
-                    }
-                    isExpanded={expandTranscriptSection}
-                    onToggleExpanded={() => setExpandTranscriptSection((prev) => !prev)}
-                  />
-                </div>
-              </main>
-
-              {/* Coluna 3: Inspetor do Short 9:16 */}
-              <ShortInspectorView
-                cut={effectiveSelectedCut}
-                cuts={effectiveCuts}
-                videoSrc={activeVideo?.videoPath ? `${apiBaseUrl}${activeVideo.videoPath}` : undefined}
-                renderOutputs={effectiveRenderOutputs}
-                renderTitlesByFileName={effectiveRenderTitlesByFileName}
-                buildRenderUrl={buildRenderUrl}
-                readOnly={isInspectingArchive}
-                isRendering={isInspectingArchive ? false : isRendering}
-                onSelectCut={(cutId) => {
-                  if (isInspectingArchive) {
-                    const found = archivedCuts.find((c) => c.cut_id === cutId);
-                    if (found) {
-                      setSelectedArchivedCutId(found.cut_id);
-                      videoPlayerHandleRef.current?.seek(found.start);
-                      void videoPlayerHandleRef.current?.play();
-                    }
-                    return;
-                  }
-                  const found = suggestedCuts.find((c) => c.cut_id === cutId);
-                  if (found) selectSuggestedCut(found);
-                }}
-                onAdjustStart={isInspectingArchive ? undefined : handleQuickAdjustStart}
-                onAdjustEnd={isInspectingArchive ? undefined : handleQuickAdjustEnd}
-                onApproveCut={
-                  isInspectingArchive ? undefined : (cutId) => void approveSingleCut(cutId)
-                }
-                onRejectCut={
-                  isInspectingArchive ? undefined : (cutId) => void rejectSingleCut(cutId)
-                }
-                onApproveAllCuts={
-                  isInspectingArchive ? undefined : () => void approveAllSuggestedCuts()
-                }
-                onRejectAllCuts={
-                  isInspectingArchive ? undefined : () => void rejectAllSuggestedCuts()
-                }
-                onRenderApprovedCuts={
-                  isInspectingArchive
-                    ? undefined
-                    : () => {
-                        if (!activeVideo) return;
-                        const validation = canStartOperation(activeVideo.job.job_id);
-                        if (!validation.allowed) {
-                          alert(validation.message);
-                          return;
-                        }
-                        void startRenderFlow();
-                      }
-                }
-                onRenderShort={
-                  isInspectingArchive
-                    ? undefined
-                    : () => {
-                        if (!activeVideo) return;
-                        const validation = canStartOperation(activeVideo.job.job_id);
-                        if (!validation.allowed) {
-                          alert(validation.message);
-                          return;
-                        }
-                        void startRenderFlow();
-                      }
-                }
-                onDiscardCut={
-                  isInspectingArchive ? undefined : (cutId) => requestDeleteSuggestedCut(cutId)
-                }
-              />
-            </>
-          )}
-
-          {studioTab === "render-queue" && (
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div className="max-w-4xl mx-auto space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
-                  <div>
-                    <h2 className="text-base font-semibold text-white tracking-tight">Fila de Processamento & Batch</h2>
-                    <p className="text-xs text-text-3 mt-0.5">Acompanhe tarefas em segundo plano, transcrição e renderização em lote.</p>
-                  </div>
-                  <GlassButton
-                    variant="primary"
-                    onClick={openBatchPipelineDialog}
-                    leadingIcon={
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                    }
-                  >
-                    Iniciar Processamento em Lote
-                  </GlassButton>
-                </div>
-
-                {isBatchProcessing ? (
-                  <GlassCard className="p-5 border-white/15 bg-[#0e0e14]/90 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                        <span className="text-sm font-semibold text-white">Processamento em Lote Ativo</span>
-                      </div>
-                      <span className="font-mono text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                        Em andamento
-                      </span>
-                    </div>
-
-                    {batchProcessingLogs.length > 0 && (
-                      <div className="h-44 overflow-y-auto font-mono text-xs text-zinc-300 bg-black/60 p-3 rounded-xl border border-white/10 space-y-1">
-                        {batchProcessingLogs.map((log, i) => (
-                          <div key={i} className="leading-relaxed">{log}</div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/[0.06]">
-                      <GlassButton
-                        variant="danger"
-                        size="sm"
-                        onClick={cancelBatchPipelineDialog}
-                        leadingIcon={
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                        }
-                      >
-                        Cancelar Lote
-                      </GlassButton>
-                    </div>
-                  </GlassCard>
-                ) : (
-                  <GlassCard className="p-8 border-white/10 bg-white/[0.02] text-center space-y-3">
-                    <div className="w-12 h-12 rounded-2xl bg-white/[0.05] border border-white/10 mx-auto flex items-center justify-center text-zinc-400">
-                      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-white">Nenhum processamento em lote em execução</p>
-                      <p className="text-xs text-zinc-400 mt-1 max-w-md mx-auto">
-                        Inicie um lote para transcrever múltiplos vídeos, extrair blocos semânticos e gerar cortes sugeridos automaticamente.
-                      </p>
-                    </div>
-                    <div className="pt-2">
-                      <GlassButton
-                        variant="glass"
-                        size="sm"
-                        onClick={openBatchPipelineDialog}
-                        leadingIcon={
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polygon points="5 3 19 12 5 21 5 3" />
-                          </svg>
-                        }
-                      >
-                        Configurar Novo Lote
-                      </GlassButton>
-                    </div>
-                  </GlassCard>
-                )}
-              </div>
-            </div>
-          )}
-
-          {studioTab === "completed" && (
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="max-w-5xl mx-auto">
-                <RenderingSection
-                  isLoadingRenderOutputs={
-                    isInspectingArchive ? isLoadingAttemptDetail : isLoadingRenderOutputs
-                  }
-                  isRendering={isInspectingArchive ? false : isRendering}
-                  renderOutputs={effectiveRenderOutputs}
-                  renderTitlesByFileName={effectiveRenderTitlesByFileName}
-                  buildRenderUrl={buildRenderUrl}
-                  onOpenRenderFolder={async (fileName) => {
-                    if (isInspectingArchive && inspectingAttempt) {
-                      await openVideoFolder(inspectingAttempt.jobId);
-                      return;
-                    }
-                    await openRenderOutputFolder(fileName);
-                  }}
-                  onDeleteRender={async (fileName) => {
-                    if (isInspectingArchive) {
-                      setToastNotification(
-                        "Tentativa arquivada é somente leitura. Para remover, exclua a tentativa na barra lateral.",
-                      );
-                      return;
-                    }
-                    await deleteRenderOutputFile(fileName);
-                  }}
-                  isExpanded={true}
-                  onToggle={() => {}}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </GlassWindow>
-
-      {/* Modal de Importação de Vídeo em Liquid Glass */}
-      {showUploadModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
-          onClick={() => setShowUploadModal(false)}
-        >
-          <div
-            className="w-full max-w-xl rounded-2xl border border-white/15 bg-[#0f0f14]/90 p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-white/10">
-              <h2 className="text-sm font-semibold text-white">Importar Novo Vídeo</h2>
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="text-text-3 hover:text-white text-xs"
-              >
-                Fechar
-              </button>
-            </div>
-
-            <UploadSection
-              action={action}
-              onVideoAdded={(video) => {
-                upsertVideoIntoList(video);
-                setActiveVideoId(video.job.job_id);
-                setShowUploadModal(false);
-              }}
-              onLoadVideos={loadVideos}
-              appSettings={appSettings}
-              onShowMoveUploadDialog={() => {
-                setDontAskMoveUpload(false);
-                setShowMoveUploadDialog(true);
-              }}
-              isExpanded={true}
-              onToggle={() => {}}
-            />
-          </div>
-        </div>
       )}
 
-      {/* Toast Notifications (Sucesso e Erros) em Liquid Glass */}
-      <GlassToastContainer position="bottom-right">
-        {toastNotification && (
-          <GlassToast
-            variant="default"
-            message={toastNotification}
-            onClose={() => setToastNotification(null)}
-            duration={4000}
-          />
-        )}
-        {action.error && (
-          <GlassToast
-            variant="danger"
-            title="Erro na operação"
-            message={action.error}
-            onClose={() => setAction((prev) => ({ ...prev, error: undefined }))}
-            duration={6000}
-          />
-        )}
-      </GlassToastContainer>
-      <AppSupportDialogs
-        showTranscriptionRegenerateConfirmDialog={showTranscriptionRegenerateConfirmDialog}
-        showDeleteCutConfirmDialog={showDeleteCutConfirmDialog}
-        showHowToUseDialog={showHowToUseDialog}
-        dontAskDeleteCutAgain={dontAskDeleteCutAgain}
-        onCloseTranscriptionRegenerateConfirm={() =>
-          closeTranscriptionRegenerateConfirm()
+      {/* Popover de transcrição */}
+      <TranscriptPopover
+        open={transcriptOpen}
+        sidebarPinned={sidebarPinned}
+        sidebarSide={sidebarSide}
+        transcriptionText={activeVideo?.transcription || ""}
+        segments={(activeVideo?.transcriptionSegments as any) || []}
+        blocks={blocks}
+        showDiscardedCuts={showDiscarded}
+        discardedCount={discardedCount}
+        onToggleShowDiscarded={() => setShowDiscarded((s) => !s)}
+        onSeekTo={(seconds) => {
+          handleSeek(seconds);
+          if (videoRef.current?.paused) {
+            void videoRef.current.play().catch(() => {});
+          }
+        }}
+        onClose={() => setTranscriptOpen(false)}
+      />
+
+      {/* Modais de Novo Vídeo e Central de Configurações */}
+      <NewVideoModal
+        open={showNewVideoModal}
+        onClose={() => setShowNewVideoModal(false)}
+        onVideoAdded={upsertVideoIntoList}
+        onLoadVideos={loadVideos}
+        onError={(msg) => setAction({ busy: false, error: msg })}
+      />
+
+      <SettingsHubModal
+        open={showSettingsHub}
+        initialSection={settingsInitialSection}
+        onClose={() => setShowSettingsHub(false)}
+        suppressEscape={showInstallationDialog}
+        onSectionEnter={prepareSettingsSection}
+        baseDir={configBaseDir}
+        downloadResolution={configDownloadResolution}
+        askDeleteCutConfirm={appSettings?.preferences?.ask_delete_cut_confirm ?? true}
+        onSaveAppSettings={handleAutoSaveAppSettings}
+        dependencies={dependencies}
+        loadingDependencies={loadingDependencies}
+        installingDependency={installingDependency}
+        uninstallingDependency={uninstallingDependency}
+        dependencyOperationMessage={dependencyOperationFeedback?.message || null}
+        dependencyOperationTone={dependencyOperationFeedback?.kind || "success"}
+        installSessionId={dependencyInstallSessionId}
+        installLogOperation={dependencyLogOperation}
+        installLogDependency={dependencyInstallLogDependency}
+        installLogStatus={dependencyInstallLogStatus}
+        installLogs={dependencyInstallLogs}
+        showInstallLogs={showDependencyInstallLogs}
+        refreshingDependencies={refreshingDependencies}
+        onRefreshDependencies={async () => {
+          await refreshDependencies(true);
+        }}
+        onShowInstallInstructions={(name) => {
+          setSelectedDependencyForInstall(name);
+          setShowInstallationDialog(true);
+        }}
+        onInstallDependency={(name, viewMode, options) =>
+          startDependencyOperationSession(name, "install", viewMode, options)
         }
-        onConfirmTranscriptionRegenerate={() => void confirmTranscriptionRegenerate()}
+        onUninstallDependency={(name, viewMode) =>
+          startDependencyOperationSession(name, "uninstall", viewMode)
+        }
+        onCancelInstallSession={cancelActiveDependencyInstallSession}
+        onDownloadInstallLogs={downloadDependencyLogsAsTxt}
+        llmModel={llmModel}
+        embeddingModel={embeddingModel}
+        registeredEmbeddingModels={registeredEmbeddingModels}
+        availableModels={ollamaModels}
+        modelCatalog={ollamaModelCatalog}
+        llmSystemPrompt={llmSystemPrompt}
+        onSaveLLM={handleAutoSaveLLM}
+        onRegisterModel={(name, source) => registerOllamaModel({ name, source })}
+        onRemoveModel={(name) => removeOllamaModel(name)}
+        onRefreshModels={() => refreshOllamaModelOptions(true)}
+        whisperConfig={whisperConfig}
+        whisperDevice={whisperDevice}
+        whisperFormats={whisperFormats}
+        onSaveWhisper={handleAutoSaveWhisper}
+        ffmpegConfig={ffmpegConfig}
+        onSaveFFmpeg={handleAutoSaveFFmpeg}
+        videos={videos}
+        selectedVideosForBatch={selectedVideosForBatch}
+        batchPipelineOptions={batchPipelineOptions}
+        isBatchProcessing={isBatchProcessing}
+        activeBatchId={activeBatchId}
+        onBatchVideoToggle={toggleBatchVideo}
+        onBatchOptionChange={updateBatchPipelineOptions}
+        onCancelBatch={cancelBatchPipelineDialog}
+        onStartBatch={async () => {
+          if (selectedVideosForBatch.length > 0) {
+            setShowSettingsHub(false);
+          }
+          await startBatchPipelineDialog();
+        }}
+      />
+
+      {/* Diálogos de suporte e configuração existentes */}
+      <AppSupportDialogs
+        showDeleteCutConfirmDialog={showDeleteCutConfirmDialog}
+        pendingDeleteCutTitle={pendingDeleteCutTitle}
+        dontAskDeleteCutAgain={dontAskDeleteCutAgain}
+        showTranscriptionRegenerateConfirmDialog={showTranscriptionRegenerateConfirmDialog}
+        showHowToUseDialog={false}
         onCloseDeleteCutConfirm={closeDeleteCutConfirmDialog}
         onConfirmDeleteCut={() => void confirmDeleteSuggestedCut()}
         onDontAskDeleteCutAgainChange={setDontAskDeleteCutAgain}
-        onCloseHowToUse={() => setShowHowToUseDialog(false)}
+        onCloseTranscriptionRegenerateConfirm={closeTranscriptionRegenerateConfirm}
+        onConfirmTranscriptionRegenerate={() => void confirmTranscriptionRegenerate()}
+        onCloseHowToUse={() => {}}
       />
 
       <TranscriptionDialogs
@@ -2374,12 +2005,10 @@ export default function App() {
         onConfirmDelete={confirmDeleteTranscriptionFormat}
       />
 
-      {/* Blocks Dialog */}
       {showBlocksDialog && blocks.length > 0 && (
         <BlocksDialog blocks={blocks} onClose={() => setShowBlocksDialog(false)} />
       )}
 
-      {/* AI Response Dialog */}
       {showAiResponseDialog && aiResponseRaw && (
         <AiResponseDialog
           aiResponseRaw={aiResponseRaw}
@@ -2387,7 +2016,6 @@ export default function App() {
         />
       )}
 
-      {/* Regenerate Analyze Dialog */}
       {showRegenerateAnalyzeDialog && suggestedCuts.length > 0 && activeVideo && (
         <RegenerateAnalyzeDialog
           suggestedCuts={suggestedCuts}
@@ -2395,28 +2023,34 @@ export default function App() {
           onCancel={() => setShowRegenerateAnalyzeDialog(false)}
           onMaintainSelected={(keptCutIds) => {
             const keptCuts = suggestedCuts.filter((cut) => keptCutIds.includes(cut.cut_id));
+            const targetJobId = activeVideo.job.job_id;
             setShowRegenerateAnalyzeDialog(false);
-            runAction(
+            void runAction(
               async () => {
                 setIsAnalyzing(true);
+                markJobProcessing(targetJobId, true);
                 try {
-                  return await analyzeJob(activeVideo.job.job_id);
+                  return await analyzeJob(targetJobId);
                 } finally {
                   setIsAnalyzing(false);
+                  markJobProcessing(targetJobId, false);
                 }
               },
               (value) => handleAnalyzeResult(value, keptCuts),
             );
           }}
           onRegenerateAll={() => {
+            const targetJobId = activeVideo.job.job_id;
             setShowRegenerateAnalyzeDialog(false);
-            runAction(
+            void runAction(
               async () => {
                 setIsAnalyzing(true);
+                markJobProcessing(targetJobId, true);
                 try {
-                  return await analyzeJob(activeVideo.job.job_id);
+                  return await analyzeJob(targetJobId);
                 } finally {
                   setIsAnalyzing(false);
+                  markJobProcessing(targetJobId, false);
                 }
               },
               (value) => handleAnalyzeResult(value),
@@ -2439,89 +2073,8 @@ export default function App() {
         onSaveManualCut={saveManualCutTimestamps}
       />
 
-      {/* LLM Config Dialog */}
-      {showLLMConfigDialog && (
-        <LLMConfigDialog
-          llmModel={llmModel}
-          embeddingModel={embeddingModel}
-          registeredEmbeddingModels={registeredEmbeddingModels}
-          availableModels={ollamaModels}
-          modelCatalog={ollamaModelCatalog}
-          localAvailable={ollamaLocalAvailable}
-          remoteAvailable={ollamaRemoteAvailable}
-          llmSystemPrompt={llmSystemPrompt}
-          action={action}
-          onRegisterModel={registerNewOllamaModel}
-          onRemoveModel={removeRegisteredOllamaModel}
-          onRefreshModels={() => refreshOllamaModelOptions(true)}
-          onSave={(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels) => {
-            setLlmModel(model);
-            setLlmSystemPrompt(prompt);
-            setEmbeddingModel(nextEmbeddingModel);
-            setRegisteredEmbeddingModels(nextRegisteredEmbeddingModels);
-            void saveLLMConfig(model, prompt, nextEmbeddingModel, nextRegisteredEmbeddingModels);
-          }}
-          onCancel={() => setShowLLMConfigDialog(false)}
-        />
-      )}
-      {/* Whisper Config Dialog */}
-      {showWhisperConfigDialog && (
-        <WhisperConfigDialog
-          whisperDevice={whisperDevice}
-          whisperFormats={whisperFormats}
-          initialConfig={whisperConfig}
-          action={action}
-          onSave={saveWhisperConfig}
-          onCancel={() => setShowWhisperConfigDialog(false)}
-        />
-      )}
-
-      {showFFmpegConfigDialog && (
-        <FFmpegConfigDialog
-          initialConfig={ffmpegConfig || undefined}
-          action={action}
-          onSave={saveFFmpegConfig}
-          onCancel={() => setShowFFmpegConfigDialog(false)}
-        />
-      )}
-
-      {/* Dependencies Dialog */}
-      {showDependenciesDialog && (
-        <DependenciesDialog
-          dependencies={dependencies}
-          loadingDependencies={loadingDependencies}
-          installingDependency={installingDependency}
-          uninstallingDependency={uninstallingDependency}
-          operationResultMessage={dependencyOperationFeedback?.message || null}
-          operationResultTone={dependencyOperationFeedback?.kind || "success"}
-          installSessionId={dependencyInstallSessionId}
-          installLogOperation={dependencyLogOperation}
-          installLogDependency={dependencyInstallLogDependency}
-          installLogStatus={dependencyInstallLogStatus}
-          installLogs={dependencyInstallLogs}
-          showInstallLogs={showDependencyInstallLogs}
-          refreshingDependencies={refreshingDependencies}
-          onClose={() => setShowDependenciesDialog(false)}
-          onRefresh={async () => {
-            await refreshDependencies(true);
-          }}
-          onShowInstallInstructions={(name) => {
-            setSelectedDependencyForInstall(name);
-            setShowInstallationDialog(true);
-          }}
-          onInstallDependency={(name, viewMode, options) =>
-            startDependencyOperationSession(name, "install", viewMode, options)
-          }
-          onUninstallDependency={(name, viewMode) =>
-            startDependencyOperationSession(name, "uninstall", viewMode)
-          }
-          onCancelInstallSession={cancelActiveDependencyInstallSession}
-          onDownloadInstallLogs={downloadDependencyLogsAsTxt}
-        />
-      )}
-
       {showInstallationDialog && selectedDependencyForInstall && (
-        <div className="dialog-overlay" onClick={() => setShowInstallationDialog(false)}>
+        <div className="relative z-[90]">
           <InstallationInstructionsDialog
             dependencyName={selectedDependencyForInstall}
             onClose={() => setShowInstallationDialog(false)}
@@ -2529,42 +2082,8 @@ export default function App() {
         </div>
       )}
 
-      {showConfigureAppDialog && (
-        <ConfigureAppDialog
-          configBaseDir={configBaseDir}
-          configDownloadResolution={configDownloadResolution}
-          appSettings={appSettings}
-          action={action}
-          onSave={(baseDir, resolution, askDeleteCutConfirm) => {
-            runAction(
-              () =>
-                saveSettings({
-                  media: {
-                    base_dir: baseDir,
-                    download_resolution: resolution,
-                  },
-                  preferences: {
-                    ask_move_on_upload: appSettings?.preferences?.ask_move_on_upload ?? true,
-                    move_uploads: appSettings?.preferences?.move_uploads ?? false,
-                    ask_delete_cut_confirm: askDeleteCutConfirm,
-                  },
-                }),
-              () => {
-                setShowConfigureAppDialog(false);
-                getSettings().then((s) => {
-                  setAppSettings(s);
-                  setConfigBaseDir(s.media.base_dir);
-                  setConfigDownloadResolution(s.media.download_resolution || "1080p");
-                });
-              },
-            );
-          }}
-          onCancel={() => setShowConfigureAppDialog(false)}
-        />
-      )}
-
       <BatchPipelineControls
-        showBatchPipelineDialog={showBatchPipelineDialog}
+        showBatchPipelineDialog={false}
         videos={videos}
         selectedVideosForBatch={selectedVideosForBatch}
         batchPipelineOptions={batchPipelineOptions}
@@ -2583,32 +2102,50 @@ export default function App() {
       <SimpleDialogs
         renameVideoId={renameVideoId}
         renameVideoNewName={renameVideoNewName}
-        onRenameChange={(name) => setRenameVideoNewName(name)}
+        onRenameChange={setRenameVideoNewName}
         onRenameClose={() => {
           setRenameVideoId(null);
           setRenameVideoNewName("");
         }}
         onRenameSave={() => {
-          if (renameVideoNewName.trim()) {
-            runAction(
-              () => renameVideo(renameVideoId!, renameVideoNewName),
+          if (renameVideoNewName.trim() && renameVideoId) {
+            void runAction(
+              () => renameVideo(renameVideoId, renameVideoNewName),
               () => {
                 setRenameVideoId(null);
                 setRenameVideoNewName("");
-                loadVideos();
+                void loadVideos();
               },
             );
           }
         }}
         showMoveUploadDialog={showMoveUploadDialog}
         dontAskMoveUpload={dontAskMoveUpload}
-        onDontAskChange={(value) => setDontAskMoveUpload(value)}
+        onDontAskChange={setDontAskMoveUpload}
         onMoveUploadClose={() => setShowMoveUploadDialog(false)}
         onMoveUploadDecision={handleMoveUploadDecision}
         showBatchCompletionNotification={showBatchCompletionNotification}
         batchCompletionMessage={batchCompletionMessage}
         onBatchCompletionClose={closeBatchCompletionNotification}
       />
+
+      {/* Toast não-bloqueante de erro */}
+      {action.error && (
+        <div
+          role="alert"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-modal max-w-[min(480px,90vw)] px-4 py-2.5 rounded-pill glass--strong border border-danger/40 text-sm text-text-1 shadow-panel flex items-center gap-3"
+        >
+          <span className="h-2 w-2 rounded-full bg-danger shrink-0" />
+          <span className="truncate">{action.error}</span>
+          <button
+            type="button"
+            onClick={() => setAction((prev) => ({ ...prev, error: undefined }))}
+            className="text-xs text-text-3 hover:text-text-1 shrink-0"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
     </div>
   );
 }

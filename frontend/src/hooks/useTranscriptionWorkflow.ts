@@ -103,7 +103,8 @@ export function useTranscriptionWorkflow({
       return;
     }
 
-    console.log(`[UI] Iniciando transcrição do video ${activeVideo.job.job_id}`);
+    const jobId = activeVideo.job.job_id;
+    console.log(`[UI] Iniciando transcrição do video ${jobId}`);
     setShowTranscriptionFormatListDialog(false);
     setShowTranscriptionContentDialog(false);
     setShowTranscriptionDeleteDialog(false);
@@ -116,7 +117,7 @@ export function useTranscriptionWorkflow({
     clearSuggestedCuts();
     prepareTranscriptionTaskLog();
     stopTaskLogsPolling();
-    updateVideo(activeVideo.job.job_id, {
+    updateVideo(jobId, {
       isTranscribing: true,
       transcriptionLogs: [],
       transcription: "",
@@ -124,24 +125,42 @@ export function useTranscriptionWorkflow({
       transcriptionFormats: undefined,
     });
 
+    let settled = false;
+    const clearTranscribing = () => {
+      if (!settled) {
+        settled = true;
+        updateVideo(jobId, { isTranscribing: false });
+      }
+    };
+
     return runAction(
       async () => {
-        if (hasAnyTranscription) {
-          await deleteTranscription(activeVideo.job.job_id, "all");
+        try {
+          if (hasAnyTranscription) {
+            await deleteTranscription(jobId, "all");
+          }
+          return await transcribeJob(jobId);
+        } catch (error) {
+          settled = true;
+          updateVideo(jobId, { isTranscribing: false });
+          stopTaskLogsPolling();
+          throw error;
         }
-        return transcribeJob(activeVideo.job.job_id);
       },
       (result: any) => {
         console.log(`[UI] Transcrição completada`);
-        updateVideo(activeVideo.job.job_id, {
+        settled = true;
+        updateVideo(jobId, {
           transcription: result.transcription,
           transcriptionSegments: result.segments,
           transcriptionFormats: result.available_formats,
           isTranscribing: false,
         });
-        refreshVideo(activeVideo.job.job_id);
+        refreshVideo(jobId);
       },
-    );
+    ).finally(() => {
+      clearTranscribing();
+    });
   }
 
   function requestTranscriptionStart() {
@@ -158,10 +177,11 @@ export function useTranscriptionWorkflow({
       return;
     }
 
-    console.log(`[UI] Cancelando transcrição: ${activeVideo.job.job_id}`);
+    const jobId = activeVideo.job.job_id;
+    console.log(`[UI] Cancelando transcrição: ${jobId}`);
     try {
-      await cancelTranscription(activeVideo.job.job_id);
-      updateVideo(activeVideo.job.job_id, {
+      await cancelTranscription(jobId);
+      updateVideo(jobId, {
         isTranscribing: false,
       });
       stopTaskLogsPolling();

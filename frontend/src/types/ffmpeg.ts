@@ -23,6 +23,13 @@ export interface FFmpegConfig {
   video_filter?: string; // -vf (scale, crop, rotate, etc)
   audio_filter?: string; // -af (volume, bass, etc)
   metadata?: string; // -metadata (title, author, etc)
+
+  // Vertical framing, subtitles & post-processing (backend 9:16 pipeline)
+  vertical_mode?: "auto_reframe" | "split_podcast" | "crop" | "zoom" | "blur";
+  burn_subtitles?: boolean;
+  subtitle_style?: "word_highlight" | "sentence";
+  normalize_audio?: boolean;
+  trim_internal_silence?: boolean;
 }
 
 export const VIDEO_CODECS = [

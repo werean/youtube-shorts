@@ -24,6 +24,7 @@ interface UseCutsWorkflowOptions {
   onRefreshVideo: (jobId: string) => void;
   onPausePlayback: () => void;
   onSeekAndPlay: (seconds: number) => void;
+  onCutDeleted?: (cutId: string) => void;
 }
 
 function normalizeCutIds(existing: Cut[], incoming: Cut[]): Cut[] {
@@ -56,6 +57,7 @@ export function useCutsWorkflow({
   onRefreshVideo,
   onPausePlayback,
   onSeekAndPlay,
+  onCutDeleted,
 }: UseCutsWorkflowOptions) {
   const [cuts, setCuts] = useState<Cut[]>([]);
   const [suggestedCuts, setSuggestedCuts] = useState<Cut[]>([]);
@@ -177,6 +179,7 @@ export function useCutsWorkflow({
 
     setHoveredCutId(null);
     setHoveredCutAction(null);
+    onCutDeleted?.(cutId);
   }
 
   function requestDeleteSuggestedCut(cutId: string) {
@@ -324,6 +327,10 @@ export function useCutsWorkflow({
     }
   }
 
+  const pendingDeleteCutTitle = pendingDeleteCutId
+    ? (cuts.find((c) => c.cut_id === pendingDeleteCutId)?.title ?? null)
+    : null;
+
   return {
     cuts,
     setCuts,
@@ -337,6 +344,7 @@ export function useCutsWorkflow({
     hoveredCutId,
     hoveredCutAction,
     showDeleteCutConfirmDialog,
+    pendingDeleteCutTitle,
     dontAskDeleteCutAgain,
     setDontAskDeleteCutAgain,
     clearCuts,

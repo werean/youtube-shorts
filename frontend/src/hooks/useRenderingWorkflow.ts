@@ -80,12 +80,16 @@ export function useRenderingWorkflow({
   const [renderOutputs, setRenderOutputs] = useState<string[]>([]);
   const [renderOutputsVersion, setRenderOutputsVersion] = useState(0);
   const [isRendering, setIsRendering] = useState(false);
+  const [renderingJobId, setRenderingJobId] = useState<string | null>(null);
   const [isLoadingRenderOutputs, setIsLoadingRenderOutputs] = useState(false);
   const [expectedRenderCount, setExpectedRenderCount] = useState(0);
   const renderPollRef = useRef<number | null>(null);
   const renderPollStartTimeRef = useRef<number | null>(null);
   const renderOutputsKeyRef = useRef<string>("");
   const expectedRenderCountRef = useRef<number>(0);
+  const renderingJobIdRef = useRef<string | null>(null);
+  const activeJobIdRef = useRef<string | null>(activeJobId);
+  activeJobIdRef.current = activeJobId;
 
   const renderTitlesByFileName = useMemo(() => {
     const next: Record<string, string> = {};
@@ -122,6 +126,8 @@ export function useRenderingWorkflow({
       renderPollRef.current = null;
     }
     renderPollStartTimeRef.current = null;
+    renderingJobIdRef.current = null;
+    setRenderingJobId(null);
     setIsRendering(false);
   }
 
@@ -130,7 +136,9 @@ export function useRenderingWorkflow({
     if (!targetJobId) return;
     try {
       const outputs = await listRenderOutputs(targetJobId);
-      applyRenderOutputs(outputs);
+      if (targetJobId === activeJobIdRef.current) {
+        applyRenderOutputs(outputs);
+      }
     } catch (error) {
       console.error("[render] Failed to refresh outputs:", error);
     }
@@ -139,10 +147,16 @@ export function useRenderingWorkflow({
   async function pollRenderOutputs(jobId: string) {
     try {
       const outputs = await listRenderOutputs(jobId);
-      applyRenderOutputs(outputs);
+      if (jobId === activeJobIdRef.current) {
+        applyRenderOutputs(outputs);
+      }
 
       const job = await getJob(jobId);
       updateVideo(jobId, { job });
+
+      if (jobId !== renderingJobIdRef.current) {
+        return;
+      }
 
       const currentExpectedCount = expectedRenderCountRef.current;
       if (currentExpectedCount > 0 && outputs.length >= currentExpectedCount) {
@@ -155,7 +169,9 @@ export function useRenderingWorkflow({
 
       if (job.status === "DONE") {
         const finalOutputs = await listRenderOutputs(jobId);
-        applyRenderOutputs(finalOutputs, true);
+        if (jobId === activeJobIdRef.current) {
+          applyRenderOutputs(finalOutputs, true);
+        }
         console.log(`[render] Job status is DONE, stopping polling`);
         stopRenderPolling();
         return;
@@ -163,7 +179,9 @@ export function useRenderingWorkflow({
 
       if (job.status === "ERROR") {
         console.log(`[render] Job status is ${job.status}, stopping polling`);
-        setRenderOutputsVersion((value) => value + 1);
+        if (jobId === activeJobIdRef.current) {
+          setRenderOutputsVersion((value) => value + 1);
+        }
         stopRenderPolling();
         return;
       }
@@ -178,7 +196,9 @@ export function useRenderingWorkflow({
         }
 
         console.log(`[render] Job status is ${job.status} after startup grace, stopping polling`);
-        setRenderOutputsVersion((value) => value + 1);
+        if (jobId === activeJobIdRef.current) {
+          setRenderOutputsVersion((value) => value + 1);
+        }
         stopRenderPolling();
         return;
       }
@@ -200,6 +220,8 @@ export function useRenderingWorkflow({
   function startRenderPolling(jobId: string, totalCuts: number) {
     expectedRenderCountRef.current = totalCuts;
     setExpectedRenderCount(totalCuts);
+    renderingJobIdRef.current = jobId;
+    setRenderingJobId(jobId);
     setIsRendering(true);
     renderPollStartTimeRef.current = Date.now();
 
@@ -219,6 +241,7 @@ export function useRenderingWorkflow({
 
   function startRenderFlow() {
     if (!activeJobId) return undefined;
+    const targetJobId = activeJobId;
     const expectedCutsToRender = getExpectedRenderCutCount(cuts);
 
     return runAction(async () => {
@@ -226,11 +249,11 @@ export function useRenderingWorkflow({
       prepareRenderTaskLog();
       stopTaskLogsPolling();
       clearRenderOutputs();
-      startRenderPolling(activeJobId, expectedCutsToRender);
+      startRenderPolling(targetJobId, expectedCutsToRender);
 
-      await updateCuts(activeJobId, cuts);
       try {
-        return await renderJob(activeJobId);
+        await updateCuts(targetJobId, cuts);
+        return await renderJob(targetJobId);
       } catch (error) {
         stopRenderPolling();
         throw error;
@@ -239,12 +262,12 @@ export function useRenderingWorkflow({
   }
 
   async function cancelActiveRendering() {
-    if (!activeJobId) return;
+    const targetJobId = renderingJobIdRef.current ?? activeJobId;
+    if (!targetJobId) return;
 
-    console.log(`[UI] Cancelando renderização: ${activeJobId}`);
+    console.log(`[UI] Cancelando renderização: ${targetJobId}`);
     try {
-      await cancelRendering(activeJobId);
-      setIsRendering(false);
+      await cancelRendering(targetJobId);
       stopRenderPolling();
       stopTaskLogsPolling();
       console.log(`[UI] Renderização cancelada`);
@@ -276,7 +299,7 @@ export function useRenderingWorkflow({
   }, []);
 
   useEffect(() => {
-    if (!activeJobId) {
+    if (!activeJobId && !renderingJobIdRef.current) {
       stopRenderPolling();
       return;
     }
@@ -315,6 +338,7 @@ export function useRenderingWorkflow({
   return {
     renderOutputs,
     isRendering,
+    renderingJobId,
     isLoadingRenderOutputs,
     expectedRenderCount,
     renderTitlesByFileName,

@@ -1,9 +1,11 @@
+import { DeleteCutConfirmDialog } from "../redesign/DeleteCutConfirmDialog";
 import { AppDialog } from "../shared";
 import { GlassButton, GlassCard } from "../ui/glass";
 
 interface AppSupportDialogsProps {
   showTranscriptionRegenerateConfirmDialog: boolean;
   showDeleteCutConfirmDialog: boolean;
+  pendingDeleteCutTitle?: string | null;
   showHowToUseDialog: boolean;
   dontAskDeleteCutAgain: boolean;
   onCloseTranscriptionRegenerateConfirm: () => void;
@@ -17,6 +19,7 @@ interface AppSupportDialogsProps {
 export function AppSupportDialogs({
   showTranscriptionRegenerateConfirmDialog,
   showDeleteCutConfirmDialog,
+  pendingDeleteCutTitle,
   showHowToUseDialog,
   dontAskDeleteCutAgain,
   onCloseTranscriptionRegenerateConfirm,
@@ -55,38 +58,14 @@ export function AppSupportDialogs({
         </AppDialog>
       )}
 
-      {showDeleteCutConfirmDialog && (
-        <AppDialog
-          title="Excluir Corte"
-          onClose={onCloseDeleteCutConfirm}
-          showHeaderClose={true}
-          footer={
-            <div className="flex items-center justify-end gap-2 w-full">
-              <GlassButton variant="ghost" onClick={onCloseDeleteCutConfirm}>
-                Cancelar
-              </GlassButton>
-              <GlassButton variant="danger" onClick={onConfirmDeleteCut}>
-                Excluir Corte
-              </GlassButton>
-            </div>
-          }
-        >
-          <div className="space-y-4 py-2">
-            <p className="text-xs text-zinc-200 leading-relaxed">
-              Tem certeza que deseja apagar este corte? Ele será removido da lista de sugestões.
-            </p>
-            <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-400">
-              <input
-                type="checkbox"
-                checked={dontAskDeleteCutAgain}
-                onChange={(e) => onDontAskDeleteCutAgainChange(e.target.checked)}
-                className="rounded border-white/20 bg-white/10 text-white focus:ring-0"
-              />
-              <span>Não exibir esta confirmação novamente</span>
-            </label>
-          </div>
-        </AppDialog>
-      )}
+      <DeleteCutConfirmDialog
+        open={showDeleteCutConfirmDialog}
+        cutTitle={pendingDeleteCutTitle}
+        dontAskAgain={dontAskDeleteCutAgain}
+        onDontAskAgainChange={onDontAskDeleteCutAgainChange}
+        onClose={onCloseDeleteCutConfirm}
+        onConfirm={onConfirmDeleteCut}
+      />
 
       {showHowToUseDialog && (
         <AppDialog

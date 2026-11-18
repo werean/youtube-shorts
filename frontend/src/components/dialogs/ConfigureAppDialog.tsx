@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { selectFolder } from "../../api";
 import type { ActionState } from "../../hooks/useAppAction";
 import { AppDialog } from "../shared";
@@ -25,6 +25,7 @@ export function ConfigureAppDialog({
   onSave,
   onCancel,
 }: ConfigureAppDialogProps) {
+  const switchLabelId = useId();
   const [baseDir, setBaseDir] = useState(initialDir);
   const [resolution, setResolution] = useState<"1080p" | "1440p" | "4k">(
     initialResolution as "1080p" | "1440p" | "4k",
@@ -205,16 +206,21 @@ export function ConfigureAppDialog({
         <GlassCard className="p-4 border-white/10 bg-white/[0.02] space-y-3.5">
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <h4 className="text-sm font-semibold text-white">Confirmação ao Excluir Cortes</h4>
+              <h4 id={switchLabelId} className="text-sm font-semibold text-white">
+                Confirmação ao Excluir Cortes
+              </h4>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Exibir diálogo de confirmação antes de apagar um corte gerado ou editado.
+                Exibir confirmação antes de apagar um corte (permite reativar após marcar 'Não perguntar novamente').
               </p>
             </div>
 
             <button
               type="button"
+              role="switch"
+              aria-checked={askDeleteCutConfirm}
+              aria-labelledby={switchLabelId}
               onClick={() => setAskDeleteCutConfirm((prev) => !prev)}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 focus:outline-none flex-shrink-0 ${
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 cursor-pointer flex-shrink-0 ${
                 askDeleteCutConfirm ? "bg-white justify-end" : "bg-zinc-800 justify-start"
               }`}
             >

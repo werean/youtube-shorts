@@ -12,6 +12,7 @@ export interface VideoItem {
   transcriptionSegments?: Segment[];
   transcriptionFormats?: { segments?: boolean; text?: boolean; vtt?: boolean };
   isTranscribing?: boolean;
+  is_processing?: boolean;
   transcriptionLogs?: string[];
   hasTranscription?: boolean;
   hasAnalysis?: boolean;
@@ -36,6 +37,7 @@ export function recordToVideoItem(record: VideoRecord): VideoItem {
     transcriptionLogs: [],
     hasTranscription: record.hasTranscription,
     hasAnalysis: record.hasAnalysis,
+    is_processing: record.is_processing,
   };
 }
 

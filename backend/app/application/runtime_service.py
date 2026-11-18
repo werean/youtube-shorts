@@ -577,6 +577,34 @@ class OperationRuntimeService:
                 return jid
         return None
 
+    def is_job_actively_processing(self, job_id: str) -> bool:
+        """Return True only when an active task, live subprocess, or running batch is executing for job_id."""
+        if not job_id:
+            return False
+        for (jid, _), token in list(self._cancel_tokens.items()):
+            if jid == job_id and not token.is_set():
+                return True
+        for (jid, _), pids in list(self._process_pids.items()):
+            if jid == job_id and len(pids) > 0:
+                return True
+        for batch in list(self._batches.values()):
+            if isinstance(batch, dict):
+                curr_id = batch.get("current_job_id")
+                batch_status = batch.get("status")
+                is_running = batch.get("is_running", False)
+            else:
+                curr_id = getattr(batch, "current_job_id", None)
+                batch_status = getattr(batch, "status", None)
+                is_running = getattr(batch, "is_running", False)
+            if curr_id != job_id:
+                continue
+            if batch_status is not None:
+                if batch_status == "running":
+                    return True
+            elif is_running:
+                return True
+        return False
+
     # --- Batch Pipeline State ---
 
     def create_batch_progress(self, batch_id: str, job_ids: list[str]) -> BatchPipelineProgress:

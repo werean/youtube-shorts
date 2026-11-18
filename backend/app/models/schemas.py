@@ -145,6 +145,7 @@ class VideoRecord(BaseModel):
     archived: bool
     hasTranscription: bool = False
     hasAnalysis: bool = False
+    is_processing: bool = False
 
 
 class MediaSettings(BaseModel):

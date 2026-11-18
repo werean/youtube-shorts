@@ -20,6 +20,7 @@ export interface VideoItem {
   transcriptionSegments?: Segment[];
   transcriptionFormats?: { segments?: boolean; text?: boolean; vtt?: boolean };
   isTranscribing?: boolean;
+  is_processing?: boolean;
   transcriptionLogs?: string[];
   attemptsCount?: number;
 }

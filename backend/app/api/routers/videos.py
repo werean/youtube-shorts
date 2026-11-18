@@ -102,6 +102,7 @@ def _list_videos_from_dir(root_dir: Path, archived: bool) -> list[dict[str, Any]
                 hasTranscription=container.jobs.has_transcription(job.job_id),
                 hasAnalysis=container.jobs.has_analysis(job.job_id),
                 attempts_count=container.jobs.count_attempts(job.job_id),
+                is_processing=container.runtime.is_job_actively_processing(job.job_id),
             )
         )
 

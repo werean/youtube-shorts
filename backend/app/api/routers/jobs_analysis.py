@@ -34,6 +34,7 @@ async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
     """Run Stage 3 discourse-aware semantic blocks + contextual TextTiling topic segmentation."""
     container = get_container()
     lmstudio = getattr(container, "lmstudio", None)
+    container.runtime.create_cancel_token(job_id, "blocks")
     try:
         if lmstudio is not None and lmstudio.cli_enabled():
             async with lmstudio.pipeline_session(job_id=job_id, task_log="topics"):
@@ -45,6 +46,8 @@ async def create_job_semantic_blocks(job_id: str) -> list[SemanticBlock]:
         return blocks
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        container.runtime.clear_cancel_token(job_id, "blocks")
 
 
 @router.post("/{job_id}/analyze")
@@ -52,6 +55,7 @@ async def analyze_job_cuts(job_id: str) -> Any:
     """Auto-prepare blocks/topics if missing, run 3-phase narrative arc mining, and save `cuts.suggested.json`."""
     container = get_container()
     lmstudio = getattr(container, "lmstudio", None)
+    container.runtime.create_cancel_token(job_id, "analysis")
     try:
         if lmstudio is not None and lmstudio.cli_enabled():
             async with lmstudio.pipeline_session(job_id=job_id, task_log="analysis"):
@@ -63,6 +67,8 @@ async def analyze_job_cuts(job_id: str) -> Any:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        container.runtime.clear_cancel_token(job_id, "analysis")
 
 
 @router.get("/{job_id}/cuts", response_model=list[Cut])

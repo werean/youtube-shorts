@@ -57,6 +57,7 @@ export interface VideoRecord {
   hasTranscription?: boolean;
   hasAnalysis?: boolean;
   attempts_count?: number;
+  is_processing?: boolean;
 }
 
 export interface BatchPipelineOptions {

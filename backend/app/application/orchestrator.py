@@ -34,6 +34,7 @@ from app.domain.segmentation.semantic_blocks import build_semantic_blocks
 from app.domain.segmentation.topic_segmentation import build_topic_segments
 from app.domain.transcription.service import transcribe_job
 from app.models.domain import Job, JobStatus
+from app.models.schemas import FailedJobEntry
 
 
 def _status_str(status: JobStatus | str) -> str:
@@ -521,6 +522,30 @@ class BatchRunner:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._approval_events: dict[str, asyncio.Event] = {}
 
+    def _sync_runtime_batch(
+        self,
+        c: ServiceContainer,
+        batch_id: str,
+        status: BatchStatus,
+        *,
+        batch_status: str,
+    ) -> None:
+        progress = c.runtime.get_batch_progress(batch_id)
+        if progress is None:
+            progress = c.runtime.create_batch_progress(batch_id, status.jobs)
+        progress.current_job_index = status.current_job_index
+        progress.current_job_id = status.current_job_id
+        progress.current_step = status.current_step
+        progress.completed_jobs = list(status.completed_jobs)
+        progress.failed_jobs = [
+            FailedJobEntry(job_id=f["job_id"], error=f["error"])
+            for f in status.failed_jobs
+        ]
+        progress.is_running = status.is_running
+        progress.waiting_for_approval = status.waiting_for_approval
+        progress.pending_cuts = status.pending_cuts
+        setattr(progress, "status", batch_status)
+
     def start_batch(
         self,
         job_ids: list[str],
@@ -554,6 +579,7 @@ class BatchRunner:
         self._approval_events[batch_id] = asyncio.Event()
 
         c = self.container or get_container()
+        self._sync_runtime_batch(c, batch_id, status, batch_status="running")
         c.runtime.log_stage_start(
             batch_id,
             "batch",
@@ -591,6 +617,7 @@ class BatchRunner:
             event.set()
 
         c = self.container or get_container()
+        self._sync_runtime_batch(c, batch_id, status, batch_status="cancelled")
         c.runtime.append_task_log(
             batch_id,
             "batch",
@@ -620,6 +647,7 @@ class BatchRunner:
         if status.waiting_for_approval:
             status.waiting_for_approval = False
             status.pending_cuts = None
+            self._sync_runtime_batch(c, batch_id, status, batch_status="running")
             c.runtime.append_task_log(
                 batch_id,
                 "batch",
@@ -639,6 +667,7 @@ class BatchRunner:
             if pending_exists:
                 status.is_running = True
                 status.current_step = "resuming"
+                self._sync_runtime_batch(c, batch_id, status, batch_status="running")
                 c.runtime.append_task_log(
                     batch_id,
                     "batch",
@@ -664,328 +693,364 @@ class BatchRunner:
         do_render = bool(opts.get("render", True))
         pre_approve = bool(opts.get("preApprove", False))
         batch_t0 = time.perf_counter()
+        final_synced = False
 
-        for idx, job_id in enumerate(status.jobs):
-            if not status.is_running:
-                break
+        try:
+            for idx, job_id in enumerate(status.jobs):
+                if not status.is_running:
+                    break
 
-            if job_id in status.completed_jobs:
-                continue
+                if job_id in status.completed_jobs:
+                    continue
 
-            status.current_job_index = idx
-            status.current_job_id = job_id
-            active_stage = "batch"
-            job_t0 = time.perf_counter()
+                status.current_job_index = idx
+                status.current_job_id = job_id
+                status.current_step = "starting"
+                self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                active_stage = "batch"
+                job_t0 = time.perf_counter()
 
-            c.runtime.log_stage_start(
-                job_id,
-                "batch",
-                inputs={"batch_id": batch_id, "job_index": idx, "options": opts},
-                message=f"Batch {batch_id} processing job {idx + 1}/{len(status.jobs)}",
-            )
+                c.runtime.log_stage_start(
+                    job_id,
+                    "batch",
+                    inputs={"batch_id": batch_id, "job_index": idx, "options": opts},
+                    message=f"Batch {batch_id} processing job {idx + 1}/{len(status.jobs)}",
+                )
 
-            try:
-                job = c.jobs.load_job(job_id)
+                try:
+                    job = c.jobs.load_job(job_id)
 
-                # Step 1/5: Ingestion if needed
-                source_video = c.jobs.find_source_video(job_id)
-                is_pending = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(
-                    job.status
-                ).upper() in ("CREATED", "PENDING", "DOWNLOADING")
-                if is_pending or not source_video:
-                    if job.youtube_url:
-                        active_stage = "ingest"
-                        status.current_step = "ingest"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "ingest",
-                            inputs={"youtube_url": job.youtube_url, "batch_id": batch_id},
-                            message="Batch Step 1/5: Ingesting video",
-                        )
-                        ingest_res = await ingest_video(job_id, container=c)
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "ingest",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "video_duration_seconds": job.video_duration_seconds,
-                                "video_path": ingest_res.get("video_path")
-                                if isinstance(ingest_res, dict)
-                                else None,
-                            },
-                            message="Batch Step 1/5: Ingest complete",
-                        )
-
-                # Step 2/5: Transcription
-                if do_transcription:
-                    if not status.is_running:
-                        break
-                    status.current_step = "transcription"
-                    if job.status == JobStatus.DOWNLOADED:
-                        active_stage = "transcription"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "transcription",
-                            inputs={
-                                "source_video_path": job.source_video_path,
-                                "video_duration_seconds": job.video_duration_seconds,
-                                "batch_id": batch_id,
-                            },
-                            message="Batch Step 2/5: Transcribing audio",
-                        )
-                        tr_res = await transcribe_job(job_id, container=c)
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "transcription",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "segments_count": _count_result_items(tr_res, "segments"),
-                            },
-                            message="Batch Step 2/5: Transcription complete",
-                        )
-
-                # Step 3/5, 4/5, 5/5: Semantic blocks & topic segments & analysis
-                if do_analysis:
-                    if not status.is_running:
-                        break
-                    status.current_step = "semantic_blocks"
-                    if job.status == JobStatus.BUILDING_BLOCKS:
-                        active_stage = "blocks"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "blocks",
-                            inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                            message="Batch Step 3/5: Building semantic blocks",
-                        )
-                        b_res = build_semantic_blocks(job_id, container=c)
-                        if inspect.isawaitable(b_res):
-                            b_res = await b_res
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "blocks",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "blocks_count": len(b_res) if isinstance(b_res, (list, tuple)) else None,
-                            },
-                            message="Batch Step 3/5: Semantic blocks complete",
-                        )
-
-                    if not status.is_running:
-                        break
-                    should_run_topics = job.status == JobStatus.BUILDING_TOPICS or (
-                        job.status == JobStatus.ANALYZING and not c.jobs.load_topic_segments(job_id)
-                    )
-                    should_run_llm_session = should_run_topics or job.status == JobStatus.ANALYZING
-                    lmstudio = getattr(c, "lmstudio", None)
-
-                    async def _run_batch_topics_and_analysis() -> None:
-                        nonlocal job, active_stage
-                        status.current_step = "topic_segments"
-                        if should_run_topics:
-                            active_stage = "topics"
+                    # Step 1/5: Ingestion if needed
+                    source_video = c.jobs.find_source_video(job_id)
+                    is_pending = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(
+                        job.status
+                    ).upper() in ("CREATED", "PENDING", "DOWNLOADING")
+                    if is_pending or not source_video:
+                        if job.youtube_url:
+                            active_stage = "ingest"
+                            status.current_step = "ingest"
+                            self._sync_runtime_batch(c, batch_id, status, batch_status="running")
                             t0 = time.perf_counter()
                             c.runtime.log_stage_start(
                                 job_id,
-                                "topics",
-                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                                message="Batch Step 4/5: Building topic segments",
+                                "ingest",
+                                inputs={"youtube_url": job.youtube_url, "batch_id": batch_id},
+                                message="Batch Step 1/5: Ingesting video",
                             )
-                            t_res = await build_topic_segments(job_id, container=c)
+                            ingest_res = await ingest_video(job_id, container=c)
                             job = c.jobs.load_job(job_id)
                             c.runtime.log_stage_end(
                                 job_id,
-                                "topics",
+                                "ingest",
                                 duration_ms=(time.perf_counter() - t0) * 1000,
                                 outputs={
                                     "status": _status_str(job.status),
-                                    "topics_count": len(t_res) if isinstance(t_res, (list, tuple)) else None,
+                                    "video_duration_seconds": job.video_duration_seconds,
+                                    "video_path": ingest_res.get("video_path")
+                                    if isinstance(ingest_res, dict)
+                                    else None,
                                 },
-                                message="Batch Step 4/5: Topic segmentation complete",
+                                message="Batch Step 1/5: Ingest complete",
                             )
 
+                    # Step 2/5: Transcription
+                    if do_transcription:
                         if not status.is_running:
-                            return
-                        status.current_step = "analysis"
-                        if job.status == JobStatus.ANALYZING:
-                            active_stage = "analysis"
+                            break
+                        status.current_step = "transcription"
+                        self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                        if job.status == JobStatus.DOWNLOADED:
+                            active_stage = "transcription"
                             t0 = time.perf_counter()
                             c.runtime.log_stage_start(
                                 job_id,
-                                "analysis",
-                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                                message="Batch Step 5/5: Analyzing narrative cuts",
+                                "transcription",
+                                inputs={
+                                    "source_video_path": job.source_video_path,
+                                    "video_duration_seconds": job.video_duration_seconds,
+                                    "batch_id": batch_id,
+                                },
+                                message="Batch Step 2/5: Transcribing audio",
                             )
-                            a_res = await analyze_job(job_id, container=c)
+                            tr_res = await transcribe_job(job_id, container=c)
                             job = c.jobs.load_job(job_id)
                             c.runtime.log_stage_end(
                                 job_id,
-                                "analysis",
+                                "transcription",
                                 duration_ms=(time.perf_counter() - t0) * 1000,
                                 outputs={
                                     "status": _status_str(job.status),
-                                    "cuts_count": _count_result_items(a_res, "cuts"),
+                                    "segments_count": _count_result_items(tr_res, "segments"),
                                 },
-                                message="Batch Step 5/5: Narrative analysis complete",
+                                message="Batch Step 2/5: Transcription complete",
                             )
 
-                    if should_run_llm_session and lmstudio is not None:
-                        async with lmstudio.pipeline_session(job_id=job_id, task_log="batch"):
-                            await _run_batch_topics_and_analysis()
-                    elif should_run_llm_session:
-                        await _run_batch_topics_and_analysis()
-
-                    # Pre-approval gate
-                    if pre_approve:
-                        status.current_step = "waiting_approval"
-                        status.waiting_for_approval = True
-                        c.runtime.append_task_log(
-                            job_id,
-                            "batch",
-                            f"[batch] Waiting for user approval before rendering (batch={batch_id})",
-                        )
-                        try:
-                            cuts = c.jobs.load_cuts(job_id)
-                            status.pending_cuts = [
-                                ct.model_dump() if hasattr(ct, "model_dump") else ct for ct in cuts
-                            ]
-                        except Exception:
-                            status.pending_cuts = []
-
-                        event = self._approval_events.get(batch_id)
-                        while status.waiting_for_approval and status.is_running:
-                            if event is not None:
-                                try:
-                                    await asyncio.wait_for(event.wait(), timeout=0.5)
-                                    event.clear()
-                                except asyncio.TimeoutError:
-                                    pass
-                            else:
-                                await asyncio.sleep(0.5)
+                    # Step 3/5, 4/5, 5/5: Semantic blocks & topic segments & analysis
+                    if do_analysis:
+                        if not status.is_running:
+                            break
+                        status.current_step = "semantic_blocks"
+                        self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                        if job.status == JobStatus.BUILDING_BLOCKS:
+                            active_stage = "blocks"
+                            t0 = time.perf_counter()
+                            c.runtime.log_stage_start(
+                                job_id,
+                                "blocks",
+                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                message="Batch Step 3/5: Building semantic blocks",
+                            )
+                            c.runtime.create_cancel_token(job_id, "blocks")
+                            try:
+                                b_res = build_semantic_blocks(job_id, container=c)
+                                if inspect.isawaitable(b_res):
+                                    b_res = await b_res
+                            finally:
+                                c.runtime.clear_cancel_token(job_id, "blocks")
+                            job = c.jobs.load_job(job_id)
+                            c.runtime.log_stage_end(
+                                job_id,
+                                "blocks",
+                                duration_ms=(time.perf_counter() - t0) * 1000,
+                                outputs={
+                                    "status": _status_str(job.status),
+                                    "blocks_count": len(b_res) if isinstance(b_res, (list, tuple)) else None,
+                                },
+                                message="Batch Step 3/5: Semantic blocks complete",
+                            )
 
                         if not status.is_running:
                             break
-                        status.pending_cuts = None
-                        status.waiting_for_approval = False
-
-                # Step 6/6: Render
-                if do_render and do_analysis:
-                    if not status.is_running:
-                        break
-                    status.current_step = "rendering"
-                    if job.status == JobStatus.WAITING_APPROVAL:
-                        active_stage = "render"
-                        t0 = time.perf_counter()
-                        c.runtime.log_stage_start(
-                            job_id,
-                            "render",
-                            inputs={"status": _status_str(job.status), "batch_id": batch_id},
-                            message="Batch Step 6/6: Rendering 9:16 vertical cuts",
+                        should_run_topics = job.status == JobStatus.BUILDING_TOPICS or (
+                            job.status == JobStatus.ANALYZING and not c.jobs.load_topic_segments(job_id)
                         )
-                        r_res = await get_rendering_service().render_job(job_id)
-                        job = c.jobs.load_job(job_id)
-                        c.runtime.log_stage_end(
-                            job_id,
-                            "render",
-                            duration_ms=(time.perf_counter() - t0) * 1000,
-                            outputs={
-                                "status": _status_str(job.status),
-                                "rendered_count": len(r_res) if isinstance(r_res, (list, tuple)) else None,
-                            },
-                            message="Batch Step 6/6: Rendering complete",
-                        )
+                        should_run_llm_session = should_run_topics or job.status == JobStatus.ANALYZING
+                        lmstudio = getattr(c, "lmstudio", None)
 
-                if job_id not in status.completed_jobs:
-                    status.completed_jobs.append(job_id)
-                    status.completed = len(status.completed_jobs)
+                        async def _run_batch_topics_and_analysis() -> None:
+                            nonlocal job, active_stage
+                            status.current_step = "topic_segments"
+                            self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                            if should_run_topics:
+                                active_stage = "topics"
+                                t0 = time.perf_counter()
+                                c.runtime.log_stage_start(
+                                    job_id,
+                                    "topics",
+                                    inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                    message="Batch Step 4/5: Building topic segments",
+                                )
+                                c.runtime.create_cancel_token(job_id, "topics")
+                                try:
+                                    t_res = await build_topic_segments(job_id, container=c)
+                                finally:
+                                    c.runtime.clear_cancel_token(job_id, "topics")
+                                job = c.jobs.load_job(job_id)
+                                c.runtime.log_stage_end(
+                                    job_id,
+                                    "topics",
+                                    duration_ms=(time.perf_counter() - t0) * 1000,
+                                    outputs={
+                                        "status": _status_str(job.status),
+                                        "topics_count": len(t_res) if isinstance(t_res, (list, tuple)) else None,
+                                    },
+                                    message="Batch Step 4/5: Topic segmentation complete",
+                                )
 
-                c.runtime.log_stage_end(
-                    job_id,
-                    "batch",
-                    duration_ms=(time.perf_counter() - job_t0) * 1000,
-                    outputs={"batch_id": batch_id, "final_status": _status_str(job.status)},
-                    message=f"Job finished in batch {batch_id}",
-                )
+                            if not status.is_running:
+                                return
+                            status.current_step = "analysis"
+                            self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                            if job.status == JobStatus.ANALYZING:
+                                active_stage = "analysis"
+                                t0 = time.perf_counter()
+                                c.runtime.log_stage_start(
+                                    job_id,
+                                    "analysis",
+                                    inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                    message="Batch Step 5/5: Analyzing narrative cuts",
+                                )
+                                c.runtime.create_cancel_token(job_id, "analysis")
+                                try:
+                                    a_res = await analyze_job(job_id, container=c)
+                                finally:
+                                    c.runtime.clear_cancel_token(job_id, "analysis")
+                                job = c.jobs.load_job(job_id)
+                                c.runtime.log_stage_end(
+                                    job_id,
+                                    "analysis",
+                                    duration_ms=(time.perf_counter() - t0) * 1000,
+                                    outputs={
+                                        "status": _status_str(job.status),
+                                        "cuts_count": _count_result_items(a_res, "cuts"),
+                                    },
+                                    message="Batch Step 5/5: Narrative analysis complete",
+                                )
 
-            except OperationCancelledError:
-                c.runtime.append_task_log(
-                    job_id,
-                    "batch",
-                    f"[batch] Job cancelled cooperatively during stage '{active_stage}'",
-                    level="WARNING",
-                )
-                if not status.is_running:
-                    break
-            except Exception as exc:
-                c.runtime.log_exception(
-                    job_id,
-                    active_stage,
-                    exc,
-                    message=f"Batch {batch_id} failed on job '{job_id}' during stage '{active_stage}'",
-                    context={
-                        "batch_id": batch_id,
-                        "job_id": job_id,
-                        "job_index": idx,
-                        "current_step": status.current_step,
-                        "failed_stage": active_stage,
-                    },
-                    include_env_diagnostics=True,
-                )
-                if active_stage != "batch":
-                    c.runtime.log_exception(
+                        if should_run_llm_session and lmstudio is not None:
+                            async with lmstudio.pipeline_session(job_id=job_id, task_log="batch"):
+                                await _run_batch_topics_and_analysis()
+                        elif should_run_llm_session:
+                            await _run_batch_topics_and_analysis()
+
+                        # Pre-approval gate
+                        if pre_approve:
+                            status.current_step = "waiting_approval"
+                            status.waiting_for_approval = True
+                            c.runtime.append_task_log(
+                                job_id,
+                                "batch",
+                                f"[batch] Waiting for user approval before rendering (batch={batch_id})",
+                            )
+                            try:
+                                cuts = c.jobs.load_cuts(job_id)
+                                status.pending_cuts = [
+                                    ct.model_dump() if hasattr(ct, "model_dump") else ct for ct in cuts
+                                ]
+                            except Exception:
+                                status.pending_cuts = []
+                            self._sync_runtime_batch(c, batch_id, status, batch_status="waiting_approval")
+
+                            event = self._approval_events.get(batch_id)
+                            while status.waiting_for_approval and status.is_running:
+                                if event is not None:
+                                    try:
+                                        await asyncio.wait_for(event.wait(), timeout=0.5)
+                                        event.clear()
+                                    except asyncio.TimeoutError:
+                                        pass
+                                else:
+                                    await asyncio.sleep(0.5)
+
+                            if not status.is_running:
+                                break
+                            status.pending_cuts = None
+                            status.waiting_for_approval = False
+                            self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+
+                    # Step 6/6: Render
+                    if do_render and do_analysis:
+                        if not status.is_running:
+                            break
+                        status.current_step = "rendering"
+                        self._sync_runtime_batch(c, batch_id, status, batch_status="running")
+                        if job.status == JobStatus.WAITING_APPROVAL:
+                            active_stage = "render"
+                            t0 = time.perf_counter()
+                            c.runtime.log_stage_start(
+                                job_id,
+                                "render",
+                                inputs={"status": _status_str(job.status), "batch_id": batch_id},
+                                message="Batch Step 6/6: Rendering 9:16 vertical cuts",
+                            )
+                            r_res = await get_rendering_service().render_job(job_id)
+                            job = c.jobs.load_job(job_id)
+                            c.runtime.log_stage_end(
+                                job_id,
+                                "render",
+                                duration_ms=(time.perf_counter() - t0) * 1000,
+                                outputs={
+                                    "status": _status_str(job.status),
+                                    "rendered_count": len(r_res) if isinstance(r_res, (list, tuple)) else None,
+                                },
+                                message="Batch Step 6/6: Rendering complete",
+                            )
+
+                    if job_id not in status.completed_jobs:
+                        status.completed_jobs.append(job_id)
+                        status.completed = len(status.completed_jobs)
+
+                    c.runtime.log_stage_end(
                         job_id,
                         "batch",
+                        duration_ms=(time.perf_counter() - job_t0) * 1000,
+                        outputs={"batch_id": batch_id, "final_status": _status_str(job.status)},
+                        message=f"Job finished in batch {batch_id}",
+                    )
+
+                except OperationCancelledError:
+                    c.runtime.append_task_log(
+                        job_id,
+                        "batch",
+                        f"[batch] Job cancelled cooperatively during stage '{active_stage}'",
+                        level="WARNING",
+                    )
+                    if not status.is_running:
+                        break
+                except Exception as exc:
+                    c.runtime.log_exception(
+                        job_id,
+                        active_stage,
                         exc,
-                        message=f"Batch job '{job_id}' failed at stage '{active_stage}'",
-                        context={"batch_id": batch_id, "failed_stage": active_stage},
+                        message=f"Batch {batch_id} failed on job '{job_id}' during stage '{active_stage}'",
+                        context={
+                            "batch_id": batch_id,
+                            "job_id": job_id,
+                            "job_index": idx,
+                            "current_step": status.current_step,
+                            "failed_stage": active_stage,
+                        },
+                        include_env_diagnostics=True,
+                    )
+                    if active_stage != "batch":
+                        c.runtime.log_exception(
+                            job_id,
+                            "batch",
+                            exc,
+                            message=f"Batch job '{job_id}' failed at stage '{active_stage}'",
+                            context={"batch_id": batch_id, "failed_stage": active_stage},
+                            include_env_diagnostics=False,
+                        )
+                    c.runtime.log_exception(
+                        batch_id,
+                        "batch",
+                        exc,
+                        message=f"Batch {batch_id} failure on job '{job_id}' at '{status.current_step}'",
+                        context={
+                            "job_id": job_id,
+                            "job_index": idx,
+                            "current_step": status.current_step,
+                            "failed_stage": active_stage,
+                        },
                         include_env_diagnostics=False,
                     )
-                c.runtime.log_exception(
-                    batch_id,
-                    "batch",
-                    exc,
-                    message=f"Batch {batch_id} failure on job '{job_id}' at '{status.current_step}'",
-                    context={
-                        "job_id": job_id,
-                        "job_index": idx,
-                        "current_step": status.current_step,
-                        "failed_stage": active_stage,
-                    },
-                    include_env_diagnostics=False,
-                )
-                try:
-                    c.jobs.update_job_status(job_id, JobStatus.ERROR)
-                except Exception:
-                    pass
-                status.failed_jobs.append({"job_id": job_id, "error": str(exc)})
-                status.failed = len(status.failed_jobs)
+                    try:
+                        c.jobs.update_job_status(job_id, JobStatus.ERROR)
+                    except Exception:
+                        pass
+                    status.failed_jobs.append({"job_id": job_id, "error": str(exc)})
+                    status.failed = len(status.failed_jobs)
 
-        status.is_running = False
-        if len(status.completed_jobs) == len(status.jobs):
-            status.current_step = "completed"
-        elif not status.is_running and status.current_step != "completed":
-            status.current_step = "cancelled"
+            was_cancelled = status.current_step == "cancelled"
+            status.is_running = False
+            if len(status.completed_jobs) == len(status.jobs):
+                status.current_step = "completed"
+                final_batch_status = "completed"
+            elif not status.is_running and status.current_step != "completed":
+                status.current_step = "cancelled"
+                final_batch_status = "error" if (status.failed_jobs and not was_cancelled) else "cancelled"
+            else:
+                final_batch_status = "completed"
 
-        c.runtime.log_stage_end(
-            batch_id,
-            "batch",
-            duration_ms=(time.perf_counter() - batch_t0) * 1000,
-            outputs={
-                "final_step": status.current_step,
-                "completed": status.completed,
-                "failed": status.failed,
-                "failed_jobs": status.failed_jobs,
-            },
-            message=f"Batch {batch_id} finished ({status.current_step})",
-        )
+            self._sync_runtime_batch(c, batch_id, status, batch_status=final_batch_status)
+            final_synced = True
+
+            c.runtime.log_stage_end(
+                batch_id,
+                "batch",
+                duration_ms=(time.perf_counter() - batch_t0) * 1000,
+                outputs={
+                    "final_step": status.current_step,
+                    "completed": status.completed,
+                    "failed": status.failed,
+                    "failed_jobs": status.failed_jobs,
+                },
+                message=f"Batch {batch_id} finished ({status.current_step})",
+            )
+        finally:
+            if not final_synced:
+                status.is_running = False
+                self._sync_runtime_batch(c, batch_id, status, batch_status="error")
 
 
 _GLOBAL_BATCH_RUNNER: BatchRunner | None = None
