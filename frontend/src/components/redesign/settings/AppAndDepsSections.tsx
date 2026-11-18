@@ -431,7 +431,7 @@ const DEPENDENCY_ROWS: DependencyRowMeta[] = [
 ];
 
 const TABLE_GRID =
-  "grid grid-cols-[minmax(220px,1.7fr)_116px_172px_36px] items-stretch";
+  "grid grid-cols-[minmax(220px,1.7fr)_144px_144px_36px] items-stretch";
 const CELL_DIVIDER = "border-r border-white/[0.06]";
 
 const PYTORCH_TIERS: Array<{ value: PytorchGpuTier; label: string }> = [
