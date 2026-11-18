@@ -33,6 +33,19 @@ export { listCuts, updateCuts, approveCut, rejectCut, analyzeJob } from "./cuts"
 // Rendering API
 export { renderJob, listRenderOutputs, deleteRenderOutput, openRenderFolder } from "./rendering";
 
+// Watermark API
+export {
+  getWatermark,
+  updateWatermark,
+  uploadWatermarkImage,
+  deleteWatermarkImage,
+  restoreWatermarkDefaults,
+  buildWatermarkImageUrl,
+  WATERMARK_DEFAULT_APPEARANCE,
+  type WatermarkPatch,
+  type WatermarkSettings,
+} from "./watermark";
+
 // Cancel API
 export { cancelJob, cancelTranscription, cancelRendering } from "./cancel";
 

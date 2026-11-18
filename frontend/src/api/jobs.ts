@@ -52,6 +52,7 @@ export async function runJobPipeline(
     vertical_mode?: "crop" | "blur" | "zoom" | "split_podcast";
     subtitle_style?: "word_highlight" | "sentence";
     include_render?: boolean;
+    watermark?: boolean;
   },
 ): Promise<{ started: boolean; job_id: string; status: string }> {
   return request<{ started: boolean; job_id: string; status: string }>(`/jobs/${jobId}/run`, {

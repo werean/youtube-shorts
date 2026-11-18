@@ -58,6 +58,15 @@ def saved_llm_prompts_file_path() -> Path:
     return data_dir() / "saved_llm_prompts.json"
 
 
+def local_profile_dir() -> Path:
+    """Folder of the local profile (`data/profile/`), used while no storage root is configured."""
+    return data_dir() / "profile"
+
+
+def local_profile_file_path() -> Path:
+    return local_profile_dir() / "profile.json"
+
+
 def jobs_dir() -> Path:
     return data_dir() / "jobs"
 

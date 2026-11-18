@@ -3,7 +3,7 @@ import type { Segment } from "./types";
 import type { FFmpegConfig } from "./types/ffmpeg";
 import type { WhisperConfig } from "./types/whisper";
 import type { ToolConfigs } from "./types/toolConfigs";
-import { useJobEvents, useUIState } from "./hooks";
+import { useJobEvents, useUIState, useWatermark } from "./hooks";
 import { useCutsWorkflow } from "./hooks/useCutsWorkflow";
 import { useCutTimestampWorkflow } from "./hooks/useCutTimestampWorkflow";
 import { useDependencyManagementWorkflow } from "./hooks/useDependencyManagementWorkflow";
@@ -52,6 +52,7 @@ import { FloatingChrome } from "./components/redesign/FloatingChrome";
 import { GlassDock, type DockCutItem } from "./components/redesign/GlassDock";
 import { ImmersiveVideoStage } from "./components/redesign/ImmersiveVideoStage";
 import { NewVideoModal } from "./components/redesign/NewVideoModal";
+import { WatermarkAskDialog } from "./components/redesign/WatermarkAskDialog";
 import { SettingsHubModal } from "./components/redesign/SettingsHubModal";
 import type { LLMAutoSavePatch } from "./components/redesign/settings/AISections";
 import type {
@@ -272,6 +273,8 @@ export default function App() {
     [videos, archivedVideos, activeVideoId],
   );
 
+  const watermark = useWatermark();
+
   const {
     selectedVideosForBatch,
     batchPipelineOptions,
@@ -295,6 +298,7 @@ export default function App() {
       setVideos(items);
       void hydrateTranscriptionsRef.current?.(items, updateVideo);
     },
+    resolveWatermark: watermark.resolveForRender,
   });
 
   const {
@@ -452,6 +456,7 @@ export default function App() {
     updateVideo,
     prepareRenderTaskLog,
     stopTaskLogsPolling: stopSharedTaskLogsPolling,
+    resolveWatermark: watermark.resolveForRender,
     onRenderTimeout: () => {
       setAction({
         busy: false,
@@ -1442,6 +1447,10 @@ export default function App() {
       return;
     }
 
+    // Modo "Perguntar antes": uma pergunta por clique; cancelar não gera nada.
+    const watermarkDecision = await watermark.resolveForRender();
+    if (!watermarkDecision.proceed) return;
+
     activeBatchJobIdRef.current = targetJobId;
     setActiveBatchJobId(targetJobId);
     markJobProcessing(targetJobId, true);
@@ -1451,6 +1460,9 @@ export default function App() {
         analysis: true,
         render: true,
         preApprove: reviewBeforeRender,
+        ...(watermarkDecision.watermark !== undefined
+          ? { watermark: watermarkDecision.watermark }
+          : {}),
       });
     } catch (err: any) {
       if (activeBatchJobIdRef.current === targetJobId) {
@@ -1604,6 +1616,8 @@ export default function App() {
       void prepareDependenciesDialog();
     } else if (section === "ai-model" || section === "ai-search") {
       void refreshOllamaModelOptions(false);
+    } else if (section === "watermark") {
+      void watermark.refresh();
     } else if (section === "batch") {
       if (!isBatchProcessing) {
         openBatchPipelineDialog();
@@ -1707,6 +1721,10 @@ export default function App() {
           const settingsRes = await resetAppSettings("folders");
           setAppSettings(settingsRes);
           setConfigBaseDir(settingsRes.media.base_dir);
+          break;
+        }
+        case "watermark": {
+          await watermark.restoreDefaults();
           break;
         }
         case "app-download": {
@@ -2135,7 +2153,7 @@ export default function App() {
         open={showSettingsHub}
         initialSection={settingsInitialSection}
         onClose={() => setShowSettingsHub(false)}
-        suppressEscape={showInstallationDialog}
+        suppressEscape={showInstallationDialog || watermark.ask.open}
         onSectionEnter={prepareSettingsSection}
         baseDir={configBaseDir}
         downloadResolution={configDownloadResolution}
@@ -2185,6 +2203,7 @@ export default function App() {
         onSaveWhisper={handleAutoSaveWhisper}
         ffmpegConfig={ffmpegConfig}
         onSaveFFmpeg={handleAutoSaveFFmpeg}
+        watermark={watermark}
         videos={videos}
         selectedVideosForBatch={selectedVideosForBatch}
         batchPipelineOptions={batchPipelineOptions}
@@ -2202,6 +2221,13 @@ export default function App() {
         pendingRestores={pendingRestores}
         onStartRestore={handleStartRestore}
         onCancelRestore={handleCancelRestore}
+      />
+
+      <WatermarkAskDialog
+        open={watermark.ask.open}
+        imageUrl={watermark.ask.imageUrl}
+        onAnswer={(add, dontAskAgain) => void watermark.answerAsk(add, dontAskAgain)}
+        onCancel={watermark.cancelAsk}
       />
 
       {/* Diálogos de suporte e configuração existentes */}

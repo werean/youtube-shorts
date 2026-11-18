@@ -26,6 +26,9 @@ data/jobs/*
 upload/*
 !upload/.gitkeep
 
+# Local profile (watermark image and preferences)
+data/profile/
+
 # Logs
 logs/
 *.log

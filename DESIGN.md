@@ -414,6 +414,9 @@ Inicia em background a renderização vertical (`1080x1920`, `9:16`) de todos os
 }
 ```
 
+- **Request Body (opcional):** `{ "cut_ids"?: string[], "watermark"?: boolean }`. `watermark: true` aplica a marca d'água do perfil, `false` não aplica, ausente segue o modo do perfil (`always` aplica; `never` e `ask` não aplicam, e `ask` só é resolvido pela tela). Corpo vazio ou sem o campo = comportamento anterior.
+- **`400 Bad Request`:** `{ "detail": "A imagem da marca d'água não foi encontrada.", "code": "watermark_missing" }` quando a marca vai ser aplicada e a imagem não existe ou não decodifica. Nada é renderizado.
+
 #### `POST /jobs/:job_id/render/cancel`
 Cancela a renderização em andamento, mata a árvore de subprocessos FFmpeg ativos, remove arquivos `.mp4` e `.ass` parciais incompletos e retorna o Job para `DOWNLOADED`.
 - **Response `200 OK`:** `{ "ok": true, "job_id": "..." }`.
@@ -451,6 +454,8 @@ Executa o pipeline completo de forma sequencial para um vídeo a partir da etapa
 ```
 - **Response `200 OK`:** Objeto `Job` atualizado ao final do pipeline (com `status: "DONE"` quando `include_render: true`).
 
+Campo opcional `watermark?: boolean` no corpo (mesma regra de `POST /jobs/:job_id/render`; `400` `watermark_missing` antes de iniciar o pipeline quando `include_render` é verdadeiro).
+
 #### `POST /jobs/batch/run`
 Inicia o processamento em lote para múltiplos vídeos com suporte a pausa opcional para aprovação (`preApprove`).
 - **Request Body:**
@@ -466,6 +471,8 @@ Inicia o processamento em lote para múltiplos vídeos com suporte a pausa opcio
 }
 ```
 - **Response `200 OK`:** `{ "batch_id": "batch_1762804800000", "status": "started" }`.
+
+Campo opcional `options.watermark?: boolean` (mesma regra; `400` `watermark_missing` antes de enfileirar o lote quando `options.render` é verdadeiro).
 
 #### `GET /jobs/batch/:batch_id/status`, `POST /jobs/batch/:batch_id/cancel`, `POST /jobs/batch/:batch_id/continue`
 Consulta o progresso do lote (`BatchPipelineProgress`), cancela a execução (propagando o cancelamento imediatamente para a transcrição, chamada HTTP ao LLM ou renderização FFmpeg do `current_job_id` em andamento) ou retoma após a curadoria dos cortes pendentes (`pending_cuts`).
@@ -558,3 +565,31 @@ Gerencia o prompt do sistema e templates salvos pelo usuário em `data/saved_llm
 
 #### `GET /config/dependencies` e Rotas de Instalação (`/config/dependencies/*`)
 Verifica o status de instalação de `python`, `whisper` (`faster-whisper` / `openai-whisper`), `ytdlp`, `ffmpeg`, `cuda`, `pytorch` (incluindo suporte explícito a `rtx_5000` para a **RTX 5070** com CUDA 12.8) e `ollama` / `lmstudio`.
+
+---
+
+### 5.10 Perfil local e Marca d'Água (`/profiles`)
+
+Fase 1 de `docs/profiles-publishing/`. Só existe o perfil local (`data/profile/profile.json`, `profile_id: "p_local"`); `:profile_id` aceita os aliases `active` e `p_local` (outro valor: `404` `{ "detail": "Profile not found" }`). Rotas marcadas como **local** recusam chamadas que não venham de `127.0.0.1`/`::1`, ou cujo `Origin` não seja `localhost`/`127.0.0.1`: `403` `{ "detail": "Esta ação só pode ser feita neste computador.", "code": "local_only" }`.
+
+#### `GET /profiles/:profile_id/watermark`
+- **Response `200 OK`:** `WatermarkSettings` — `{ "mode": "always" | "never" | "ask", "has_image": boolean, "image_url": string | null, "opacity": number, "position": string, "size_percent": number, "image": { "width", "height", "updated_at" } | null }`. Padrões: `mode: "never"`, `opacity: 0.7`, `position: "top-right"`, `size_percent: 18`.
+- `position`: `top-left | top-center | top-right | middle-left | center | middle-right | bottom-left | bottom-center | bottom-right`.
+
+#### `PUT /profiles/:profile_id/watermark` (local)
+- **Request Body:** qualquer subconjunto de `{ "mode", "opacity" (0,05 a 1,0), "position", "size_percent" (inteiro de 5 a 50) }`.
+- **Response `200 OK`:** `WatermarkSettings`. **`400`** valor fora da faixa ou de tipo errado (`{ "detail": "..." }`); **`400`** `watermark_missing` ao pedir `mode` diferente de `never` sem imagem.
+- "Restaurar padrões" é esta rota com `{ "opacity": 0.7, "position": "top-right", "size_percent": 18 }`: não muda o modo nem apaga a imagem.
+
+#### `POST /profiles/:profile_id/watermark/image` (local)
+- `multipart/form-data`, campo `file`. Aceita PNG, JPEG e WebP (verificados pelos bytes, não pela extensão), até 5 MB e de 16 a 4096 px por lado. A imagem é sempre regravada como PNG com transparência em `data/profile/marca-dagua/watermark.png`; o nome enviado é descartado.
+- **Response `200 OK`:** `WatermarkSettings`. O `mode` **não muda** com o envio.
+- **`400`** `{ "detail": "...", "code": "invalid_image" }` ("Use uma imagem PNG, JPG ou WebP.", "A imagem passa de 5 MB.", "A imagem é grande demais.", "A imagem é pequena demais.", "Não foi possível ler a imagem.").
+
+#### `GET /profiles/:profile_id/watermark/image`
+- **Response `200 OK`:** `image/png`. **`404`** `{ "detail": "Watermark not found" }`.
+
+#### `DELETE /profiles/:profile_id/watermark/image` (local)
+- Apaga a imagem pelo caminho fixo e volta o modo para `never`. **Response `200 OK`:** `WatermarkSettings`.
+
+Erro adicional de todas as rotas acima quando `profile.json` existe e não pode ser lido: `409` `{ "detail": "Não foi possível ler o perfil.", "code": "profile_unreadable" }` (o arquivo nunca é sobrescrito).

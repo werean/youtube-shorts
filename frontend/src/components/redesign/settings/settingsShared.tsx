@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -29,10 +30,11 @@ export type SectionId =
   | "ffmpeg-visual"
   | "ffmpeg-audio"
   | "ffmpeg-advanced"
+  | "watermark"
   | "batch"
   | "how-to-use";
 
-export type NavIconName = "gear" | "cpu" | "sparkle" | "microphone" | "film";
+export type NavIconName = "gear" | "cpu" | "sparkle" | "microphone" | "film" | "stamp";
 
 export interface NavChild {
   id: SectionId;
@@ -60,6 +62,12 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
       { id: "app-folders", label: "Pastas" },
       { id: "app-download", label: "Download" },
     ],
+  },
+  {
+    id: "marca-dagua",
+    label: "Marca d'água",
+    icon: "stamp",
+    leafId: "watermark",
   },
   {
     id: "dependencias",
@@ -331,14 +339,28 @@ export interface FormatChipProps {
   onToggle?: () => void;
   disabled?: boolean;
   className?: string;
+  /** Com `role="radio"` o chip usa `aria-checked` (uso dentro de `SegmentedChoice`). */
+  role?: "radio";
+  tabIndex?: number;
 }
 
 /** Chip de formato. Selecionado = contorno azul sutil e fundo leve. */
-export function FormatChip({ label, selected, onToggle, disabled, className }: FormatChipProps) {
+export function FormatChip({
+  label,
+  selected,
+  onToggle,
+  disabled,
+  className,
+  role,
+  tabIndex,
+}: FormatChipProps) {
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      role={role}
+      tabIndex={tabIndex}
+      aria-pressed={role === "radio" ? undefined : selected}
+      aria-checked={role === "radio" ? selected : undefined}
       disabled={disabled}
       onClick={onToggle}
       className={cx(
@@ -471,6 +493,7 @@ export const RESTORABLE_SECTIONS: ReadonlyArray<SectionId> = [
   "ffmpeg-visual",
   "ffmpeg-audio",
   "ffmpeg-advanced",
+  "watermark",
 ];
 
 export interface RestoreDefaultsButtonProps {
@@ -699,5 +722,245 @@ export function RestoreDefaultsButton({
           document.body,
         )}
     </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cartão de configuração, controle deslizante, escolha segmentada e grade     */
+/* -------------------------------------------------------------------------- */
+
+/** Mesmas classes do `CARD_CLASS` privado de `AppAndDepsSections.tsx`. */
+export const SETTINGS_CARD_CLASS = "rounded-card border border-line bg-glass";
+
+/* ----------------------------- SettingsSlider ----------------------------- */
+
+export interface SettingsSliderProps {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (next: number) => void;
+  ariaLabel: string;
+  /** Texto lido por leitores de tela (ex.: "30 por cento"). */
+  ariaValueText?: string;
+  /** Texto exibido ao lado (ex.: "30%"). */
+  valueLabel?: ReactNode;
+  disabled?: boolean;
+  className?: string;
+}
+
+/**
+ * Trilha de 4 px, preenchimento de acento e botão branco de 12 px. O
+ * `<input type="range">` fica por baixo (transparente) e cuida do teclado.
+ */
+export function SettingsSlider({
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  ariaLabel,
+  ariaValueText,
+  valueLabel,
+  disabled,
+  className,
+}: SettingsSliderProps) {
+  const span = max - min;
+  const ratio = span > 0 ? Math.min(1, Math.max(0, (value - min) / span)) : 0;
+
+  return (
+    <div className={cx("flex items-center gap-3", disabled && "opacity-50", className)}>
+      <div className="relative h-4 flex-1">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-pill bg-white/[0.18]"
+        >
+          <div className="h-full rounded-pill bg-accent" style={{ width: `${ratio * 100}%` }} />
+        </div>
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          style={{ left: `${ratio * 100}%` }}
+        />
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          aria-label={ariaLabel}
+          aria-valuetext={ariaValueText}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+        />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-pill peer-focus-visible:ring-2 peer-focus-visible:ring-accent-ring"
+        />
+      </div>
+      {valueLabel !== undefined && (
+        <span className="w-10 shrink-0 text-right text-sm text-text-2 tabular-nums">
+          {valueLabel}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- SegmentedChoice ----------------------------- */
+
+export interface SegmentedChoiceOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+export interface SegmentedChoiceProps<T extends string> {
+  options: ReadonlyArray<SegmentedChoiceOption<T>>;
+  value: T;
+  onChange: (next: T) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** Fileira de `FormatChip` com `role="radiogroup"` e setas do teclado. */
+export function SegmentedChoice<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+  disabled,
+  className,
+}: SegmentedChoiceProps<T>) {
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (disabled) return;
+    const keys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const index = options.findIndex((option) => option.value === value);
+    const nextIndex = (Math.max(0, index) + (forward ? 1 : -1) + options.length) % options.length;
+    onChange(options[nextIndex].value);
+    window.requestAnimationFrame(() => {
+      groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
+    });
+  }
+
+  return (
+    <div
+      ref={groupRef}
+      role="radiogroup"
+      aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
+      className={cx("flex flex-wrap items-center gap-2", className)}
+    >
+      {options.map((option) => (
+        <FormatChip
+          key={option.value}
+          role="radio"
+          label={option.label}
+          selected={option.value === value}
+          tabIndex={option.value === value ? 0 : -1}
+          disabled={disabled}
+          onToggle={() => onChange(option.value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------ PositionGrid ------------------------------ */
+
+export const POSITION_GRID_OPTIONS = [
+  { value: "top-left", label: "Canto superior esquerdo" },
+  { value: "top-center", label: "Topo ao centro" },
+  { value: "top-right", label: "Canto superior direito" },
+  { value: "middle-left", label: "Meio à esquerda" },
+  { value: "center", label: "Centro" },
+  { value: "middle-right", label: "Meio à direita" },
+  { value: "bottom-left", label: "Canto inferior esquerdo" },
+  { value: "bottom-center", label: "Base ao centro" },
+  { value: "bottom-right", label: "Canto inferior direito" },
+] as const;
+
+export interface PositionGridProps<T extends string> {
+  value: T;
+  onChange: (next: T) => void;
+  ariaLabel?: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** Grade 3×3 de botões de 28 px. O escolhido usa o estilo de `[data-pick-tile]` selecionado. */
+export function PositionGrid<T extends string = string>({
+  value,
+  onChange,
+  ariaLabel = "Posição",
+  disabled,
+  className,
+}: PositionGridProps<T>) {
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (disabled) return;
+    const delta: Record<string, number> = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -3,
+      ArrowDown: 3,
+    };
+    const step = delta[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    const index = Math.max(
+      0,
+      POSITION_GRID_OPTIONS.findIndex((option) => option.value === value),
+    );
+    const column = index % 3;
+    if ((step === -1 && column === 0) || (step === 1 && column === 2)) return;
+    const nextIndex = index + step;
+    if (nextIndex < 0 || nextIndex > 8) return;
+    onChange(POSITION_GRID_OPTIONS[nextIndex].value as T);
+    window.requestAnimationFrame(() => {
+      groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
+    });
+  }
+
+  return (
+    <div
+      ref={groupRef}
+      role="radiogroup"
+      aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
+      className={cx("inline-grid grid-cols-3 gap-1.5", className)}
+    >
+      {POSITION_GRID_OPTIONS.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={option.label}
+            title={option.label}
+            tabIndex={selected ? 0 : -1}
+            disabled={disabled}
+            data-pick-tile
+            data-selected={selected ? "true" : "false"}
+            onClick={() => onChange(option.value as T)}
+            className={cx(
+              "h-7 w-7 rounded-thumb border border-line transition-colors duration-fast",
+              "disabled:opacity-50 disabled:pointer-events-none",
+              "focus-visible:ring-2 focus-visible:ring-accent-ring",
+              selected ? "pick" : "bg-glass hover:bg-glass-hover hover:border-line-strong",
+            )}
+          />
+        );
+      })}
+    </div>
   );
 }

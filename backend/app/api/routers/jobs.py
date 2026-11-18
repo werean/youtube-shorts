@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 from app.api.routers import (
     jobs_analysis,
@@ -29,9 +30,32 @@ from app.application.orchestrator import (
     run_job_pipeline,
 )
 from app.application.runtime_service import OperationCancelledError, get_container
+from app.domain.profiles import watermark as wm
 from app.models.domain import JobStatus
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _parse_watermark(body: dict[str, Any]) -> bool | None:
+    try:
+        return wm.parse_watermark_flag(body.get("watermark"))
+    except wm.WatermarkPatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+def _check_watermark_ready(raw: Any) -> bool | None:
+    """Validate the optional `watermark` flag and fail with `400 watermark_missing` when it cannot be applied."""
+    try:
+        flag = wm.parse_watermark_flag(raw)
+        wm.decide_watermark(flag)
+    except wm.WatermarkPatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except wm.WatermarkMissingError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"detail": exc.detail, "code": "watermark_missing"},
+        ) from None
+    return flag
 
 
 # ============================================================================
@@ -58,6 +82,14 @@ async def run_batch_pipeline(
     options = body.get("options")
     if not isinstance(options, dict):
         options = {}
+
+    # Fail early (before queueing) when the watermark will be applied but its image is missing.
+    # The flag type is always validated; the image check only runs when the batch will really render
+    # (BatchRunner renders only when both `render` and `analysis` are on).
+    if bool(options.get("render", True)) and bool(options.get("analysis", True)):
+        await run_in_threadpool(_check_watermark_ready, options.get("watermark"))
+    else:
+        _parse_watermark(options)
 
     runner = get_batch_runner()
     batch = runner.start_batch(job_ids, options=options)
@@ -110,8 +142,16 @@ async def run_single_job_pipeline(
 ) -> dict[str, Any]:
     """Run full 1-click sequential processing pipeline for a job."""
     include_render = bool(body.get("include_render", True))
+    watermark = (
+        await run_in_threadpool(_check_watermark_ready, body.get("watermark"))
+        if include_render
+        else _parse_watermark(body)
+    )
     try:
-        job = await run_job_pipeline(job_id, include_render=include_render)
+        if watermark is None:
+            job = await run_job_pipeline(job_id, include_render=include_render)
+        else:
+            job = await run_job_pipeline(job_id, include_render=include_render, watermark=watermark)
         return job.model_dump()
     except JobNotFoundError:
         raise

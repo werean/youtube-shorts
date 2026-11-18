@@ -8,6 +8,7 @@ import {
   startBatchPipeline,
 } from "../api";
 import { recordToVideoItem, type VideoItem } from "../utils/videoHelpers";
+import type { WatermarkRenderDecision } from "./useWatermark";
 
 const initialBatchPipelineOptions: BatchPipelineOptions = {
   transcription: true,
@@ -18,9 +19,14 @@ const initialBatchPipelineOptions: BatchPipelineOptions = {
 
 interface BatchPipelineWorkflowOptions {
   onActiveVideosLoaded: (videos: VideoItem[]) => void;
+  /** Decide o campo `watermark` quando o lote inclui renderização (pergunta no modo "ask"). */
+  resolveWatermark?: () => Promise<WatermarkRenderDecision>;
 }
 
-export function useBatchPipelineWorkflow({ onActiveVideosLoaded }: BatchPipelineWorkflowOptions) {
+export function useBatchPipelineWorkflow({
+  onActiveVideosLoaded,
+  resolveWatermark,
+}: BatchPipelineWorkflowOptions) {
   const [showBatchPipelineDialog, setShowBatchPipelineDialog] = useState(false);
   const [selectedVideosForBatch, setSelectedVideosForBatch] = useState<string[]>([]);
   const [batchPipelineOptions, setBatchPipelineOptions] = useState(initialBatchPipelineOptions);
@@ -187,6 +193,15 @@ export function useBatchPipelineWorkflow({ onActiveVideosLoaded }: BatchPipeline
       return;
     }
 
+    let pipelineOptions = batchPipelineOptions;
+    if (batchPipelineOptions.render && resolveWatermark) {
+      const decision = await resolveWatermark();
+      if (!decision.proceed) return;
+      if (decision.watermark !== undefined) {
+        pipelineOptions = { ...batchPipelineOptions, watermark: decision.watermark };
+      }
+    }
+
     try {
       setIsBatchProcessing(true);
       setBatchProcessingLogs([
@@ -195,7 +210,7 @@ export function useBatchPipelineWorkflow({ onActiveVideosLoaded }: BatchPipeline
 
       setShowBatchPipelineDialog(false);
 
-      const result = await startBatchPipeline(selectedVideosForBatch, batchPipelineOptions);
+      const result = await startBatchPipeline(selectedVideosForBatch, pipelineOptions);
 
       setActiveBatchId(result.batch_id);
       setBatchProcessingLogs((prev) => [...prev, `Pipeline iniciado (ID: ${result.batch_id})`]);

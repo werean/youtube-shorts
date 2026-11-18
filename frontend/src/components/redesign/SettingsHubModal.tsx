@@ -8,12 +8,14 @@ import {
   Microphone,
   Question,
   Sparkle,
+  Stamp,
   X,
 } from "@phosphor-icons/react";
 import type { BatchPipelineOptions } from "@youtube-shorts/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { FFmpegConfig } from "../../types/ffmpeg";
 import type { WhisperConfig } from "../../types/whisper";
+import type { UseWatermarkResult } from "../../hooks/useWatermark";
 import {
   AIInstructionsSection,
   AIModelSection,
@@ -52,6 +54,7 @@ import {
   type SaveStatus,
   type SectionId,
 } from "./settings/settingsShared";
+import { WatermarkSection } from "./settings/WatermarkSection";
 import {
   WhisperAdvancedSection,
   WhisperLanguageSection,
@@ -121,6 +124,9 @@ export interface SettingsHubModalProps {
   ffmpegConfig: FFmpegConfig | null;
   onSaveFFmpeg: (config: FFmpegConfig) => Promise<void> | void;
 
+  // Marca d'água
+  watermark: UseWatermarkResult;
+
   // Processar em lote (Tela 13)
   videos: BatchSectionVideoItem[];
   selectedVideosForBatch: string[];
@@ -153,6 +159,8 @@ function renderNavIcon(icon: NavIconName, active: boolean) {
       return <Microphone size={16} weight="regular" className={className} />;
     case "film":
       return <FilmStrip size={16} weight="regular" className={className} />;
+    case "stamp":
+      return <Stamp size={16} weight="regular" className={className} />;
   }
 }
 
@@ -201,6 +209,7 @@ export function SettingsHubModal({
   onSaveWhisper,
   ffmpegConfig,
   onSaveFFmpeg,
+  watermark,
   videos,
   selectedVideosForBatch,
   batchPipelineOptions,
@@ -520,6 +529,8 @@ export function SettingsHubModal({
             reporter={reporter}
           />
         );
+      case "watermark":
+        return <WatermarkSection watermark={watermark} reporter={reporter} />;
       case "batch":
         return (
           <BatchSection

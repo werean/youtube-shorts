@@ -65,6 +65,7 @@ export interface BatchPipelineOptions {
   analysis: boolean;
   render: boolean;
   preApprove: boolean;
+  watermark?: boolean;
 }
 
 export interface BatchPipelineRequest {
@@ -300,4 +301,32 @@ export interface DeleteAttemptResponse {
   ok: boolean;
   attempt_id: string;
   attempts: AttemptSummary[];
+}
+
+// Marca d'água (perfis e publicação, fase 1)
+export type WatermarkMode = "always" | "never" | "ask";
+export type WatermarkPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "middle-left"
+  | "center"
+  | "middle-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+export interface WatermarkSettings {
+  mode: WatermarkMode;
+  has_image: boolean;
+  image_url: string | null;
+  opacity: number;
+  position: WatermarkPosition;
+  size_percent: number;
+  image: { width: number; height: number; updated_at: string } | null;
+}
+
+export interface RenderRequest {
+  cut_ids?: string[];
+  watermark?: boolean;
 }

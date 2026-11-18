@@ -79,6 +79,7 @@ async def run_job_pipeline(
     job_id: str,
     include_render: bool = True,
     container: ServiceContainer | None = None,
+    watermark: bool | None = None,
 ) -> Job:
     """Execute the full 1-click pipeline sequentially for a job.
 
@@ -390,7 +391,10 @@ async def run_job_pipeline(
                 percent=90.0,
                 message="Step 6/6: Renderizando cortes verticais 9:16 com Cinegrafista Virtual...",
             )
-            render_res = await get_rendering_service().render_job(job_id)
+            if watermark is None:
+                render_res = await get_rendering_service().render_job(job_id)
+            else:
+                render_res = await get_rendering_service().render_job(job_id, watermark=watermark)
             job = c.jobs.load_job(job_id)
             c.runtime.log_stage_end(
                 job_id,
@@ -692,6 +696,8 @@ class BatchRunner:
         do_analysis = bool(opts.get("analysis", True))
         do_render = bool(opts.get("render", True))
         pre_approve = bool(opts.get("preApprove", False))
+        raw_watermark = opts.get("watermark")
+        batch_watermark: bool | None = raw_watermark if isinstance(raw_watermark, bool) else None
         batch_t0 = time.perf_counter()
         final_synced = False
 
@@ -943,7 +949,12 @@ class BatchRunner:
                                 inputs={"status": _status_str(job.status), "batch_id": batch_id},
                                 message="Batch Step 6/6: Rendering 9:16 vertical cuts",
                             )
-                            r_res = await get_rendering_service().render_job(job_id)
+                            if batch_watermark is None:
+                                r_res = await get_rendering_service().render_job(job_id)
+                            else:
+                                r_res = await get_rendering_service().render_job(
+                                    job_id, watermark=batch_watermark
+                                )
                             job = c.jobs.load_job(job_id)
                             c.runtime.log_stage_end(
                                 job_id,

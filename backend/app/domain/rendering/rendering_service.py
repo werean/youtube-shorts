@@ -19,6 +19,7 @@ from app.application.runtime_service import (
     ServiceContainer,
     get_container,
 )
+from app.domain.profiles.watermark import WatermarkDecision, WatermarkMissingError, decide_watermark
 from app.domain.rendering.ass_generator import (
     TimelineMapper,
     build_timeline_mapper,
@@ -196,9 +197,25 @@ class RenderingService:
         *,
         cut_ids: Sequence[str] | None = None,
         synthetic_observations_provider: Callable[[float, float], list[FrameObservation]] | None = None,
+        watermark: bool | None = None,
     ) -> list[str]:
-        """Execute full 9:16 vertical rendering pipeline for approved or non-rejected cuts of `job_id`."""
+        """Execute full 9:16 vertical rendering pipeline for approved or non-rejected cuts of `job_id`.
+
+        `watermark`: `True`/`False` force the choice, `None` follows the profile mode (architecture.md 11.3).
+        When the mark is to be applied and the image is missing, `WatermarkMissingError` is raised BEFORE the job
+        changes state or any cut is rendered (never half with, half without).
+        """
         c = self.container
+
+        # 0. Watermark decision (may raise WatermarkMissingError; nothing has been touched yet)
+        try:
+            wm_decision: WatermarkDecision = decide_watermark(watermark)
+        except WatermarkMissingError as exc:
+            # Fixed message in the render log and in the job state (the image vanished after the route check).
+            c.runtime.append_task_log(job_id, "render", f"[rendering] ✗ Error: {exc.detail}")
+            c.jobs.update_job_status(job_id, JobStatus.ERROR)
+            c.runtime.publish_state_change(job_id, JobStatus.ERROR, exc.detail)
+            raise
 
         # 1. Check for conflicting active render jobs
         conflict_id = c.runtime.conflicting_active_rendering_job_id(job_id)
@@ -210,6 +227,7 @@ class RenderingService:
         # 2. Reset task logs and set status to RENDERING
         c.runtime.clear_task_logs(job_id, "render")
         c.runtime.append_task_log(job_id, "render", "[rendering] Starting render")
+        c.runtime.append_task_log(job_id, "render", wm_decision.log_line())
         c.jobs.update_job_status(job_id, JobStatus.RENDERING)
         c.runtime.publish_state_change(job_id, JobStatus.RENDERING, "Iniciando renderização vertical dos cortes")
 
@@ -376,6 +394,7 @@ class RenderingService:
                             burn_subtitles=burn_subtitles,
                             ass_path=ass_path if burn_subtitles else None,
                             has_audio=has_audio,
+                            watermark=wm_decision.overlay if wm_decision.apply else None,
                         )
                         write_filter_complex_script_file(
                             script_path,
@@ -391,6 +410,9 @@ class RenderingService:
                         c.runtime.register_partial_file(job_id, temp_output_path)
 
                         # F. Execute FFmpeg NVENC (with transparent fallback to libx264) into temp_output_path
+                        exec_kwargs: dict[str, Any] = {}
+                        if wm_decision.apply and wm_decision.image_path is not None:
+                            exec_kwargs["watermark_path"] = wm_decision.image_path
                         await self.ffmpeg_executor.execute_render_cut(
                             job_id=job_id,
                             input_path=video_path,
@@ -400,6 +422,7 @@ class RenderingService:
                             duration=dur,
                             cancel_token=cancel_token,
                             tool_config=tool_cfg,
+                            **exec_kwargs,
                         )
 
                         if cancel_token.is_set():

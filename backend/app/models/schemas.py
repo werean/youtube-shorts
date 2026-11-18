@@ -95,6 +95,7 @@ class UpdateCutsResponse(BaseModel):
 
 class RunPipelineRequest(BaseModel):
     include_render: bool = False
+    watermark: bool | None = None
 
 
 class BatchPipelineOptions(BaseModel):
@@ -102,6 +103,7 @@ class BatchPipelineOptions(BaseModel):
     analysis: bool = True
     render: bool = True
     preApprove: bool = False
+    watermark: bool | None = None
 
 
 class BatchPipelineRequest(BaseModel):

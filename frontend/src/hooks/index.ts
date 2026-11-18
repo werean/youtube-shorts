@@ -8,6 +8,7 @@ export { useUIState } from "./useUIState";
 export { useUpload } from "./useUpload";
 export { useAIAnalysis } from "./useAIAnalysis";
 export { useAnalysis } from "./useAnalysis";
+export { useWatermark, type UseWatermarkResult } from "./useWatermark";
 
 // New utility hooks
 export { usePolling, useAutoScroll } from "./usePolling";

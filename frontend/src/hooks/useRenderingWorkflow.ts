@@ -23,6 +23,8 @@ interface UseRenderingWorkflowOptions {
   prepareRenderTaskLog: () => void;
   stopTaskLogsPolling: () => void;
   onRenderTimeout: () => void;
+  /** Decide o campo `watermark` do pedido (pergunta no modo "ask"). */
+  resolveWatermark?: () => Promise<{ proceed: boolean; watermark?: boolean }>;
 }
 
 function formatTimestampForFilename(seconds: number): string {
@@ -76,6 +78,7 @@ export function useRenderingWorkflow({
   prepareRenderTaskLog,
   stopTaskLogsPolling,
   onRenderTimeout,
+  resolveWatermark,
 }: UseRenderingWorkflowOptions) {
   const [renderOutputs, setRenderOutputs] = useState<string[]>([]);
   const [renderOutputsVersion, setRenderOutputsVersion] = useState(0);
@@ -239,10 +242,17 @@ export function useRenderingWorkflow({
     return buildRenderUrlUtil(renderPath, renderOutputsVersion);
   }
 
-  function startRenderFlow() {
+  async function startRenderFlow() {
     if (!activeJobId) return undefined;
     const targetJobId = activeJobId;
     const expectedCutsToRender = getExpectedRenderCutCount(cuts);
+
+    let watermark: boolean | undefined;
+    if (resolveWatermark) {
+      const decision = await resolveWatermark();
+      if (!decision.proceed) return undefined;
+      watermark = decision.watermark;
+    }
 
     return runAction(async () => {
       console.log(`[UI] Renderização iniciada`);
@@ -253,7 +263,7 @@ export function useRenderingWorkflow({
 
       try {
         await updateCuts(targetJobId, cuts);
-        return await renderJob(targetJobId);
+        return await renderJob(targetJobId, { watermark });
       } catch (error) {
         stopRenderPolling();
         throw error;

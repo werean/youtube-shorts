@@ -14,6 +14,7 @@ from app.api.routers import jobs_ingest as jobs_ingest_router
 from app.api.routers import jobs_render as jobs_render_router
 from app.api.routers import jobs_transcription as jobs_transcription_router
 from app.api.routers import media as media_router
+from app.api.routers import profiles as profiles_router
 from app.api.routers import videos as videos_router
 from app.application.job_lifecycle import JobNotFoundError
 
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(config_router.router)
     app.include_router(videos_router.router)
     app.include_router(media_router.router)
+    app.include_router(profiles_router.router)
 
     # Modular Job routers (order is critical: batch routes in jobs_router mounted FIRST)
     app.include_router(jobs_router.router)

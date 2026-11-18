@@ -54,6 +54,23 @@ def resolve_filter_complex_script_flag() -> str:
     return "-filter_complex_script"
 
 
+def _watermark_input_args(watermark_path: str | Path | None) -> list[str]:
+    """FFmpeg input arguments for the optional watermark image (2nd input). Empty when no watermark.
+
+    The image is a plain argv element (no shell), so spaces, apostrophes, drive-letter colons and non-ASCII
+    characters need no escaping. A `%` in the path would be read by the image2 demuxer as a sequence pattern,
+    so `-pattern_type none` is added in that (rare) case.
+    """
+    if watermark_path is None:
+        return []
+    text = str(watermark_path)
+    args: list[str] = []
+    if "%" in text:
+        args.extend(["-pattern_type", "none"])
+    args.extend(["-i", text])
+    return args
+
+
 def build_ffmpeg_nvenc_command(
     *,
     input_path: str | Path,
@@ -66,6 +83,7 @@ def build_ffmpeg_nvenc_command(
     audio_codec: str = "aac",
     audio_bitrate: str = "192k",
     extra_video_flags: Sequence[str] | None = None,
+    watermark_path: str | Path | None = None,
 ) -> list[str]:
     """Construct FFmpeg command with NVIDIA NVENC hardware acceleration."""
     cmd = [
@@ -77,6 +95,7 @@ def build_ffmpeg_nvenc_command(
         f"{float(start_time):.3f}",
         "-i",
         str(input_path),
+        *_watermark_input_args(watermark_path),
         "-t",
         f"{float(duration):.3f}",
         resolve_filter_complex_script_flag(),
@@ -116,6 +135,7 @@ def build_ffmpeg_cpu_fallback_command(
     audio_codec: str = "aac",
     audio_bitrate: str = "192k",
     extra_video_flags: Sequence[str] | None = None,
+    watermark_path: str | Path | None = None,
 ) -> list[str]:
     """Construct FFmpeg command with CPU libx264 fallback encoding."""
     cmd = [
@@ -125,6 +145,7 @@ def build_ffmpeg_cpu_fallback_command(
         f"{float(start_time):.3f}",
         "-i",
         str(input_path),
+        *_watermark_input_args(watermark_path),
         "-t",
         f"{float(duration):.3f}",
         resolve_filter_complex_script_flag(),
@@ -193,6 +214,7 @@ class FFmpegNvencExecutor:
         cancel_token: CancelToken | None = None,
         on_log: Callable[[str], None] | None = None,
         tool_config: dict[str, Any] | None = None,
+        watermark_path: Path | None = None,
     ) -> bool:
         """Render a single cut using NVENC with transparent fallback to libx264."""
         token = cancel_token or self.container.runtime.get_cancel_token(job_id, "render")
@@ -212,6 +234,7 @@ class FFmpegNvencExecutor:
             start_time=start_time,
             duration=duration,
             video_preset=preset,
+            watermark_path=watermark_path,
         )
 
         def _log(line: str) -> None:
@@ -268,6 +291,7 @@ class FFmpegNvencExecutor:
                     script_path=script_path,
                     start_time=start_time,
                     duration=duration,
+                    watermark_path=watermark_path,
                 )
                 retcode = await runner(fallback_cmd, _cpu_log_capture, token)
                 if token and token.is_set():

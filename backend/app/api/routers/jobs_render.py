@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from app.api.routers.videos import default_open_folder_for_file
 from app.application.job_lifecycle import JobNotFoundError
 from app.application.runtime_service import get_container
 from app.core.settings import archived_videos_dir, load_settings
+from app.domain.profiles import watermark as wm
 from app.domain.rendering.rendering_service import (
     cancel_rendering_job,
     delete_rendered_file,
@@ -46,20 +48,35 @@ async def start_render_cuts(
             },
         )
 
-    # Optional cut_ids from request body
+    # Optional cut_ids / watermark from request body (empty or malformed body = defaults)
     cut_ids: list[str] | None = None
+    raw_watermark: Any = None
     try:
         body = await request.json()
-        if isinstance(body, dict) and "cut_ids" in body and isinstance(body["cut_ids"], list):
-            cut_ids = [str(cid) for cid in body["cut_ids"]]
+        if isinstance(body, dict):
+            if "cut_ids" in body and isinstance(body["cut_ids"], list):
+                cut_ids = [str(cid) for cid in body["cut_ids"]]
+            raw_watermark = body.get("watermark")
     except Exception:
         pass
+
+    # Resolve the watermark BEFORE starting: a missing image must fail the request, not render half the cuts.
+    try:
+        watermark = wm.parse_watermark_flag(raw_watermark)
+        await run_in_threadpool(wm.decide_watermark, watermark)
+    except wm.WatermarkPatchError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    except wm.WatermarkMissingError as exc:
+        return JSONResponse(status_code=400, content={"detail": exc.detail, "code": "watermark_missing"})
 
     service = get_rendering_service(container=container)
 
     async def _run_in_background() -> None:
         try:
-            await service.render_job(job_id, cut_ids=cut_ids)
+            if watermark is None:
+                await service.render_job(job_id, cut_ids=cut_ids)
+            else:
+                await service.render_job(job_id, cut_ids=cut_ids, watermark=watermark)
         except Exception as exc:
             # Errors are already logged to task_logs and job.status is set to ERROR
             pass

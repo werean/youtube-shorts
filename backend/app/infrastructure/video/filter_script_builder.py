@@ -99,6 +99,24 @@ def build_piecewise_linear_crop_expression(
     return expr
 
 
+@dataclass(frozen=True)
+class WatermarkOverlay:
+    """Pre-computed watermark geometry (values only; the image path is an FFmpeg input argument).
+
+    `x` / `y` are FFmpeg `overlay` expressions (`W`, `H`, `w`, `h` variables) already containing the margin.
+    """
+
+    box_width: int
+    box_height: int
+    opacity: float
+    x: str
+    y: str
+    # Optional explicit scaled size (even, >= 2). When set it replaces the box fit, which can round a
+    # dimension to 0 for very wide or very tall images.
+    scaled_width: int | None = None
+    scaled_height: int | None = None
+
+
 @dataclass
 class FilterScriptOptions:
     """Configuration options for building a cut's filtergraph script."""
@@ -112,6 +130,8 @@ class FilterScriptOptions:
     audio_fade_out_seconds: float = 0.05
     target_lufs: float = -14.0
     has_audio: bool = True
+    # Optional watermark overlay. When set, the command MUST carry the image as the 2nd input (`[1:v]`).
+    watermark: WatermarkOverlay | None = None
 
 
 def _emit_mode_stream_lines(
@@ -348,6 +368,19 @@ def build_filter_complex_script_content(
         escaped_ass = escape_ffmpeg_filter_path(opts.ass_path)
         lines.append(f"[{v_current}]subtitles={escaped_ass}[v_sub];")
         v_current = "v_sub"
+
+    # Watermark overlay (2nd input), on top of subtitles and before the final pixel-format conversion
+    wm = opts.watermark
+    if wm is not None:
+        if wm.scaled_width is not None and wm.scaled_height is not None:
+            wm_scale = f"scale=w={wm.scaled_width}:h={wm.scaled_height}"
+        else:
+            wm_scale = (
+                f"scale=w={wm.box_width}:h={wm.box_height}:force_original_aspect_ratio=decrease"
+            )
+        lines.append(f"[1:v]format=rgba,{wm_scale},colorchannelmixer=aa={wm.opacity:.2f}[wm];")
+        lines.append(f"[{v_current}][wm]overlay=x={wm.x}:y={wm.y}:eof_action=repeat[v_wm];")
+        v_current = "v_wm"
 
     lines.append(f"[{v_current}]format=yuv420p[v_out];")
 
