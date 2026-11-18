@@ -7,7 +7,6 @@ import {
   FilmStrip,
   FolderOpen,
   FolderSimple,
-  Info,
   Microphone,
   Monitor,
   DotsThree,
@@ -432,7 +431,7 @@ const DEPENDENCY_ROWS: DependencyRowMeta[] = [
 ];
 
 const TABLE_GRID =
-  "grid grid-cols-[minmax(200px,1.5fr)_112px_162px_136px_32px] items-stretch";
+  "grid grid-cols-[minmax(220px,1.7fr)_116px_172px_36px] items-stretch";
 const CELL_DIVIDER = "border-r border-white/[0.06]";
 
 const PYTORCH_TIERS: Array<{ value: PytorchGpuTier; label: string }> = [
@@ -679,7 +678,6 @@ export function DependenciesSection({
             <span className="flex items-center justify-start pr-3">Programa</span>
             <span className="flex items-center justify-center px-3 text-center">Versão</span>
             <span className="flex items-center justify-center px-3 text-center">Status</span>
-            <span className="flex items-center justify-center px-3 text-center">Ação</span>
             <span aria-hidden="true" />
           </div>
 
@@ -706,36 +704,33 @@ export function DependenciesSection({
               } else if (installed) {
                 statusNode = <span className="text-sm text-success">Instalado</span>;
               } else {
-                statusNode = <span className="text-sm text-warning">Não instalado</span>;
-              }
-
-              const version = !loading && installed && status?.version && !offline ? status.version : "—";
-
-              let actionNode: ReactNode = null;
-              if (!loading && !installed) {
-                actionNode = row.autoInstall ? (
+                statusNode = (
                   <button
                     type="button"
-                    disabled={busy}
-                    aria-label={`Instalar ${row.displayName}`}
-                    onClick={() => startInstall(row)}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-sm font-medium text-accent-soft transition-colors duration-fast hover:text-text-1 disabled:pointer-events-none disabled:opacity-50"
+                    disabled={busy && row.autoInstall}
+                    aria-label={
+                      row.autoInstall
+                        ? `Instalar ${row.displayName}`
+                        : `Como instalar ${row.displayName}`
+                    }
+                    onClick={() =>
+                      row.autoInstall ? startInstall(row) : onShowInstallInstructions(row.name)
+                    }
+                    className="group/status cursor-pointer rounded-pill border border-amber-400/35 bg-amber-400/[0.08] px-3 py-1 text-sm font-medium text-warning transition-[background-color,border-color,box-shadow,color,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[rgba(91,156,255,0.8)] hover:bg-[rgba(91,156,255,0.18)] hover:shadow-[0_0_0_1px_rgba(91,156,255,0.28),0_4px_14px_rgba(91,156,255,0.22)] focus-visible:border-[rgba(91,156,255,0.8)] focus-visible:bg-[rgba(91,156,255,0.18)] focus-visible:shadow-[0_0_0_1px_rgba(91,156,255,0.28),0_4px_14px_rgba(91,156,255,0.22)] active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <DownloadSimple size={14} weight="regular" aria-hidden="true" />
-                    <span>Instalar</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label={`Como instalar ${row.displayName}`}
-                    onClick={() => onShowInstallInstructions(row.name)}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-0 py-1 text-sm font-medium text-text-2 transition-colors duration-fast hover:text-text-1"
-                  >
-                    <Info size={14} weight="regular" aria-hidden="true" />
-                    <span>Como instalar</span>
+                    <span className="relative inline-grid place-items-center whitespace-nowrap [&>*]:col-start-1 [&>*]:row-start-1">
+                      <span className="transition-[opacity,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:-translate-y-1 group-hover/status:opacity-0 group-focus-visible/status:-translate-y-1 group-focus-visible/status:opacity-0">
+                        Não instalado
+                      </span>
+                      <span className="translate-y-1 font-semibold text-[#dbe9ff] opacity-0 transition-[opacity,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/status:translate-y-0 group-hover/status:opacity-100 group-focus-visible/status:translate-y-0 group-focus-visible/status:opacity-100">
+                        {row.autoInstall ? "Instalar" : "Como instalar"}
+                      </span>
+                    </span>
                   </button>
                 );
               }
+
+              const version = !loading && installed && status?.version && !offline ? status.version : "—";
 
               return (
                 <li
@@ -762,10 +757,9 @@ export function DependenciesSection({
                   >
                     {version}
                   </span>
-                  <div className={`flex items-center justify-center px-3 py-2.5 text-center ${CELL_DIVIDER}`}>
+                  <div className="flex items-center justify-center px-3 py-2.5 text-center">
                     {statusNode}
                   </div>
-                  <div className="flex items-center justify-center px-3 py-2.5 text-center">{actionNode}</div>
 
                   <div
                     ref={(node) => {
