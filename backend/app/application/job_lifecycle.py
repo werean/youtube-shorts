@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.paths import (
+    data_dir as _data_dir,
     cuts_path as _cuts_path,
     ensure_job_dir,
     job_dir,
@@ -368,6 +369,63 @@ class JobLifecycleService:
     def cuts_path(self, job_id: str) -> Path:
         return _cuts_path(job_id)
 
+    # --- Analysis v2 artifacts (additive; dict payloads with "version": 1) ---
+
+    def sentences_path(self, job_id: str) -> Path:
+        return ensure_job_dir(job_id) / "sentences.json"
+
+    def video_brief_path(self, job_id: str) -> Path:
+        return ensure_job_dir(job_id) / "video.brief.json"
+
+    def units_path(self, job_id: str) -> Path:
+        return ensure_job_dir(job_id) / "units.json"
+
+    def scored_candidates_path(self, job_id: str) -> Path:
+        return ensure_job_dir(job_id) / "candidates.scored.json"
+
+    def _save_v2_artifact(self, path: Path, job_id: str, payload: dict[str, Any]) -> Path:
+        return self.store.write_json(path, payload, job_id=job_id)
+
+    def _load_v2_artifact(self, path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        return self.store.read_json(path)
+
+    def save_sentences(self, job_id: str, payload: dict[str, Any]) -> Path:
+        return self._save_v2_artifact(self.sentences_path(job_id), job_id, payload)
+
+    def load_sentences(self, job_id: str) -> dict[str, Any] | None:
+        return self._load_v2_artifact(self.sentences_path(job_id))
+
+    def save_video_brief(self, job_id: str, payload: dict[str, Any]) -> Path:
+        return self._save_v2_artifact(self.video_brief_path(job_id), job_id, payload)
+
+    def load_video_brief(self, job_id: str) -> dict[str, Any] | None:
+        return self._load_v2_artifact(self.video_brief_path(job_id))
+
+    def save_units(self, job_id: str, payload: dict[str, Any]) -> Path:
+        return self._save_v2_artifact(self.units_path(job_id), job_id, payload)
+
+    def load_units(self, job_id: str) -> dict[str, Any] | None:
+        return self._load_v2_artifact(self.units_path(job_id))
+
+    def save_scored_candidates(self, job_id: str, payload: dict[str, Any]) -> Path:
+        return self._save_v2_artifact(self.scored_candidates_path(job_id), job_id, payload)
+
+    def load_scored_candidates(self, job_id: str) -> dict[str, Any] | None:
+        return self._load_v2_artifact(self.scored_candidates_path(job_id))
+
+    # --- Global analysis history (phase 7; one file for all jobs, never inside a job directory) ---
+
+    def analysis_history_path(self) -> Path:
+        return _data_dir() / "analysis_history.json"
+
+    def save_analysis_history(self, payload: dict[str, Any]) -> Path:
+        return self.store.write_json(self.analysis_history_path(), payload)
+
+    def load_analysis_history(self) -> dict[str, Any] | None:
+        return self._load_v2_artifact(self.analysis_history_path())
+
     def audio_16k_path(self, job_id: str) -> Path:
         return self.transcriptions_dir_path(job_id, create=True) / "audio_16k.wav"
 
@@ -531,6 +589,11 @@ class JobLifecycleService:
                 self.semantic_blocks_path(job_id),
                 self.topic_segments_path(job_id),
                 self.cuts_path(job_id),
+                # Analysis v2 artifacts derive from the transcription as well.
+                self.sentences_path(job_id),
+                self.video_brief_path(job_id),
+                self.units_path(job_id),
+                self.scored_candidates_path(job_id),
             ):
                 if path.exists():
                     path.unlink(missing_ok=True)

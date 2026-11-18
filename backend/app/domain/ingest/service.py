@@ -15,6 +15,7 @@ from app.application.runtime_service import (
     ServiceContainer,
     get_container,
 )
+from app.domain.analysis.v2.audience import normalize_heatmap
 from app.core.settings import get_video_dir, get_video_file_path
 from app.infrastructure.audio.pcm_extractor import (
     extract_pcm_16k_wav,
@@ -101,6 +102,12 @@ def build_source_video_info(
     for key in ("uploader", "channel", "upload_date", "view_count", "description", "ext"):
         if key in serializable_raw and key not in payload:
             payload[key] = serializable_raw[key]
+    # Optional audience heatmap ("most replayed"): list of {start_time, end_time, value}. NOTE: the presence and
+    # shape of this yt-dlp field have not been verified on real videos in this project. Absent, empty or all
+    # malformed -> the key is not written. (The unvalidated copy also stays in raw_info, as before.)
+    heatmap = normalize_heatmap(info_dict.get("heatmap"))
+    if heatmap:
+        payload["heatmap"] = heatmap
     return payload
 
 

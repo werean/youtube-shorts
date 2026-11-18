@@ -48,24 +48,25 @@ O pipeline atual (v1) foi ajustado olhando um vídeo de cada vez. Os sintomas, v
 | [pipeline-v2.md](./pipeline-v2.md) | Arquitetura das etapas, artefatos, configuração, falhas |
 | [stage-contracts.md](./stage-contracts.md) | Entrada, saída e schema JSON de cada etapa |
 | [review-checklist.md](./review-checklist.md) | O que a revisão independente verifica em cada fase |
+| [hardware-validation.md](./hardware-validation.md) | Tudo o que foi implementado sem medição e falta conferir no PC do dono |
 | [phases/](./phases) | Um arquivo por fase: escopo, arquivos, critério de pronto |
 
 Quem implementa uma fase lê: este README, o arquivo da fase e os documentos que ele citar. Não é preciso ler as outras fases.
 
 ## Fases e status
 
-Marque `[x]` ao concluir a fase **e** passar no critério de pronto dela.
+Marque `[x]` ao concluir a fase **e** passar no critério de pronto dela. `[~]` significa código implementado, testado com mocks e revisado, com a validação em hardware ainda pendente em [hardware-validation.md](./hardware-validation.md).
 
 | Status | Fase | Entrega | Depende de |
 |---|---|---|---|
-| `[ ]` | [0](./phases/phase-0.md) | Saneamento da v1: determinismo, schema, guarda de duração, remoção de código feito para teste | — |
-| `[ ]` | [1](./phases/phase-1.md) | Harness de avaliação, corpus e baseline da v1 | 0 |
-| `[ ]` | [2](./phases/phase-2.md) | v2 mínima: frases, pontuação por candidato, seleção | 1 |
-| `[ ]` | [3](./phases/phase-3.md) | Brief do vídeo, unidades por LLM, refino de borda | 2 |
-| `[ ]` | [4](./phases/phase-4.md) | Escolha de modelo, v2 como padrão, remoção do legado | 3 |
-| `[ ]` | [5](./phases/phase-5.md) | Sinal de audiência do YouTube e diarização real | 4 |
-| `[ ]` | [6](./phases/phase-6.md) | Visão condicional | 4 |
-| `[ ]` | [7](./phases/phase-7.md) | Aprender com aprovações e aprovação automática | 4 |
+| `[~]` | [0](./phases/phase-0.md) | Saneamento da v1: determinismo, schema, guarda de duração, remoção de código feito para teste | — |
+| `[~]` | [1](./phases/phase-1.md) | Harness de avaliação, corpus e baseline da v1 | 0 |
+| `[~]` | [2](./phases/phase-2.md) | v2 mínima: frases, pontuação por candidato, seleção | 1 |
+| `[~]` | [3](./phases/phase-3.md) | Brief do vídeo, unidades por LLM, refino de borda | 2 |
+| `[~]` | [4](./phases/phase-4.md) | Escolha de modelo, v2 como padrão, remoção do legado | 3 |
+| `[~]` | [5](./phases/phase-5.md) | Sinal de audiência do YouTube e diarização real | 4 |
+| `[~]` | [6](./phases/phase-6.md) | Visão condicional | 4 |
+| `[~]` | [7](./phases/phase-7.md) | Aprender com aprovações e aprovação automática | 4 |
 | `[ ]` | [8](./phases/phase-8.md) | Cortes não contínuos (opcional) | 4 + frontend |
 
 As fases 0 a 3 estão detalhadas. As fases 4 a 8 têm objetivo e critério de pronto; o detalhamento é feito quando chegar a vez, com os números do harness.
@@ -100,6 +101,7 @@ Estas decisões não foram tomadas e bloqueiam a fase indicada:
 
 | # | Pendência | Bloqueia |
 |---|---|---|
+| — | **Estado em 18/11/2026:** fases 0 a 7 implementadas em código, com testes mockados e revisão independente; nenhuma foi medida com o LLM real. Na fase 4 só a parte de código foi feita: a v1 continua sendo o padrão. A fase 8 não foi iniciada. O que falta está em [hardware-validation.md](./hardware-validation.md). | — |
 | 1 | ~~Qual modelo local fica fixo na configuração ativa~~ **Resolvida:** Qwen3 14B, contexto 8192, raciocínio desligado (D15 e D16) | — |
 | 2 | Autorização para os agentes rodarem o harness no PC com o LLM local carregado | Fase 1 |
 | 3 | Quais vídeos entram no corpus e quais ficam de reserva | Fase 1 |

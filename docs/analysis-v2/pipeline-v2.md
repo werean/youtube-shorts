@@ -162,6 +162,7 @@ Chaves novas na seção `llm`, todas opcionais. `normalize_llm_config` em `core/
 | `analysis_seed` | `42` | Seed de todas as chamadas da análise |
 | `analysis_min_interest` | `4` | Nota mínima para virar corte |
 | `auto_approve` | `false` | Fase 7: aprova sozinho o que passa do limite |
+| `analysis_v2` | ausente | Dicionário de chaves por etapa para medir cada peça em separado; ver D22 em `decisions.md` |
 
 `target_cut_duration_seconds` deixa de ser usado pela v2: a duração vem do brief. `max_suggested_cuts` vira só teto.
 

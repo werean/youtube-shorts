@@ -162,14 +162,13 @@ def _item_matches_model_type(item: dict[str, Any], model_type: ModelType) -> boo
     return is_emb if model_type == "embedding" else not is_emb
 
 
-_PARAM_SIZE_RE = re.compile(r"(?:^|[^a-z0-9])e?(\d+(?:\.\d+)?)b(?:[^a-z0-9]|$)")
 
 
 def resolve_lmstudio_context_length(
     model_key: str | None,
     llm_cfg: dict[str, Any] | None = None,
 ) -> int:
-    """Resolve LM Studio context length: explicit override -> adaptive by parameter size -> default 8192."""
+    """Resolve LM Studio context length: explicit override -> fixed LMSTUDIO_CONTEXT_LENGTH (8192, D18)."""
     if isinstance(llm_cfg, dict):
         raw_ctx = llm_cfg.get("context_length")
         if raw_ctx is not None and not isinstance(raw_ctx, bool):
@@ -180,18 +179,7 @@ def resolve_lmstudio_context_length(
             except (TypeError, ValueError):
                 pass
 
-    key_low = str(model_key or "").strip().lower()
-    if key_low:
-        match = _PARAM_SIZE_RE.search(key_low)
-        if match:
-            try:
-                params_b = float(match.group(1))
-                if params_b <= 9.5:
-                    return int(config.LMSTUDIO_SMALL_MODEL_CONTEXT_LENGTH)
-                return int(config.LMSTUDIO_CONTEXT_LENGTH)
-            except ValueError:
-                pass
-
+    # D18: the chat context is fixed (LMSTUDIO_CONTEXT_LENGTH) regardless of model size.
     return int(config.LMSTUDIO_CONTEXT_LENGTH)
 
 
@@ -559,6 +547,7 @@ class LMStudioCLIManager:
         gpu: str | None = None,
         context_length: int | None = None,
         ttl_seconds: int = 300,
+        parallel: int | None = None,
     ) -> bool:
         """Load `model_key` via `lms load`, skipping if compatible already loaded and unloading conflicts."""
         if not self.cli_enabled() or not model_key or not model_key.strip():
@@ -594,7 +583,26 @@ class LMStudioCLIManager:
                         except (TypeError, ValueError):
                             pass
 
-                if gpu_mismatch or ctx_mismatch:
+                strict_mismatch = False
+                if parallel is not None and int(parallel) > 0:
+                    # D18 strict check: context must match exactly, all layers on GPU, parallel as requested.
+                    raw_ctx = item.get("contextLength", item.get("context_length"))
+                    if context_length is not None and int(context_length) > 0:
+                        try:
+                            strict_mismatch = strict_mismatch or int(raw_ctx) != int(context_length)
+                        except (TypeError, ValueError):
+                            strict_mismatch = True
+                    raw_par = item.get("parallel", item.get("maxParallelPredictions"))
+                    try:
+                        strict_mismatch = strict_mismatch or int(raw_par) != int(parallel)
+                    except (TypeError, ValueError):
+                        strict_mismatch = True
+                    if gpu is not None and str(gpu).strip().lower() == "max":
+                        raw_gpu = item.get("gpu", item.get("gpuOffload"))
+                        if str(raw_gpu).strip().lower() not in ("max", "1", "1.0", "100%"):
+                            strict_mismatch = True
+
+                if gpu_mismatch or ctx_mismatch or strict_mismatch:
                     has_conflict = True
                 else:
                     compatible_loaded = True
@@ -612,11 +620,41 @@ class LMStudioCLIManager:
             cmd.extend(["--gpu", str(gpu).strip()])
         if context_length is not None and int(context_length) > 0:
             cmd.extend(["-c", str(int(context_length))])
+        if parallel is not None and int(parallel) > 0:
+            cmd.extend(["--parallel", str(int(parallel))])
 
         rc, _stdout, stderr = await self._run_lms(cmd, timeout=120.0)
         if rc != 0 and stderr.strip():
             logger.warning("LM Studio load failed for '%s': %s", target_key, stderr.strip())
         return rc == 0
+
+    async def _log_load_readback(
+        self,
+        job_id: str | None,
+        task_log: str,
+        model_key: str,
+        requested_ctx: int | None,
+        requested_gpu: str | None,
+    ) -> None:
+        """Log requested vs reported load parameters (`lms ps --json`). Never raises."""
+        try:
+            reported = "nao reportado"
+            for item in await self.list_loaded_models():
+                key = _extract_model_key(item)
+                if key and _models_match(key, model_key):
+                    ctx = item.get("contextLength", item.get("context_length"))
+                    gpu_v = item.get("gpu", item.get("gpuOffload"))
+                    par = item.get("parallel", item.get("maxParallelPredictions"))
+                    reported = f"contextLength={ctx} gpu={gpu_v} parallel={par}"
+                    break
+            self._log(
+                job_id,
+                task_log,
+                f"[lmstudio] Carga solicitada: contexto={requested_ctx} gpu={requested_gpu}; "
+                f"reportado pelo `lms ps`: {reported}.",
+            )
+        except Exception as exc:
+            logger.warning("LM Studio load read-back failed: %s", exc)
 
     async def unload_all(self) -> bool:
         """Unload all active models from VRAM and RAM (`lms unload --all`)."""
@@ -714,10 +752,11 @@ class LMStudioCLIManager:
                     and self._active_context_length >= int(context_length)
                 )
             )
+            nested_gpu = "max" if (model_type == "llm" and gpu is None) else gpu
             if (
                 self._stage_depth > 0
                 and self._active_model_type == model_type
-                and self._active_gpu == gpu
+                and self._active_gpu == nested_gpu
                 and self._active_model_key is not None
                 and pref_matches_active
                 and ctx_compatible
@@ -760,6 +799,15 @@ class LMStudioCLIManager:
                 else:
                     effective_ctx = None
 
+                effective_gpu = gpu
+                effective_parallel: int | None = None
+                if model_type == "llm":
+                    # D18: all layers on GPU, one prediction slot for the chat LLM.
+                    if effective_gpu is None:
+                        effective_gpu = "max"
+                    effective_parallel = 1
+                gpu = effective_gpu
+
                 gpu_tag = f" (--gpu {gpu})" if gpu else ""
                 ctx_tag = f" (-c {effective_ctx})" if effective_ctx else ""
                 self._log(
@@ -772,8 +820,10 @@ class LMStudioCLIManager:
                     gpu=gpu,
                     context_length=effective_ctx,
                     ttl_seconds=ttl_seconds,
+                    parallel=effective_parallel,
                 )
                 if loaded_ok:
+                    await self._log_load_readback(job_id, task_log, resolved_key, effective_ctx, gpu)
                     async with self._state_lock:
                         self._active_model_key = resolved_key
                         self._active_model_type = model_type

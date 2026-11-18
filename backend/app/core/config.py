@@ -83,7 +83,6 @@ CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
                     "title": {"type": "string"},
                     "start_block_id": {"type": "string"},
                     "end_block_id": {"type": "string"},
-                    "score": {"type": "number"},
                     "cut_type": {"type": "string"},
                     "opening_evidence": {"type": "string"},
                     "closing_evidence": {"type": "string"},
@@ -96,12 +95,12 @@ CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
                     "end_conclusion": {"type": "string"},
                     "hook_reason": {"type": "string"},
                     "content_reason": {"type": "string"},
+                    "score": {"type": "number"},
                 },
                 "required": [
                     "title",
                     "start_block_id",
                     "end_block_id",
-                    "score",
                     "cut_type",
                     "opening_evidence",
                     "closing_evidence",
@@ -114,6 +113,7 @@ CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
                     "end_conclusion",
                     "hook_reason",
                     "content_reason",
+                    "score",
                 ],
                 "additionalProperties": False,
             },
@@ -135,7 +135,6 @@ class AppConfig:
 
     LMSTUDIO_BASE_URL: str = os.environ.get("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     LMSTUDIO_CONTEXT_LENGTH: int = 8192
-    LMSTUDIO_SMALL_MODEL_CONTEXT_LENGTH: int = 16384
     OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
     OLLAMA_API_KEY: str = os.environ.get("OLLAMA_API_KEY", "")
@@ -146,6 +145,9 @@ class AppConfig:
 
     TARGET_CUT_DURATION_SECONDS: int = 90
     MAX_SUGGESTED_CUTS: int = 12
+    ANALYSIS_SEED: int = 42
+    MIN_CUT_SECONDS: float = 10.0
+    MAX_CUT_SECONDS: float = 180.0
     ENABLE_BOUNDARY_LOOKAROUND: bool = True
 
     HOOK_MAX_FORWARD_ADJUST_SECONDS: float = 1.0

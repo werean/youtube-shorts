@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import AsyncIterator, Iterator
 
@@ -17,6 +18,31 @@ from app.application.runtime_service import (
 )
 from app.core import paths, settings, tool_configs
 from app.main import create_app
+
+
+def _requested_schema(body: dict | None) -> dict:
+    """Extract the JSON schema requested by an LM Studio or Ollama chat body."""
+    body = body or {}
+    rf = body.get("response_format")
+    if isinstance(rf, dict):
+        inner = rf.get("json_schema")
+        if isinstance(inner, dict) and isinstance(inner.get("schema"), dict):
+            return inner["schema"]
+    fmt = body.get("format")
+    if isinstance(fmt, dict):
+        return fmt
+    return {}
+
+
+def _empty_valid_document(body: dict | None) -> dict:
+    """Minimal document valid for the requested schema: every required array is empty."""
+    schema = _requested_schema(body)
+    props = schema.get("properties") or {}
+    doc: dict = {}
+    for key in schema.get("required") or list(props):
+        ptype = (props.get(key) or {}).get("type")
+        doc[key] = [] if ptype == "array" else {} if ptype == "object" else "" if ptype == "string" else 0
+    return doc
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +79,8 @@ def isolated_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
         if url.endswith("/api/ps"):
             return 200, {"models": [{"name": "qwen2.5:14b"}]}
         if url.endswith("/chat/completions") or url.endswith("/api/chat"):
-            return 200, {"message": {"content": "ok"}, "choices": [{"message": {"content": "ok"}}]}
+            content = json.dumps(_empty_valid_document(body))
+            return 200, {"message": {"content": content}, "choices": [{"message": {"content": content}}]}
         return 404, {}
 
     async def _fake_ollama_cmd(args: list[str]) -> dict:

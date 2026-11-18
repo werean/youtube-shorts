@@ -44,6 +44,8 @@ from app.domain.analysis.rms_snap import (
     snap_timestamp_to_rms_valley,
 )
 
+from app.domain.analysis.v2.pipeline import analyze_job_v2  # noqa: E402
+
 __all__ = [
     "ANAPHORIC_OPENING_MARKERS_PT_EN",
     "CONCLUSION_MARKERS_PT_EN",
@@ -61,6 +63,7 @@ __all__ = [
     "START_LOOKBACK_SEC",
     "TOP_K_PREFILTER",
     "analyze_job",
+    "analyze_job_v2",
     "apply_deterministic_lookaround_single",
     "approve_cut",
     "build_global_context_header",

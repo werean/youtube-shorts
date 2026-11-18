@@ -305,3 +305,68 @@ async def test_pure_python_wav_header_duration_probe(tmp_path: Path) -> None:
 
     dur = await probe_media_duration(wav_file)
     assert dur == pytest.approx(2.5, abs=0.01)
+
+
+# --- audience heatmap (phase 5 part A) ---------------------------------------------------------------------
+
+
+def _fake_ytdlp_with(extra: dict[str, Any]):
+    class FakeYoutubeDL:
+        def __init__(self, opts: dict[str, Any]) -> None:
+            self.opts = opts
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            pass
+
+        def extract_info(self, url: str, download: bool = True) -> dict[str, Any]:
+            video_file = Path(str(self.opts["outtmpl"]).replace("%(ext)s", "mp4"))
+            video_file.parent.mkdir(parents=True, exist_ok=True)
+            video_file.write_bytes(b"ftypmp42synthetic_video_bytes")
+            return {"id": "hm1", "title": "Heat Video", "duration": 100.0, "webpage_url": url, **extra}
+
+    return FakeYoutubeDL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra,expected",
+    [
+        ({}, None),
+        ({"heatmap": []}, None),
+        ({"heatmap": None}, None),
+        ({"heatmap": [{"start_time": 5, "end_time": 1, "value": 0.5}, "junk"]}, None),
+        (
+            {
+                "heatmap": [
+                    {"start_time": 10.0, "end_time": 20.0, "value": 3},
+                    {"start_time": 0, "end_time": 10, "value": 0.25},
+                    {"start_time": 20, "end_time": 20, "value": 0.5},
+                ]
+            },
+            [
+                {"start_time": 0.0, "end_time": 10.0, "value": 0.25},
+                {"start_time": 10.0, "end_time": 20.0, "value": 1.0},
+            ],
+        ),
+    ],
+)
+async def test_ingest_persists_a_normalised_heatmap_only_when_present(
+    async_client: httpx.AsyncClient,
+    container: ServiceContainer,
+    extra: dict[str, Any],
+    expected: Any,
+) -> None:
+    resp = await async_client.post("/jobs", json={"youtube_url": "https://www.youtube.com/watch?v=hm1"})
+    job_id = resp.json()["job"]["job_id"]
+    set_custom_ytdlp_factory(_fake_ytdlp_with(extra))
+    set_custom_media_prober(lambda _path: 100.0)
+    assert (await async_client.post(f"/jobs/{job_id}/ingest")).status_code == 200
+    info = container.jobs.load_source_info(job_id)
+    if expected is None:
+        assert "heatmap" not in info
+    else:
+        assert info["heatmap"] == expected
+    assert info["title"] == "Heat Video" and info["chapters"] == []

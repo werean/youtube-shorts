@@ -366,6 +366,7 @@ def parse_candidate_cuts_from_llm_payload(
     blocks: Sequence[SemanticBlock],
     *,
     topics: Sequence[TopicSegment] | None = None,
+    stats: dict[str, int] | None = None,
 ) -> list[CandidateCut]:
     """Parse candidate cuts (`v4` Evidence-First + legacy `v3`) and run deterministic score calibration."""
     raw_items: list[Any] = []
@@ -403,6 +404,12 @@ def parse_candidate_cuts_from_llm_payload(
 
         span, ids, s_time, e_time = expand_block_range(blocks, start_id, end_id)
         if not span or e_time <= s_time:
+            continue
+
+        span_seconds = e_time - s_time
+        if span_seconds < config.MIN_CUT_SECONDS or span_seconds > config.MAX_CUT_SECONDS:
+            if stats is not None:
+                stats["discarded_duration"] = stats.get("discarded_duration", 0) + 1
             continue
 
         raw_score = item.get("score")
@@ -513,67 +520,6 @@ def parse_candidate_cuts_from_llm_payload(
         )
 
     return candidates
-
-
-def _synthesize_fallback_candidates_from_blocks(
-    blocks: Sequence[SemanticBlock],
-    topics: Sequence[TopicSegment] | None = None,
-    *,
-    target_duration_seconds: float = 90.0,
-) -> list[CandidateCut]:
-    """Deterministic fallback candidate builder used only when test stub returns `'ok'`."""
-    if not blocks:
-        return []
-
-    if topics:
-        candidates: list[CandidateCut] = []
-        for idx, tp in enumerate(topics):
-            if not tp.block_ids:
-                continue
-            start_id = tp.block_ids[0]
-            end_id = tp.block_ids[-1]
-            span, ids, s_time, e_time = expand_block_range(blocks, start_id, end_id)
-            if not span:
-                continue
-            candidates.append(
-                CandidateCut(
-                    title=tp.title or f"Corte Narrativo {idx + 1}",
-                    start_block_id=span[0].block_id,
-                    end_block_id=span[-1].block_id,
-                    score=round(max(50.0, 95.0 - idx * 3.0), 1),
-                    beginning_hook=span[0].text[:120],
-                    middle_development=span[len(span) // 2].text[:120],
-                    end_conclusion=span[-1].text[:120],
-                    hook_reason="Abertura direta do tópico.",
-                    content_reason="Desenvolvimento e conclusão completos.",
-                    block_ids=ids,
-                    start=s_time,
-                    end=e_time,
-                    topic_id=tp.topic_id,
-                )
-            )
-        if candidates:
-            return candidates
-
-    span, ids, s_time, e_time = expand_block_range(
-        blocks, blocks[0].block_id, blocks[-1].block_id
-    )
-    return [
-        CandidateCut(
-            title=blocks[0].text[:60] or "Corte Principal",
-            start_block_id=blocks[0].block_id,
-            end_block_id=blocks[-1].block_id,
-            score=90.0,
-            beginning_hook=blocks[0].text[:120],
-            middle_development=blocks[len(blocks) // 2].text[:120],
-            end_conclusion=blocks[-1].text[:120],
-            hook_reason="Abertura direta do assunto.",
-            content_reason="Raciocínio completo.",
-            block_ids=ids,
-            start=s_time,
-            end=e_time,
-        )
-    ]
 
 
 def _select_candidates_with_temporal_coverage(
@@ -787,6 +733,7 @@ async def mine_narrative_cuts(
     rms_10ms: np.ndarray | None = None,
     audio_wav_path: Path | None = None,
     llm_adapter: UnifiedLocalLLMAdapter | None = None,
+    stats: dict[str, int] | None = None,
 ) -> tuple[list[Cut], str]:
     """Run the complete 3-Phase Narrative Arc Mining pipeline over `blocks`."""
     if not blocks:
@@ -823,32 +770,19 @@ async def mine_narrative_cuts(
                 f"=== TRANSCRIPT WINDOW {w_idx + 1}/{len(windows)} ===\n"
                 f"{transcript_body}"
             )
-            try:
-                parsed, raw_str = await adapter.chat_json(
-                    sys_prompt,
-                    user_prompt,
-                    json_schema=CUTS_RESPONSE_JSON_SCHEMA,
-                    schema_name="narrative_cuts",
-                    max_tokens=config.LLM_MAX_TOKENS_MINER,
-                    acquire_gpu_slot=False,
-                )
-                raw_responses.append(parsed)
-                win_cands = parse_candidate_cuts_from_llm_payload(
-                    parsed, blocks, topics=topics
-                )
-                phase_4a_candidates.extend(win_cands)
-            except InvalidLLMJsonResponseError as exc:
-                if exc.raw_text.strip() == "ok":
-                    # Default conftest stub returned "ok"; synthesize coherent candidate
-                    fallback_cands = _synthesize_fallback_candidates_from_blocks(
-                        win_blocks,
-                        topics=topics if w_idx == 0 else None,
-                        target_duration_seconds=float(target_cut_duration_seconds),
-                    )
-                    phase_4a_candidates.extend(fallback_cands)
-                    raw_responses.append({"cuts": [c.__dict__ for c in fallback_cands]})
-                else:
-                    raise
+            parsed, _raw_str = await adapter.chat_json(
+                sys_prompt,
+                user_prompt,
+                json_schema=CUTS_RESPONSE_JSON_SCHEMA,
+                schema_name="narrative_cuts",
+                max_tokens=config.LLM_MAX_TOKENS_MINER,
+                acquire_gpu_slot=False,
+            )
+            raw_responses.append(parsed)
+            win_cands = parse_candidate_cuts_from_llm_payload(
+                parsed, blocks, topics=topics, stats=stats
+            )
+            phase_4a_candidates.extend(win_cands)
 
         # Phase 4B: Top-18 pre-filter + Hybrid [-3, +3] Boundary Lookaround
         phase_4b_candidates = await run_phase_4b_top_k_lookaround(
@@ -892,6 +826,29 @@ async def analyze_job(
 ) -> dict[str, Any]:
     """Ensure Stage 3 prerequisites (`semantic.blocks.json` & `topic.segments.json`), run Stage 4 analysis, and persist `cuts.suggested.json`."""
     c = container or get_container()
+
+    # Pipeline dispatch (docs/analysis-v2): "v2" delegates; absent or "v1" keeps this path unchanged.
+    try:
+        pipeline_choice = (c.load_active_tool_configs().get("llm") or {}).get("analysis_pipeline")
+    except Exception:  # noqa: BLE001 - config problems surface in the v1 path as before
+        pipeline_choice = None
+    if pipeline_choice == "v2":
+        from app.domain.analysis.v2.pipeline import analyze_job_v2
+
+        return await analyze_job_v2(
+            job_id,
+            llm_adapter=llm_adapter,
+            pcm_samples=pcm_samples,
+            rms_10ms=rms_10ms,
+            container=c,
+        )
+    if pipeline_choice not in (None, "v1"):
+        c.runtime.log_warning(
+            job_id,
+            "analysis",
+            f"Unknown llm.analysis_pipeline {pipeline_choice!r}; using v1.",
+        )
+
     job = c.jobs.load_job(job_id)
 
     # 1. Auto-run semantic blocks if missing
@@ -965,6 +922,23 @@ async def analyze_job(
         provider_pref = str(llm_cfg.get("provider") or "auto").strip().lower()
         lmstudio = getattr(c, "lmstudio", None)
 
+        registered_models = llm_cfg.get("registered_models")
+        if configured_model and isinstance(registered_models, list):
+            for entry in registered_models:
+                if (
+                    isinstance(entry, dict)
+                    and str(entry.get("name") or "").strip().lower() == configured_model.lower()
+                    and str(entry.get("source") or "").strip().lower() == "cloud"
+                ):
+                    c.runtime.log_warning(
+                        job_id,
+                        "analysis",
+                        f"Model '{configured_model}' is registered as cloud; the product premise is 100% local.",
+                    )
+                    break
+
+        mining_stats: dict[str, int] = {}
+
         async def _run_mining() -> tuple[list[Cut], str]:
             return await mine_narrative_cuts(
                 blocks,
@@ -981,6 +955,7 @@ async def analyze_job(
                 rms_10ms=rms_10ms,
                 audio_wav_path=audio_wav if audio_wav.exists() else None,
                 llm_adapter=adapter,
+                stats=mining_stats,
             )
 
         if lmstudio is not None and provider_pref in ("auto", "lmstudio") and lmstudio.cli_enabled():
@@ -993,6 +968,15 @@ async def analyze_job(
                 cuts, raw_response = await _run_mining()
         else:
             cuts, raw_response = await _run_mining()
+
+        discarded = mining_stats.get("discarded_duration", 0)
+        if discarded:
+            c.runtime.log_warning(
+                job_id,
+                "analysis",
+                f"{discarded} candidate cut(s) discarded for duration outside "
+                f"{config.MIN_CUT_SECONDS:g}s-{config.MAX_CUT_SECONDS:g}s.",
+            )
 
         c.jobs.save_cuts(job_id, cuts)
         c.jobs.update_job_status(job_id, JobStatus.WAITING_APPROVAL)

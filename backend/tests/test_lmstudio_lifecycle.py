@@ -316,7 +316,10 @@ async def test_long_video_pipeline_session_cpu_embedding_then_llm_and_stop_befor
     assert "--gpu" in emb_load and emb_load[emb_load.index("--gpu") + 1] == "off"
 
     assert llm_load[1] == "google/gemma-4-e4b"
-    assert "--gpu" not in llm_load
+    # D18: chat LLM is loaded fully on GPU, context 8192, a single prediction slot.
+    assert llm_load[llm_load.index("--gpu") + 1] == "max"
+    assert llm_load[llm_load.index("-c") + 1] == "8192"
+    assert llm_load[llm_load.index("--parallel") + 1] == "1"
 
     # Embedding unload happened BEFORE LLM load, and server stop happened ONLY at session end
     idx_emb_load = next(
@@ -646,8 +649,9 @@ async def test_lms_context_length_flag_reload_and_vlm_discovery(
 
     # 1. Adaptive context length resolution
     assert resolve_lmstudio_context_length("qwen2.5:14b") == 8192
-    assert resolve_lmstudio_context_length("google/gemma-4-e4b") == 16384
-    assert resolve_lmstudio_context_length("qwen2.5-7b-instruct") == 16384
+    # D18: context is fixed at 8192 regardless of model size.
+    assert resolve_lmstudio_context_length("google/gemma-4-e4b") == 8192
+    assert resolve_lmstudio_context_length("qwen2.5-7b-instruct") == 8192
     assert resolve_lmstudio_context_length("qwen2.5:14b", {"context_length": 12288}) == 12288
 
     # 2. Trivial scalar bracket fragments in noisy CLI output are skipped when real JSON follows
@@ -677,19 +681,19 @@ async def test_lms_context_length_flag_reload_and_vlm_discovery(
     assert [m["modelKey"] for m in llm_models] == ["google/gemma-4-e4b"]
     assert [m["modelKey"] for m in emb_models] == ["text-embedding-nomic-embed-text-v1.5"]
 
-    # 4. Loaded model with smaller contextLength (4096 < 16384) triggers unload + reload with `-c 16384`
+    # 4. Loaded model with smaller contextLength (4096 < 8192) triggers unload + reload with `-c 8192`
     async with container.lmstudio.stage(
         model_type="llm",
         preferred_model="google/gemma-4-e4b",
         task_log="analysis",
     ) as loaded_key:
         assert loaded_key == "google/gemma-4-e4b"
-        assert harness.loaded_models[0]["contextLength"] == 16384
+        assert harness.loaded_models[0]["contextLength"] == 8192
 
     assert ["unload", "--all"] in harness.commands
     load_cmds = [c for c in harness.commands if c and c[0] == "load"]
     assert len(load_cmds) == 1
-    assert "-c" in load_cmds[0] and load_cmds[0][load_cmds[0].index("-c") + 1] == "16384"
+    assert "-c" in load_cmds[0] and load_cmds[0][load_cmds[0].index("-c") + 1] == "8192"
 
 
 @pytest.mark.asyncio

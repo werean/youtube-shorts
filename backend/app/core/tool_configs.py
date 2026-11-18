@@ -315,8 +315,33 @@ def normalize_llm_config(raw: dict[str, Any] | None) -> dict[str, Any]:
     if not any(m.lower() == embedding_model.lower() for m in registered_emb):
         registered_emb.insert(0, embedding_model)
 
+    optional_keys: dict[str, Any] = {}
+    if isinstance(l.get("analysis_seed"), int) and not isinstance(l.get("analysis_seed"), bool):
+        optional_keys["analysis_seed"] = int(l["analysis_seed"])
+    if isinstance(l.get("disable_reasoning"), bool):
+        optional_keys["disable_reasoning"] = l["disable_reasoning"]
+    # Analysis v2 keys (docs/analysis-v2/pipeline-v2.md, "Configuracao"): optional, never invented.
+    if isinstance(l.get("analysis_pipeline"), str) and l["analysis_pipeline"].strip():
+        optional_keys["analysis_pipeline"] = l["analysis_pipeline"].strip()
+    if isinstance(l.get("analysis_min_interest"), int) and not isinstance(l.get("analysis_min_interest"), bool):
+        optional_keys["analysis_min_interest"] = int(l["analysis_min_interest"])
+    if isinstance(l.get("auto_approve"), bool):
+        optional_keys["auto_approve"] = l["auto_approve"]
+    if isinstance(l.get("auto_approve_min_interest"), int) and not isinstance(l.get("auto_approve_min_interest"), bool):
+        optional_keys["auto_approve_min_interest"] = int(l["auto_approve_min_interest"])
+    if isinstance(l.get("vision_model"), str) and l["vision_model"].strip():
+        optional_keys["vision_model"] = l["vision_model"].strip()
+    if isinstance(l.get("analysis_v2"), dict):
+        optional_keys["analysis_v2"] = dict(l["analysis_v2"])
+
+    # Invalid values of the v2 keys are dropped instead of leaking through `merged`.
+    for v2_key in ("analysis_pipeline", "analysis_min_interest", "analysis_v2", "auto_approve", "auto_approve_min_interest", "vision_model"):
+        if v2_key not in optional_keys:
+            merged.pop(v2_key, None)
+
     return {
         **merged,
+        **optional_keys,
         "model": model,
         "provider": provider,
         "lmstudio_base_url": lmstudio_url,

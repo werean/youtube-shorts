@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.application.runtime_service import get_container
+from app.application.runtime_service import OperationCancelledError, get_container
 from app.domain.analysis.narrative_miner import (
     CutNotFoundError,
     analyze_job,
@@ -65,6 +65,8 @@ async def analyze_job_cuts(job_id: str) -> Any:
         return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
     except InvalidLLMJsonResponseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OperationCancelledError as exc:
+        raise HTTPException(status_code=409, detail="Analysis cancelled") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

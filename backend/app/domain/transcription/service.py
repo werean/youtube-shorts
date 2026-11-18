@@ -22,6 +22,17 @@ from app.application.runtime_service import (
 from app.application.scheduler import WhisperAllocationDecision
 from app.core.config import config
 from app.infrastructure.audio.acoustic_dsp import assign_acoustic_speakers
+from app.infrastructure.audio.diarization import (
+    DIARIZATION_MIN_FREE_VRAM_GB,
+    DIARIZATION_MODE_ACOUSTIC,
+    DIARIZATION_MODE_MODEL,
+    DiarizationBackend,
+    DiarizationTurn,
+    assign_speakers_from_turns,
+    clear_speakers,
+    load_default_backend,
+    resolve_diarization_mode,
+)
 from app.infrastructure.audio.pcm_extractor import extract_pcm_16k_wav, probe_media_duration
 from app.models.domain import Job, JobStatus, Segment, WordTiming
 from app.models.schemas import (
@@ -540,6 +551,36 @@ class FasterWhisperAdapter:
         )
 
 
+def _build_word_timings(
+    diarized_segments: list[Segment], filtered_raw: list[RawWhisperSegment]
+) -> list[WordTiming]:
+    all_words: list[WordTiming] = []
+    for seg, rseg in zip(diarized_segments, filtered_raw):
+        if rseg.words:
+            for rw in rseg.words:
+                all_words.append(
+                    WordTiming(
+                        word=rw.word,
+                        start=rw.start,
+                        end=rw.end,
+                        probability=rw.probability,
+                        speaker=seg.speaker,
+                        segment_id=seg.segment_id,
+                    )
+                )
+        else:
+            all_words.extend(
+                _synthesize_words_for_segment(
+                    seg.segment_id,
+                    seg.start,
+                    seg.end,
+                    seg.text,
+                    seg.speaker,
+                )
+            )
+    return all_words
+
+
 class TranscriptionDomainService:
     """Domain service orchestrating GPU transcription, VRAM budget coexistence, anti-hallucination, and speaker diarization."""
 
@@ -548,9 +589,11 @@ class TranscriptionDomainService:
         *,
         container: ServiceContainer | None = None,
         whisper_adapter: FasterWhisperAdapter | None = None,
+        diarization_backend: DiarizationBackend | None = None,
     ) -> None:
         self._container = container
         self.whisper_adapter = whisper_adapter or FasterWhisperAdapter()
+        self.diarization_backend = diarization_backend
 
     @property
     def c(self) -> ServiceContainer:
@@ -568,6 +611,61 @@ class TranscriptionDomainService:
         write_text = use_all or "txt" in normalized or "text" in normalized
         write_vtt = use_all or "vtt" in normalized
         return write_text, write_vtt
+
+    async def _diarize_with_model(
+        self, job_id: str, wav_path: Path | None, cancel_token: CancelToken
+    ) -> list[DiarizationTurn] | None:
+        """Run the optional model diarization after Whisper has been unloaded.
+
+        Returns None (speakers stay None, never the acoustic heuristic) when the audio, the
+        library, the VRAM or the backend is unavailable. Cancellation propagates.
+        """
+        c = self.c
+
+        def _warn(msg: str) -> None:
+            c.runtime.log_warning(
+                job_id, "transcription", f"[transcription] Model diarization skipped: {msg}; speakers left empty"
+            )
+
+        if wav_path is None:
+            _warn("16 kHz audio not available")
+            return None
+        cancel_token.raise_if_cancelled()
+        async with c.scheduler.gpu_slot(holder="diarization") as mgr:
+            backend: DiarizationBackend | None = None
+            try:
+                cancel_token.raise_if_cancelled()
+                # D8: the Whisper model was already unloaded; confirm the VRAM really came back.
+                try:
+                    free_gb = await mgr.probe_free_vram_gb()
+                except Exception as exc:
+                    _warn(f"could not verify free VRAM ({exc})")
+                    return None
+                if free_gb < DIARIZATION_MIN_FREE_VRAM_GB:
+                    _warn(f"VRAM not released ({free_gb:.2f}GB free, need {DIARIZATION_MIN_FREE_VRAM_GB}GB)")
+                    return None
+                try:
+                    backend = self.diarization_backend or await asyncio.to_thread(load_default_backend)
+                    cancel_token.raise_if_cancelled()
+                    c.runtime.append_task_log(
+                        job_id, "transcription", "[transcription] Running model diarization..."
+                    )
+                    turns = await asyncio.to_thread(backend.diarize, wav_path)
+                except OperationCancelledError:
+                    raise
+                except Exception as exc:
+                    _warn(f"{type(exc).__name__}: {exc}")
+                    return None
+                cancel_token.raise_if_cancelled()
+                return list(turns)
+            finally:
+                unload = getattr(backend, "unload", None)
+                if callable(unload):
+                    try:
+                        unload()
+                    except Exception:
+                        pass
+                mgr.cleanup_whisper_vram()
 
     async def transcribe_job(self, job_id: str) -> TranscribeJobResponse:
         """Execute Stage 2 GPU transcription for `job_id` inside `c.scheduler.whisper_slot()`."""
@@ -752,36 +850,33 @@ class TranscriptionDomainService:
                     )
                 )
 
-            diarized_segments = assign_acoustic_speakers(
-                preliminary_segments,
-                audio_path=wav_path if wav_path.exists() else None,
-            )
+            diar_mode, diar_valid = resolve_diarization_mode(whisper_cfg.get("diarization"))
+            if not diar_valid:
+                c.runtime.log_warning(
+                    job_id,
+                    "transcription",
+                    f"[transcription] Unknown whisper.diarization value {whisper_cfg.get('diarization')!r}; using 'acoustic'",
+                )
 
-            # 4. Build word-level timing list (`transcription.words.json`) aligned with diarized speakers
-            all_words: list[WordTiming] = []
-            for seg, rseg in zip(diarized_segments, filtered_raw):
-                if rseg.words:
-                    for rw in rseg.words:
-                        all_words.append(
-                            WordTiming(
-                                word=rw.word,
-                                start=rw.start,
-                                end=rw.end,
-                                probability=rw.probability,
-                                speaker=seg.speaker,
-                                segment_id=seg.segment_id,
-                            )
-                        )
-                else:
-                    all_words.extend(
-                        _synthesize_words_for_segment(
-                            seg.segment_id,
-                            seg.start,
-                            seg.end,
-                            seg.text,
-                            seg.speaker,
-                        )
+            if diar_mode == DIARIZATION_MODE_ACOUSTIC:
+                diarized_segments = assign_acoustic_speakers(
+                    preliminary_segments,
+                    audio_path=wav_path if wav_path.exists() else None,
+                )
+                # 4. Build word-level timing list (`transcription.words.json`) aligned with diarized speakers
+                all_words = _build_word_timings(diarized_segments, filtered_raw)
+            else:
+                cleared_segments, _ = clear_speakers(preliminary_segments, [])
+                all_words = _build_word_timings(cleared_segments, filtered_raw)
+                diarized_segments = cleared_segments
+                if diar_mode == DIARIZATION_MODE_MODEL:
+                    turns = await self._diarize_with_model(
+                        job_id, wav_path if wav_path.exists() else None, cancel_token
                     )
+                    if turns is not None:
+                        diarized_segments, all_words = assign_speakers_from_turns(
+                            cleared_segments, all_words, turns
+                        )
 
             # 5. Persist all transcription artifacts atomically in {video_dir}/transcrições/
             c.jobs.save_transcription_segments(job_id, diarized_segments)

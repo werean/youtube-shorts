@@ -12,8 +12,10 @@ Features:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import math
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 from app.application.runtime_service import CancelToken, ServiceContainer, get_container
 from app.core.config import CUTS_RESPONSE_JSON_SCHEMA, config
-from app.infrastructure.llm.lmstudio_cli import _models_match
+from app.infrastructure.llm.lmstudio_cli import _models_match, resolve_lmstudio_context_length
 
 HttpFetcherFn = Callable[[str, str, dict[str, Any] | None], Awaitable[tuple[int, Any]]]
 
@@ -104,6 +106,31 @@ class InvalidLLMJsonResponseError(ValueError):
         msg = message or f"LLM response is not valid JSON. Raw: {raw_text[:300]}"
         super().__init__(msg)
         self.raw_text = raw_text
+
+
+class LLMContextOverflowError(RuntimeError):
+    """Raised BEFORE sending when prompt + max_tokens cannot fit the loaded context window."""
+
+
+class LLMEmptyResponseError(RuntimeError):
+    """Raised when the provider returns empty content (probable cause: context overflow).
+
+    Deliberately NOT an InvalidLLMJsonResponseError: it must not trigger the JSON-repair retry.
+    """
+
+
+# Prompt-size guard: ~3 chars per token is a conservative estimate for PT/EN text.
+_CHARS_PER_TOKEN = 3.0
+_PROMPT_TOKEN_OVERHEAD = 64
+
+# Reasoning control. LM Studio documents no per-request switch for Qwen3 hybrid thinking on
+# /v1/chat/completions. The Qwen3 model card documents the `/no_think` soft switch (honoured
+# from the latest user/system message). UNVERIFIED against the real model in this project.
+_LMSTUDIO_NO_THINK_SUFFIX = "\n\n/no_think"
+
+
+def estimate_prompt_tokens(system_prompt: str, user_prompt: str) -> int:
+    return int(math.ceil(len(system_prompt + user_prompt) / _CHARS_PER_TOKEN)) + _PROMPT_TOKEN_OVERHEAD
 
 
 @dataclass
@@ -719,9 +746,24 @@ class UnifiedLocalLLMAdapter:
         temperature: float,
         max_tokens: int | None = None,
         cancel_token: CancelToken | None,
+        seed: int | None = None,
+        reasoning: bool | None = None,
+        images: Sequence[bytes] | None = None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
+
+        llm_cfg = self._get_llm_config()
+        if reasoning is None:
+            disable_reasoning = llm_cfg.get("disable_reasoning", True)
+            if not isinstance(disable_reasoning, bool):
+                disable_reasoning = True
+        else:
+            # Per-call override: reasoning=False sends the off controls (/no_think, think:false); True leaves them out, so
+            # the model's own default decides (Ollama's think:true is not sent).
+            disable_reasoning = not bool(reasoning)
+        if seed is None:
+            seed = self._resolve_seed(llm_cfg)
 
         effective_max_tokens = (
             int(max_tokens)
@@ -729,10 +771,48 @@ class UnifiedLocalLLMAdapter:
             else int(config.LLM_MAX_TOKENS_MINER)
         )
 
+        if disable_reasoning and resolution.provider == "lmstudio":
+            user_prompt = user_prompt + _LMSTUDIO_NO_THINK_SUFFIX
+
+        # Same context the model is loaded with (lmstudio_cli.stage uses this resolver).
+        context_length = int(resolve_lmstudio_context_length(resolution.model, llm_cfg))
+        est_prompt = estimate_prompt_tokens(system_prompt, user_prompt)
+        if est_prompt + effective_max_tokens > context_length:
+            raise LLMContextOverflowError(
+                f"Prompt too large for the loaded context: estimated prompt tokens={est_prompt}, "
+                f"max_tokens={effective_max_tokens}, context length={context_length}. "
+                "Request not sent."
+            )
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        if images:
+            # NOT RUN: the image request shapes below were written from the public API documentation of LM Studio
+            # (OpenAI-style content parts with image_url data URIs) and Ollama ("images" with base64 strings on the
+            # message). They have never been sent to a real server here; check them on the real machine.
+            # Without images, `messages` above is exactly what every text call has always sent.
+            if resolution.provider == "lmstudio":
+                messages[1] = {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        *(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(img).decode("ascii")},
+                            }
+                            for img in images
+                        ),
+                    ],
+                }
+            else:
+                messages[1] = {
+                    "role": "user",
+                    "content": user_prompt,
+                    "images": [base64.b64encode(img).decode("ascii") for img in images],
+                }
 
         try:
             if resolution.provider == "lmstudio":
@@ -740,6 +820,7 @@ class UnifiedLocalLLMAdapter:
                     "model": resolution.model,
                     "messages": messages,
                     "temperature": temperature,
+                    "seed": int(seed),
                     "max_tokens": effective_max_tokens,
                     "response_format": {
                         "type": "json_schema",
@@ -792,10 +873,14 @@ class UnifiedLocalLLMAdapter:
                     "format": json_schema,
                     "options": {
                         "temperature": temperature,
-                        "num_ctx": int(config.LMSTUDIO_CONTEXT_LENGTH),
+                        "seed": int(seed),
+                        "num_ctx": context_length,
                         "num_predict": effective_max_tokens,
                     },
                 }
+                if disable_reasoning:
+                    # Documented: https://docs.ollama.com/capabilities/thinking (Ollama >= 0.9.0)
+                    req_body["think"] = False
                 status, payload = await self._request_json(
                     "POST",
                     f"{resolution.base_url}/api/chat",
@@ -860,7 +945,22 @@ class UnifiedLocalLLMAdapter:
                     "LLM returned empty content and reasoning_content did not contain valid JSON",
                 ) from exc
 
-        return _extract_json_payload("")
+        raise LLMEmptyResponseError(
+            f"LLM ({resolution.provider}, model '{resolution.model}') returned empty content. "
+            f"Probable cause: context overflow (context length={context_length}, "
+            f"estimated prompt tokens={est_prompt}, max_tokens={effective_max_tokens}) "
+            "or the output budget was consumed by reasoning."
+        )
+
+    def _resolve_seed(self, llm_cfg: dict[str, Any] | None = None) -> int:
+        cfg = llm_cfg if llm_cfg is not None else self._get_llm_config()
+        raw = cfg.get("analysis_seed") if isinstance(cfg, dict) else None
+        if raw is not None and not isinstance(raw, bool):
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+        return int(getattr(config, "ANALYSIS_SEED", 42))
 
     async def _execute_chat_json_with_repair(
         self,
@@ -873,7 +973,12 @@ class UnifiedLocalLLMAdapter:
         temperature: float,
         max_tokens: int | None,
         cancel_token: CancelToken | None,
+        seed: int | None = None,
+        reasoning: bool | None = None,
+        images: Sequence[bytes] | None = None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
+        # `images` is forwarded only when present, so text calls make the exact same inner call as before.
+        extra: dict[str, Any] = {"images": images} if images else {}
         try:
             return await self._execute_chat_json(
                 resolution,
@@ -884,10 +989,11 @@ class UnifiedLocalLLMAdapter:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 cancel_token=cancel_token,
+                seed=seed,
+                reasoning=reasoning,
+                **extra,
             )
         except InvalidLLMJsonResponseError as exc:
-            if exc.raw_text.strip() == "ok":
-                raise
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
 
@@ -911,6 +1017,9 @@ class UnifiedLocalLLMAdapter:
                 temperature=0.0,
                 max_tokens=max_tokens,
                 cancel_token=cancel_token,
+                seed=seed,
+                reasoning=reasoning,
+                **extra,
             )
 
     async def chat_json(
@@ -920,14 +1029,19 @@ class UnifiedLocalLLMAdapter:
         *,
         json_schema: dict[str, Any] = CUTS_RESPONSE_JSON_SCHEMA,
         schema_name: str = "narrative_cuts",
-        temperature: float = 0.2,
+        temperature: float = 0.0,
         max_tokens: int | None = None,
         acquire_gpu_slot: bool = True,
         cancel_token: CancelToken | None = None,
+        seed: int | None = None,
+        reasoning: bool | None = None,
     ) -> tuple[dict[str, Any] | list[Any], str]:
         """Execute a structured JSON chat completion on LM Studio or Ollama (auto-starting LMS if needed)."""
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
+
+        if seed is None:
+            seed = self._resolve_seed()
 
         cfg = self.get_configured_urls_and_models()
         provider_pref = cfg["provider"]
@@ -953,6 +1067,8 @@ class UnifiedLocalLLMAdapter:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         cancel_token=cancel_token,
+                        seed=seed,
+                        reasoning=reasoning,
                     )
 
                 lms_ok, lms_models = await self._probe_lmstudio(lms_url)
@@ -979,6 +1095,8 @@ class UnifiedLocalLLMAdapter:
                                 temperature=temperature,
                                 max_tokens=max_tokens,
                                 cancel_token=cancel_token,
+                                seed=seed,
+                                reasoning=reasoning,
                             )
 
             resolution = await self.detect_provider_and_model()
@@ -991,4 +1109,67 @@ class UnifiedLocalLLMAdapter:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 cancel_token=cancel_token,
+                seed=seed,
+                reasoning=reasoning,
+            )
+
+    async def chat_json_with_images(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        images: Sequence[bytes],
+        *,
+        json_schema: dict[str, Any],
+        schema_name: str,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        seed: int | None = None,
+        cancel_token: CancelToken | None = None,
+        acquire_gpu_slot: bool = True,
+        reasoning: bool | None = None,
+    ) -> tuple[dict[str, Any] | list[Any], str]:
+        """Structured JSON chat completion with still images (JPEG bytes) attached to the user message.
+
+        Used only by the optional vision stage. It never loads or unloads anything: the caller (the pipeline's
+        vision step) has already put the vision model on the GPU through `lmstudio.stage`, and the call goes to the
+        model of that stage (or to `model` when given). Same response parsing, error classes, seed, reasoning
+        switch and context guard as `chat_json`. The images are not counted by the context guard (their token cost
+        depends on the model and has not been measured).
+
+        NOT RUN: the image request shapes were written from the public API documentation and have never been run
+        here (see `_execute_chat_json`).
+        """
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
+        if not images:
+            raise ValueError("chat_json_with_images needs at least one image")
+        if seed is None:
+            seed = self._resolve_seed()
+
+        cfg = self.get_configured_urls_and_models()
+        lmstudio_cli = getattr(self.container, "lmstudio", None)
+        stage_key: str | None = None
+        if (
+            cfg["provider"] in ("auto", "lmstudio")
+            and lmstudio_cli is not None
+            and lmstudio_cli.cli_enabled()
+        ):
+            stage_key = lmstudio_cli.active_stage_model("llm")
+
+        async with self._maybe_gpu_slot(acquire_gpu_slot, holder="vision"):
+            resolution = await self._resolve_chat_provider(
+                lms_url=cfg["lmstudio_base_url"], stage_key=model or stage_key
+            )
+            return await self._execute_chat_json_with_repair(
+                resolution,
+                system_prompt,
+                user_prompt,
+                json_schema=json_schema,
+                schema_name=schema_name,
+                temperature=0.0,
+                max_tokens=max_tokens,
+                cancel_token=cancel_token,
+                seed=seed,
+                reasoning=reasoning,
+                images=images,
             )
