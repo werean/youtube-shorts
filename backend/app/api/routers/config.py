@@ -19,7 +19,7 @@ from app.application.job_lifecycle import utc_now_iso
 from app.application.runtime_service import CancelToken, get_container
 from app.core.config import PROMPT_VERSION, SYSTEM_PROMPT_TEMPLATE, config
 from app.core.paths import saved_llm_prompts_file_path
-from app.core.settings import load_settings, update_settings
+from app.core.settings import default_settings, load_settings, save_settings, update_settings
 from app.core.tool_configs import (
     get_tool_configs_payload,
     import_tool_configs_payload,
@@ -778,6 +778,26 @@ async def get_settings_route() -> dict[str, Any]:
 @router.post("/settings")
 async def update_settings_route(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     return update_settings(body or {}).model_dump()
+
+
+@router.post("/settings/reset")
+async def reset_settings_route(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    scope = str((body or {}).get("scope") or "all").strip().lower()
+    defaults = default_settings()
+    if scope == "folders":
+        current = load_settings()
+        merged = current.model_copy(deep=True)
+        merged.media.base_dir = defaults.media.base_dir
+        merged.preferences.ask_delete_cut_confirm = defaults.preferences.ask_delete_cut_confirm
+        merged.preferences.ask_move_on_upload = defaults.preferences.ask_move_on_upload
+        merged.preferences.move_uploads = defaults.preferences.move_uploads
+        return save_settings(merged).model_dump()
+    if scope == "download":
+        current = load_settings()
+        merged = current.model_copy(deep=True)
+        merged.media.download_resolution = defaults.media.download_resolution
+        return save_settings(merged).model_dump()
+    return save_settings(defaults).model_dump()
 
 
 # --- Tool Configs (`/config/tool-configs*`) ---

@@ -431,7 +431,9 @@ const DEPENDENCY_ROWS: DependencyRowMeta[] = [
   },
 ];
 
-const TABLE_GRID = "grid grid-cols-[minmax(200px,1.5fr)_88px_138px_120px_32px] items-center gap-x-3";
+const TABLE_GRID =
+  "grid grid-cols-[minmax(200px,1.5fr)_112px_162px_136px_32px] items-stretch";
+const CELL_DIVIDER = "border-r border-white/[0.06]";
 
 const PYTORCH_TIERS: Array<{ value: PytorchGpuTier; label: string }> = [
   { value: "rtx_4000_or_lower", label: "RTX 4000 ou inferior" },
@@ -674,10 +676,10 @@ export function DependenciesSection({
           <div
             className={`${TABLE_GRID} border-b border-line px-4 py-2.5 text-label font-medium uppercase tracking-[0.06em] text-text-3`}
           >
-            <span>Programa</span>
-            <span>Versão</span>
-            <span>Status</span>
-            <span>Ação</span>
+            <span className={`flex items-center pr-3 ${CELL_DIVIDER}`}>Programa</span>
+            <span className={`flex items-center px-3 ${CELL_DIVIDER}`}>Versão</span>
+            <span className={`flex items-center px-3 ${CELL_DIVIDER}`}>Status</span>
+            <span className="flex items-center pl-3 pr-2">Ação</span>
             <span aria-hidden="true" />
           </div>
 
@@ -740,7 +742,7 @@ export function DependenciesSection({
                   key={row.name}
                   className={`${TABLE_GRID} relative px-4 py-2.5`}
                 >
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className={`flex min-w-0 items-center gap-3 pr-3 ${CELL_DIVIDER}`}>
                     <span
                       aria-hidden="true"
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-item bg-glass-hover text-text-2"
@@ -755,15 +757,19 @@ export function DependenciesSection({
                     </div>
                   </div>
 
-                  <span className="font-mono text-sm text-text-3 tabular-nums">{version}</span>
-                  <div>{statusNode}</div>
-                  <div className="flex items-center">{actionNode}</div>
+                  <span
+                    className={`flex items-center px-3 font-mono text-sm text-text-3 tabular-nums ${CELL_DIVIDER}`}
+                  >
+                    {version}
+                  </span>
+                  <div className={`flex items-center px-3 ${CELL_DIVIDER}`}>{statusNode}</div>
+                  <div className="flex items-center pl-3 pr-2">{actionNode}</div>
 
                   <div
                     ref={(node) => {
                       menuCellRefs.current[row.name] = node;
                     }}
-                    className="relative flex justify-end"
+                    className="relative flex items-center justify-end"
                   >
                     <button
                       type="button"

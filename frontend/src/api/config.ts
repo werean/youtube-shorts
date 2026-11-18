@@ -205,6 +205,16 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<AppS
   });
 }
 
+export async function resetAppSettings(
+  scope?: "all" | "folders" | "download",
+): Promise<AppSettings> {
+  return request("/config/settings/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope: scope || "all" }),
+  });
+}
+
 export async function getToolConfigs(): Promise<ToolConfigsResponse> {
   return request("/config/tool-configs");
 }

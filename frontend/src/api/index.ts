@@ -71,6 +71,7 @@ export {
   saveSettings,
   getToolConfigs,
   saveToolConfigs,
+  resetAppSettings,
   resetAllToolConfigs,
   resetToolConfigSection,
   importToolConfigs,

@@ -27,11 +27,14 @@ import {
   uploadVideoFile,
   getSettings,
   saveSettings,
+  resetAppSettings,
   getToolConfigs,
+  getDefaultLLMPrompt,
   getOllamaModels,
   registerOllamaModel,
   removeOllamaModel,
   saveToolConfigs,
+  resetAllToolConfigs,
   type AppSettings,
 } from "./api";
 import { useBatchPipelineWorkflow } from "./hooks/useBatchPipelineWorkflow";
@@ -54,6 +57,8 @@ import type { LLMAutoSavePatch } from "./components/redesign/settings/AISections
 import type {
   AppSettingsPatch,
   DownloadResolution,
+  PendingRestoreMap,
+  RestoreScope,
   SectionId,
 } from "./components/redesign/settings/settingsShared";
 import { TranscriptPopover } from "./components/redesign/TranscriptPopover";
@@ -67,6 +72,7 @@ interface ActionState {
 
 const initialAction: ActionState = { busy: false };
 const SPEED_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4] as const;
+const RESTORE_DURATION_MS = 5000;
 
 interface OllamaModelCatalogItem {
   name: string;
@@ -219,6 +225,9 @@ export default function App() {
   const [showDiscarded, setShowDiscarded] = useState(false);
   const [showSettingsHub, setShowSettingsHub] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SectionId>("app-folders");
+  const [pendingRestores, setPendingRestores] = useState<PendingRestoreMap>({});
+  const restoreTimersRef = useRef<Partial<Record<RestoreScope, number>>>({});
+  const executeRestoreScopeRef = useRef<(scope: RestoreScope) => Promise<void>>(async () => {});
   const [showNewVideoModal, setShowNewVideoModal] = useState(false);
 
   // Immersive cut playback state
@@ -1254,6 +1263,13 @@ export default function App() {
     }
   }
 
+  function handleSelectSpeed(nextSpeed: number) {
+    setPlaybackRate(nextSpeed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = nextSpeed;
+    }
+  }
+
   function handleToggleMute() {
     const next = !muted;
     setMuted(next);
@@ -1673,6 +1689,221 @@ export default function App() {
     applyToolConfigs(response);
   }
 
+  async function executeRestoreScope(scope: RestoreScope): Promise<void> {
+    try {
+      switch (scope) {
+        case "all": {
+          const [settingsRes, toolRes] = await Promise.all([
+            resetAppSettings("all"),
+            resetAllToolConfigs(),
+          ]);
+          setAppSettings(settingsRes);
+          setConfigBaseDir(settingsRes.media.base_dir);
+          setConfigDownloadResolution(settingsRes.media.download_resolution || "1080p");
+          applyToolConfigs(toolRes);
+          break;
+        }
+        case "app-folders": {
+          const settingsRes = await resetAppSettings("folders");
+          setAppSettings(settingsRes);
+          setConfigBaseDir(settingsRes.media.base_dir);
+          break;
+        }
+        case "app-download": {
+          const settingsRes = await resetAppSettings("download");
+          setAppSettings(settingsRes);
+          setConfigDownloadResolution(settingsRes.media.download_resolution || "1080p");
+          break;
+        }
+        case "ai-model": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveLLM({ model: defaults.llm.model });
+          break;
+        }
+        case "ai-search": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveLLM({
+            embedding_model: defaults.llm.embedding_model,
+            registered_embedding_models: defaults.llm.registered_embedding_models,
+          });
+          break;
+        }
+        case "ai-instructions": {
+          const { prompt } = await getDefaultLLMPrompt();
+          await handleAutoSaveLLM({ system_prompt: prompt });
+          break;
+        }
+        case "whisper-model": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveWhisper({
+            model: defaults.whisper.model,
+            device: defaults.whisper.device,
+            output_format: defaults.whisper.output_format,
+          });
+          break;
+        }
+        case "whisper-language": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveWhisper({
+            language: defaults.whisper.language,
+            task: defaults.whisper.task,
+          });
+          break;
+        }
+        case "whisper-advanced": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveWhisper({
+            verbose: defaults.whisper.verbose,
+            temperature: defaults.whisper.temperature,
+            best_of: defaults.whisper.best_of,
+            beam_size: defaults.whisper.beam_size,
+            patience: defaults.whisper.patience,
+            length_penalty: defaults.whisper.length_penalty,
+            suppress_tokens: defaults.whisper.suppress_tokens,
+            temperature_increment_on_fallback: defaults.whisper.temperature_increment_on_fallback,
+            compression_ratio_threshold: defaults.whisper.compression_ratio_threshold,
+            logprob_threshold: defaults.whisper.logprob_threshold,
+            no_speech_threshold: defaults.whisper.no_speech_threshold,
+            condition_on_previous_text: defaults.whisper.condition_on_previous_text,
+            initial_prompt: defaults.whisper.initial_prompt,
+            carry_initial_prompt: defaults.whisper.carry_initial_prompt,
+            fp16: defaults.whisper.fp16,
+            word_timestamps: defaults.whisper.word_timestamps,
+            prepend_punctuations: defaults.whisper.prepend_punctuations,
+            append_punctuations: defaults.whisper.append_punctuations,
+            highlight_words: defaults.whisper.highlight_words,
+            max_line_width: defaults.whisper.max_line_width,
+            max_line_count: defaults.whisper.max_line_count,
+            max_words_per_line: defaults.whisper.max_words_per_line,
+            threads: defaults.whisper.threads,
+            clip_timestamps: defaults.whisper.clip_timestamps,
+            hallucination_silence_threshold: defaults.whisper.hallucination_silence_threshold,
+          });
+          break;
+        }
+        case "ffmpeg-quality": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveFFmpeg({
+            ...(ffmpegConfig || defaults.ffmpeg),
+            video_preset: defaults.ffmpeg.video_preset,
+            format: defaults.ffmpeg.format,
+          });
+          break;
+        }
+        case "ffmpeg-visual": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveFFmpeg({
+            ...(ffmpegConfig || defaults.ffmpeg),
+            vertical_mode: defaults.ffmpeg.vertical_mode,
+            burn_subtitles: defaults.ffmpeg.burn_subtitles,
+            disable_subtitle: defaults.ffmpeg.disable_subtitle,
+            subtitle_style: defaults.ffmpeg.subtitle_style,
+            trim_internal_silence: defaults.ffmpeg.trim_internal_silence,
+            normalize_audio: defaults.ffmpeg.normalize_audio,
+          });
+          break;
+        }
+        case "ffmpeg-audio": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveFFmpeg({
+            ...(ffmpegConfig || defaults.ffmpeg),
+            audio_codec: defaults.ffmpeg.audio_codec,
+            normalize_audio: defaults.ffmpeg.normalize_audio,
+            disable_audio: defaults.ffmpeg.disable_audio,
+            disable_video: defaults.ffmpeg.disable_video,
+          });
+          break;
+        }
+        case "ffmpeg-advanced": {
+          const toolRes = await getToolConfigs();
+          const defaults = toolRes.defaults ?? toolRes.active;
+          await handleAutoSaveFFmpeg({
+            ...(ffmpegConfig || defaults.ffmpeg),
+            video_codec: defaults.ffmpeg.video_codec,
+            video_bitrate: defaults.ffmpeg.video_bitrate,
+            framerate: defaults.ffmpeg.framerate,
+            aspect_ratio: defaults.ffmpeg.aspect_ratio,
+            audio_bitrate: defaults.ffmpeg.audio_bitrate,
+            audio_sample_rate: defaults.ffmpeg.audio_sample_rate,
+            audio_channels: defaults.ffmpeg.audio_channels,
+            video_filter: defaults.ffmpeg.video_filter,
+            audio_filter: defaults.ffmpeg.audio_filter,
+            metadata: defaults.ffmpeg.metadata,
+          });
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (error: any) {
+      console.error(`Failed to restore defaults for ${scope}:`, error);
+      setAction({
+        busy: false,
+        error: error?.message || "Não foi possível restaurar as configurações padrão.",
+      });
+    }
+  }
+  executeRestoreScopeRef.current = executeRestoreScope;
+
+  function handleStartRestore(scope: RestoreScope) {
+    const existingTimer = restoreTimersRef.current[scope];
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+
+    setPendingRestores((prev) => ({
+      ...prev,
+      [scope]: {
+        startedAt: Date.now(),
+        durationMs: RESTORE_DURATION_MS,
+      },
+    }));
+
+    restoreTimersRef.current[scope] = window.setTimeout(() => {
+      delete restoreTimersRef.current[scope];
+      setPendingRestores((prev) => {
+        if (!prev[scope]) return prev;
+        const next = { ...prev };
+        delete next[scope];
+        return next;
+      });
+      void executeRestoreScopeRef.current(scope);
+    }, RESTORE_DURATION_MS);
+  }
+
+  function handleCancelRestore(scope: RestoreScope) {
+    const timerId = restoreTimersRef.current[scope];
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      delete restoreTimersRef.current[scope];
+    }
+    setPendingRestores((prev) => {
+      if (!prev[scope]) return prev;
+      const next = { ...prev };
+      delete next[scope];
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      for (const timerId of Object.values(restoreTimersRef.current)) {
+        if (timerId !== undefined) {
+          window.clearTimeout(timerId);
+        }
+      }
+      restoreTimersRef.current = {};
+    };
+  }, []);
+
   async function handleMoveUploadDecision(moveUploads: boolean) {
     const askAgain = !dontAskMoveUpload;
     try {
@@ -1844,6 +2075,8 @@ export default function App() {
           onPrevCut={() => handlePrevNextCut(-1)}
           onNextCut={() => handlePrevNextCut(1)}
           onCycleSpeed={handleCycleSpeed}
+          onSelectSpeed={handleSelectSpeed}
+          speedSteps={SPEED_STEPS}
           onToggleMute={handleToggleMute}
           onVolumeChange={handleVolumeChange}
           onToggleTranscript={() => void handleToggleTranscript()}
@@ -1966,6 +2199,9 @@ export default function App() {
           }
           await startBatchPipelineDialog();
         }}
+        pendingRestores={pendingRestores}
+        onStartRestore={handleStartRestore}
+        onCancelRestore={handleCancelRestore}
       />
 
       {/* Diálogos de suporte e configuração existentes */}

@@ -1,8 +1,6 @@
 import {
-  ArrowsClockwise,
   CaretDown,
   CaretRight,
-  Check,
   Cpu,
   FilmStrip,
   Gear,
@@ -41,12 +39,16 @@ import {
 } from "./settings/FFmpegAndUtilitySections";
 import {
   getSectionMeta,
+  RESTORABLE_SECTIONS,
+  RestoreDefaultsButton,
   SETTINGS_FOOTER_GROUP_ID,
   SETTINGS_NAV_GROUPS,
   type AppSettingsPatch,
   type AutoSaveReporter,
   type DownloadResolution,
   type NavIconName,
+  type PendingRestoreMap,
+  type RestoreScope,
   type SaveStatus,
   type SectionId,
 } from "./settings/settingsShared";
@@ -129,7 +131,14 @@ export interface SettingsHubModalProps {
   onBatchOptionChange: (options: Partial<BatchPipelineOptions>) => void;
   onCancelBatch: () => Promise<void> | void;
   onStartBatch: () => Promise<void> | void;
+
+  // Restauração para padrões de fábrica
+  pendingRestores?: PendingRestoreMap;
+  onStartRestore?: (scope: RestoreScope) => void;
+  onCancelRestore?: (scope: RestoreScope) => void;
 }
+
+const noopRestore = () => {};
 
 function renderNavIcon(icon: NavIconName, active: boolean) {
   const className = active ? "text-accent-soft shrink-0" : "text-text-2 shrink-0";
@@ -201,6 +210,9 @@ export function SettingsHubModal({
   onBatchOptionChange,
   onCancelBatch,
   onStartBatch,
+  pendingRestores,
+  onStartRestore,
+  onCancelRestore,
 }: SettingsHubModalProps) {
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
@@ -294,17 +306,13 @@ export function SettingsHubModal({
 
   const handleGroupClick = (groupId: string, firstChildId: SectionId, isActiveGroup: boolean) => {
     const isExpanded = Boolean(expandedGroups[groupId]);
-    if (!isExpanded) {
-      setExpandedGroups((prev) => ({ ...prev, [groupId]: true }));
-      if (!isActiveGroup) {
-        navigateToSection(firstChildId);
-      }
+    if (isExpanded) {
+      setExpandedGroups((prev) => ({ ...prev, [groupId]: false }));
       return;
     }
 
-    if (isActiveGroup) {
-      setExpandedGroups((prev) => ({ ...prev, [groupId]: false }));
-    } else {
+    setExpandedGroups((prev) => ({ ...prev, [groupId]: true }));
+    if (!isActiveGroup) {
       navigateToSection(firstChildId);
     }
   };
@@ -554,7 +562,7 @@ export function SettingsHubModal({
 
           <nav
             aria-label="Seções de configurações"
-            className="flex-1 min-h-0 overflow-y-auto arc-scroll space-y-0.5"
+            className="flex-1 min-h-0 overflow-y-auto arc-scroll space-y-0.5 pr-3 -mr-1"
           >
             {SETTINGS_NAV_GROUPS.map((group) => {
               const hasChildren = Boolean(group.children?.length);
@@ -662,6 +670,17 @@ export function SettingsHubModal({
               <span className="truncate">Processar em lote</span>
             </button>
 
+            <RestoreDefaultsButton
+              scope="all"
+              label="Restaurar padrões"
+              confirmTitle="Restaurar configurações para os padrões iniciais?"
+              confirmDescription="Pastas, modelos de IA, transcrição e renderização voltarão aos valores de fábrica."
+              pending={pendingRestores?.all}
+              onConfirmStart={onStartRestore ?? noopRestore}
+              onCancelPending={onCancelRestore ?? noopRestore}
+              variant="sidebar"
+            />
+
             <button
               type="button"
               data-settings-nav-item="true"
@@ -693,22 +712,10 @@ export function SettingsHubModal({
             <span className="text-xs text-text-3 font-normal">{meta.title}</span>
 
             <div className="flex items-center gap-3">
-              {meta.showSaved && (
-                <div className="inline-flex items-center gap-1.5" role="status" aria-live="polite">
-                  {saveStatus === "saving" ? (
-                    <>
-                      <ArrowsClockwise className="animate-spin text-text-3" size={13} />
-                      <span className="text-xs text-text-2">Salvando…</span>
-                    </>
-                  ) : saveStatus === "error" ? (
-                    <span className="text-xs text-danger">{saveError || "Erro ao salvar"}</span>
-                  ) : (
-                    <>
-                      <Check size={14} weight="bold" className="text-success" />
-                      <span className="text-xs text-text-2">Salvo</span>
-                    </>
-                  )}
-                </div>
+              {saveStatus === "error" && (
+                <span className="text-xs text-danger" role="status" aria-live="polite">
+                  {saveError || "Erro ao salvar"}
+                </span>
               )}
 
               <button
@@ -728,6 +735,19 @@ export function SettingsHubModal({
             className="flex-1 min-h-0 overflow-y-auto px-7 pb-7 pt-2 arc-scroll settings-scroll-fade"
           >
             {renderSection()}
+            {RESTORABLE_SECTIONS.includes(activeSection) && onStartRestore && onCancelRestore && (
+              <div className="mt-8 pt-5 border-t border-line flex items-center justify-end">
+                <RestoreDefaultsButton
+                  scope={activeSection}
+                  label="Restaurar padrão"
+                  confirmTitle="Tem certeza que deseja restaurar esta seção?"
+                  pending={pendingRestores?.[activeSection]}
+                  onConfirmStart={onStartRestore}
+                  onCancelPending={onCancelRestore}
+                  variant="section"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

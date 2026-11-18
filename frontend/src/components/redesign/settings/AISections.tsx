@@ -1,5 +1,4 @@
 import {
-  ArrowCounterClockwise,
   BookmarkSimple,
   Cloud,
   Database,
@@ -13,7 +12,6 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  getDefaultLLMPrompt,
   getSavedLLMPrompts,
   saveLLMPrompt,
   type SavedLLMPrompt,
@@ -958,7 +956,6 @@ export function AIInstructionsSection({
 }: AIInstructionsSectionProps) {
   const incomingPrompt = llmSystemPrompt ?? systemPromptProp ?? "";
   const [localPrompt, setLocalPrompt] = useState<string>(incomingPrompt);
-  const [restoringDefault, setRestoringDefault] = useState(false);
 
   // Estado para "Prompts salvos" e "Salvar com nome"
   const [showSavedDrawer, setShowSavedDrawer] = useState(false);
@@ -1110,31 +1107,6 @@ export function AIInstructionsSection({
     }
   }
 
-  async function handleRestoreDefault(): Promise<void> {
-    if (restoringDefault) return;
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-
-    setRestoringDefault(true);
-    reporter?.reportSaving();
-    try {
-      const response = await getDefaultLLMPrompt();
-      const defaultText = response?.prompt ?? "";
-      setLocalPrompt(defaultText);
-      latestDraftRef.current = defaultText;
-      lastSavedRef.current = defaultText;
-      dirtyRef.current = false;
-      await onSaveLLM({ system_prompt: defaultText });
-      reporter?.reportSaved();
-    } catch (error) {
-      reporter?.reportError(errorMessage(error));
-    } finally {
-      setRestoringDefault(false);
-    }
-  }
-
   return (
     <section>
       <div className="flex items-center justify-between gap-3 mb-2.5">
@@ -1275,19 +1247,10 @@ export function AIInstructionsSection({
         />
       </div>
 
-      {/* Linha inferior: Restaurar padrão + texto auxiliar */}
-      <div className="mt-4 flex items-center gap-4 flex-wrap">
-        <GhostButton
-          leadingIcon={<ArrowCounterClockwise size={14} />}
-          disabled={restoringDefault}
-          onClick={() => void handleRestoreDefault()}
-        >
-          Restaurar padrão
-        </GhostButton>
-        <p className="text-xs text-text-2">
-          Define como a IA escolhe e nomeia os cortes. Ao restaurar, o texto atual é substituído pela versão padrão.
-        </p>
-      </div>
+      {/* Texto auxiliar */}
+      <p className="mt-3 text-xs text-text-2">
+        Define como a IA escolhe e nomeia os cortes. Ao restaurar, o texto atual é substituído pela versão padrão.
+      </p>
     </section>
   );
 }

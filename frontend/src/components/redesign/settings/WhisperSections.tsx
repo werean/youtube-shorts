@@ -358,6 +358,91 @@ export function WhisperLanguageSection({
 /* Tela 09 — Transcrição · Avançado (`whisper-advanced`)                      */
 /* -------------------------------------------------------------------------- */
 
+interface WhisperAdvancedFormState {
+  model: WhisperConfig["model"];
+  device: "cpu" | "cuda";
+  formats: string[];
+  temperature: string;
+  bestOf: string;
+  beamSize: string;
+  patience: string;
+  lengthPenalty: string;
+  verbose: boolean;
+  suppressTokens: string;
+  initialPrompt: string;
+  carryInitialPrompt: boolean;
+  conditionOnPreviousText: boolean;
+  fp16: boolean;
+  temperatureIncrement: string;
+  compressionRatioThreshold: string;
+  logprobThreshold: string;
+  noSpeechThreshold: string;
+  wordTimestamps: boolean;
+  prependPunctuations: string;
+  appendPunctuations: string;
+  highlightWords: boolean;
+  maxLineWidth: string;
+  maxLineCount: string;
+  maxWordsPerLine: string;
+  threads: string;
+  clipTimestamps: string;
+  hallucinationSilenceThreshold: string;
+}
+
+function toWhisperAdvancedFormState(
+  whisperConfig: Partial<WhisperConfig> | null,
+  whisperDevice: "cpu" | "cuda",
+  whisperFormats: string[],
+): WhisperAdvancedFormState {
+  const formats =
+    Array.isArray(whisperConfig?.output_format) && whisperConfig.output_format.length > 0
+      ? [...whisperConfig.output_format]
+      : whisperFormats.length > 0
+        ? [...whisperFormats]
+        : ["json", "vtt", "txt"];
+
+  return {
+    model: (whisperConfig?.model as WhisperConfig["model"]) ?? "small",
+    device: whisperConfig?.device ?? whisperDevice ?? "cuda",
+    formats,
+    temperature: cleanStr(whisperConfig?.temperature, "0"),
+    bestOf: cleanStr(whisperConfig?.best_of, "5"),
+    beamSize: cleanStr(whisperConfig?.beam_size, "5"),
+    patience: cleanStr(whisperConfig?.patience),
+    lengthPenalty: cleanStr(whisperConfig?.length_penalty),
+    verbose: whisperConfig?.verbose ?? true,
+    suppressTokens: cleanStr(whisperConfig?.suppress_tokens, "-1"),
+    initialPrompt: cleanStr(whisperConfig?.initial_prompt),
+    carryInitialPrompt: whisperConfig?.carry_initial_prompt ?? false,
+    conditionOnPreviousText: whisperConfig?.condition_on_previous_text ?? true,
+    fp16: whisperConfig?.fp16 ?? true,
+    temperatureIncrement: cleanStr(whisperConfig?.temperature_increment_on_fallback, "0.2"),
+    compressionRatioThreshold: cleanStr(whisperConfig?.compression_ratio_threshold, "2.4"),
+    logprobThreshold: cleanStr(whisperConfig?.logprob_threshold, "-1.0"),
+    noSpeechThreshold: cleanStr(whisperConfig?.no_speech_threshold, "0.6"),
+    wordTimestamps: Boolean(whisperConfig?.word_timestamps),
+    prependPunctuations: cleanStr(whisperConfig?.prepend_punctuations),
+    appendPunctuations: cleanStr(whisperConfig?.append_punctuations),
+    highlightWords: Boolean(whisperConfig?.highlight_words),
+    maxLineWidth: cleanStr(whisperConfig?.max_line_width),
+    maxLineCount: cleanStr(whisperConfig?.max_line_count),
+    maxWordsPerLine: cleanStr(whisperConfig?.max_words_per_line),
+    threads: cleanStr(whisperConfig?.threads, "0"),
+    clipTimestamps: cleanStr(whisperConfig?.clip_timestamps, "0"),
+    hallucinationSilenceThreshold: cleanStr(whisperConfig?.hallucination_silence_threshold),
+  };
+}
+
+function serializeWhisperAdvancedExternal(
+  whisperConfig: Partial<WhisperConfig> | null,
+  whisperDevice: "cpu" | "cuda",
+  whisperFormats: string[],
+): string {
+  const state = toWhisperAdvancedFormState(whisperConfig, whisperDevice, whisperFormats);
+  const entries = Object.entries(state).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(entries);
+}
+
 export function WhisperAdvancedSection({
   whisperConfig,
   whisperDevice,
@@ -368,125 +453,188 @@ export function WhisperAdvancedSection({
   const idPrefix = useId();
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatchRef = useRef<Partial<WhisperConfig>>({});
+  const hasPendingDebounceRef = useRef(false);
 
-  const [model, setModel] = useState<WhisperConfig["model"]>(
-    (whisperConfig?.model as WhisperConfig["model"]) ?? "small",
+  const whisperConfigRef = useRef(whisperConfig);
+  whisperConfigRef.current = whisperConfig;
+  const whisperDeviceRef = useRef(whisperDevice);
+  whisperDeviceRef.current = whisperDevice;
+  const whisperFormatsRef = useRef(whisperFormats);
+  whisperFormatsRef.current = whisperFormats;
+  const onSaveWhisperRef = useRef(onSaveWhisper);
+  onSaveWhisperRef.current = onSaveWhisper;
+  const reporterRef = useRef(reporter);
+  reporterRef.current = reporter;
+
+  const normalizedConfigKey = useMemo(
+    () => serializeWhisperAdvancedExternal(whisperConfig, whisperDevice, whisperFormats),
+    [whisperConfig, whisperDevice, whisperFormats],
   );
-  const [device, setDevice] = useState<"cpu" | "cuda">(
-    whisperConfig?.device ?? whisperDevice ?? "cuda",
+  const lastExternalConfigKeyRef = useRef<string>(normalizedConfigKey);
+  const lastLocallySavedKeyRef = useRef<string | null>(null);
+
+  const [initialExternalState] = useState<WhisperAdvancedFormState>(() =>
+    toWhisperAdvancedFormState(whisperConfig, whisperDevice, whisperFormats),
   );
-  const [formats, setFormats] = useState<string[]>(() => {
-    if (Array.isArray(whisperConfig?.output_format) && whisperConfig!.output_format.length > 0) {
-      return [...whisperConfig!.output_format];
-    }
-    return whisperFormats.length > 0 ? [...whisperFormats] : ["json", "vtt", "txt"];
-  });
+
+  const [model, setModel] = useState<WhisperConfig["model"]>(initialExternalState.model);
+  const [device, setDevice] = useState<"cpu" | "cuda">(initialExternalState.device);
+  const [formats, setFormats] = useState<string[]>(initialExternalState.formats);
 
   // 1. Busca e amostragem (6)
-  const [temperature, setTemperature] = useState<string>(
-    cleanStr(whisperConfig?.temperature, "0"),
-  );
-  const [bestOf, setBestOf] = useState<string>(cleanStr(whisperConfig?.best_of, "5"));
-  const [beamSize, setBeamSize] = useState<string>(cleanStr(whisperConfig?.beam_size, "5"));
-  const [patience, setPatience] = useState<string>(cleanStr(whisperConfig?.patience));
-  const [lengthPenalty, setLengthPenalty] = useState<string>(
-    cleanStr(whisperConfig?.length_penalty),
-  );
-  const [verbose, setVerbose] = useState<boolean>(whisperConfig?.verbose ?? true);
+  const [temperature, setTemperature] = useState<string>(initialExternalState.temperature);
+  const [bestOf, setBestOf] = useState<string>(initialExternalState.bestOf);
+  const [beamSize, setBeamSize] = useState<string>(initialExternalState.beamSize);
+  const [patience, setPatience] = useState<string>(initialExternalState.patience);
+  const [lengthPenalty, setLengthPenalty] = useState<string>(initialExternalState.lengthPenalty);
+  const [verbose, setVerbose] = useState<boolean>(initialExternalState.verbose);
 
   // 2. Token e prompt (4)
   const [suppressTokens, setSuppressTokens] = useState<string>(
-    cleanStr(whisperConfig?.suppress_tokens, "-1"),
+    initialExternalState.suppressTokens,
   );
-  const [initialPrompt, setInitialPrompt] = useState<string>(
-    cleanStr(whisperConfig?.initial_prompt),
-  );
+  const [initialPrompt, setInitialPrompt] = useState<string>(initialExternalState.initialPrompt);
   const [carryInitialPrompt, setCarryInitialPrompt] = useState<boolean>(
-    whisperConfig?.carry_initial_prompt ?? false,
+    initialExternalState.carryInitialPrompt,
   );
   const [conditionOnPreviousText, setConditionOnPreviousText] = useState<boolean>(
-    whisperConfig?.condition_on_previous_text ?? true,
+    initialExternalState.conditionOnPreviousText,
   );
 
   // 3. Decodificação avançada (5)
-  const [fp16, setFp16] = useState<boolean>(whisperConfig?.fp16 ?? true);
+  const [fp16, setFp16] = useState<boolean>(initialExternalState.fp16);
   const [temperatureIncrement, setTemperatureIncrement] = useState<string>(
-    cleanStr(whisperConfig?.temperature_increment_on_fallback, "0.2"),
+    initialExternalState.temperatureIncrement,
   );
   const [compressionRatioThreshold, setCompressionRatioThreshold] = useState<string>(
-    cleanStr(whisperConfig?.compression_ratio_threshold, "2.4"),
+    initialExternalState.compressionRatioThreshold,
   );
   const [logprobThreshold, setLogprobThreshold] = useState<string>(
-    cleanStr(whisperConfig?.logprob_threshold, "-1.0"),
+    initialExternalState.logprobThreshold,
   );
   const [noSpeechThreshold, setNoSpeechThreshold] = useState<string>(
-    cleanStr(whisperConfig?.no_speech_threshold, "0.6"),
+    initialExternalState.noSpeechThreshold,
   );
 
   // 4. Timestamps e palavras (4)
   const [wordTimestamps, setWordTimestamps] = useState<boolean>(
-    Boolean(whisperConfig?.word_timestamps),
+    initialExternalState.wordTimestamps,
   );
   const [prependPunctuations, setPrependPunctuations] = useState<string>(
-    cleanStr(whisperConfig?.prepend_punctuations),
+    initialExternalState.prependPunctuations,
   );
   const [appendPunctuations, setAppendPunctuations] = useState<string>(
-    cleanStr(whisperConfig?.append_punctuations),
+    initialExternalState.appendPunctuations,
   );
   const [highlightWords, setHighlightWords] = useState<boolean>(
-    Boolean(whisperConfig?.highlight_words),
+    initialExternalState.highlightWords,
   );
 
   // 5. Formatação de saída (3)
-  const [maxLineWidth, setMaxLineWidth] = useState<string>(
-    cleanStr(whisperConfig?.max_line_width),
-  );
-  const [maxLineCount, setMaxLineCount] = useState<string>(
-    cleanStr(whisperConfig?.max_line_count),
-  );
+  const [maxLineWidth, setMaxLineWidth] = useState<string>(initialExternalState.maxLineWidth);
+  const [maxLineCount, setMaxLineCount] = useState<string>(initialExternalState.maxLineCount);
   const [maxWordsPerLine, setMaxWordsPerLine] = useState<string>(
-    cleanStr(whisperConfig?.max_words_per_line),
+    initialExternalState.maxWordsPerLine,
   );
 
   // 6. Performance (3)
-  const [threads, setThreads] = useState<string>(cleanStr(whisperConfig?.threads, "0"));
+  const [threads, setThreads] = useState<string>(initialExternalState.threads);
   const [clipTimestamps, setClipTimestamps] = useState<string>(
-    cleanStr(whisperConfig?.clip_timestamps, "0"),
+    initialExternalState.clipTimestamps,
   );
   const [hallucinationSilenceThreshold, setHallucinationSilenceThreshold] = useState<string>(
-    cleanStr(whisperConfig?.hallucination_silence_threshold),
+    initialExternalState.hallucinationSilenceThreshold,
   );
 
-  // Sync external changes when props update
+  // Sync external changes when props update (preserving active debounced edits)
   useEffect(() => {
-    if (whisperConfig?.model) {
-      setModel(whisperConfig.model);
-    }
-  }, [whisperConfig?.model]);
+    const prevKey = lastExternalConfigKeyRef.current;
+    lastExternalConfigKeyRef.current = normalizedConfigKey;
 
-  useEffect(() => {
-    setDevice(whisperConfig?.device ?? whisperDevice ?? "cuda");
-  }, [whisperConfig?.device, whisperDevice]);
+    const isSameExternalValue = normalizedConfigKey === prevKey;
+    const isEchoOfLocalSave =
+      lastLocallySavedKeyRef.current !== null &&
+      lastLocallySavedKeyRef.current === normalizedConfigKey;
 
-  useEffect(() => {
-    if (Array.isArray(whisperConfig?.output_format) && whisperConfig!.output_format.length > 0) {
-      setFormats([...whisperConfig!.output_format]);
-    } else if (whisperFormats.length > 0) {
-      setFormats([...whisperFormats]);
+    if (isEchoOfLocalSave) {
+      lastLocallySavedKeyRef.current = null;
+      if (hasPendingDebounceRef.current) {
+        return;
+      }
+    } else if (isSameExternalValue && hasPendingDebounceRef.current) {
+      return;
     }
-  }, [whisperConfig?.output_format, whisperFormats]);
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    hasPendingDebounceRef.current = false;
+    pendingPatchRef.current = {};
+
+    const next = toWhisperAdvancedFormState(whisperConfig, whisperDevice, whisperFormats);
+    setModel(next.model);
+    setDevice(next.device);
+    setFormats(next.formats);
+    setTemperature(next.temperature);
+    setBestOf(next.bestOf);
+    setBeamSize(next.beamSize);
+    setPatience(next.patience);
+    setLengthPenalty(next.lengthPenalty);
+    setVerbose(next.verbose);
+    setSuppressTokens(next.suppressTokens);
+    setInitialPrompt(next.initialPrompt);
+    setCarryInitialPrompt(next.carryInitialPrompt);
+    setConditionOnPreviousText(next.conditionOnPreviousText);
+    setFp16(next.fp16);
+    setTemperatureIncrement(next.temperatureIncrement);
+    setCompressionRatioThreshold(next.compressionRatioThreshold);
+    setLogprobThreshold(next.logprobThreshold);
+    setNoSpeechThreshold(next.noSpeechThreshold);
+    setWordTimestamps(next.wordTimestamps);
+    setPrependPunctuations(next.prependPunctuations);
+    setAppendPunctuations(next.appendPunctuations);
+    setHighlightWords(next.highlightWords);
+    setMaxLineWidth(next.maxLineWidth);
+    setMaxLineCount(next.maxLineCount);
+    setMaxWordsPerLine(next.maxWordsPerLine);
+    setThreads(next.threads);
+    setClipTimestamps(next.clipTimestamps);
+    setHallucinationSilenceThreshold(next.hallucinationSilenceThreshold);
+  }, [whisperConfig, whisperDevice, whisperFormats, normalizedConfigKey]);
+
+  const commitPatch = useCallback((patch: Partial<WhisperConfig>) => {
+    const nextConfig: Partial<WhisperConfig> = {
+      ...(whisperConfigRef.current ?? {}),
+      ...patch,
+    };
+    const nextDevice: "cpu" | "cuda" =
+      nextConfig.device === "cpu" || nextConfig.device === "cuda"
+        ? nextConfig.device
+        : whisperDeviceRef.current;
+    const nextFormats = Array.isArray(nextConfig.output_format)
+      ? nextConfig.output_format
+      : whisperFormatsRef.current;
+    lastLocallySavedKeyRef.current = serializeWhisperAdvancedExternal(
+      nextConfig,
+      nextDevice,
+      nextFormats,
+    );
+    void persistWhisperPatch(onSaveWhisperRef.current, reporterRef.current, patch);
+  }, []);
 
   const flushPendingSave = useCallback(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+    hasPendingDebounceRef.current = false;
     if (Object.keys(pendingPatchRef.current).length > 0) {
       const batch = pendingPatchRef.current;
       pendingPatchRef.current = {};
-      void persistWhisperPatch(onSaveWhisper, reporter, batch);
+      commitPatch(batch);
     }
-  }, [onSaveWhisper, reporter]);
+  }, [commitPatch]);
 
   const flushPendingSaveRef = useRef(flushPendingSave);
   flushPendingSaveRef.current = flushPendingSave;
@@ -503,33 +651,33 @@ export function WhisperAdvancedSection({
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
       }
+      hasPendingDebounceRef.current = false;
       const mergedPatch =
         Object.keys(pendingPatchRef.current).length > 0
           ? { ...pendingPatchRef.current, ...patch }
           : patch;
       pendingPatchRef.current = {};
-      void persistWhisperPatch(onSaveWhisper, reporter, mergedPatch);
+      commitPatch(mergedPatch);
     },
-    [onSaveWhisper, reporter],
+    [commitPatch],
   );
 
-  const schedulePatch = useCallback(
-    (partialPatch: Partial<WhisperConfig>) => {
-      pendingPatchRef.current = {
-        ...pendingPatchRef.current,
-        ...partialPatch,
-      };
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      reporter?.reportSaving();
-      debounceTimerRef.current = setTimeout(() => {
-        debounceTimerRef.current = null;
-        flushPendingSaveRef.current();
-      }, DEBOUNCE_MS);
-    },
-    [reporter],
-  );
+  const schedulePatch = useCallback((partialPatch: Partial<WhisperConfig>) => {
+    pendingPatchRef.current = {
+      ...pendingPatchRef.current,
+      ...partialPatch,
+    };
+    hasPendingDebounceRef.current = true;
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    reporterRef.current?.reportSaving();
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      hasPendingDebounceRef.current = false;
+      flushPendingSaveRef.current();
+    }, DEBOUNCE_MS);
+  }, []);
 
   const handleFormatToggle = (formatId: string) => {
     const isCurrentlySelected = formats.includes(formatId);

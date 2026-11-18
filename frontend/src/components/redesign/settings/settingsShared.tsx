@@ -1,12 +1,15 @@
-import { Check } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Check, X } from "@phosphor-icons/react";
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 /* -------------------------------------------------------------------------- */
 /* Navegação / metadados das seções                                            */
@@ -256,7 +259,7 @@ export function PickTile({
       data-pick-tile
       data-selected={selected ? "true" : "false"}
       className={cx(
-        "relative flex flex-col rounded-card border border-line bg-glass p-4 text-left transition-[border-color,background-color,box-shadow] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "relative flex flex-col rounded-card border border-line bg-glass p-4 text-left transition-[border-color,background-color,box-shadow] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         selected ? "pick" : onSelect && !disabled && "hover:bg-glass-hover hover:border-line-strong",
         disabled && "opacity-60",
         className,
@@ -312,137 +315,12 @@ export interface PickTileGroupProps {
   className?: string;
 }
 
-interface RailPosition {
-  x: number;
-  y: number;
-  h: number;
-  visible: boolean;
-}
-
 /**
- * Agrupa tiles de seleção única (`PickTile`) e anima um trilho indicador
- * compartilhado entre o tile anterior e o próximo entre colunas e linhas.
+ * Container para grupos de tiles selecionáveis (`PickTile`).
+ * A transição suave de borda, fundo e barra lateral acontece em cada card individualmente.
  */
 export function PickTileGroup({ children, className }: PickTileGroupProps) {
-  const groupRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<RailPosition>({ x: 0, y: 0, h: 0, visible: false });
-  const [canAnimate, setCanAnimate] = useState(false);
-
-  const measure = useCallback(() => {
-    const container = groupRef.current;
-    if (!container) return;
-
-    const selected = container.querySelector<HTMLElement>(
-      '[data-pick-tile][data-selected="true"]',
-    );
-    if (!selected) {
-      setPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      setCanAnimate(false);
-      return;
-    }
-
-    let x = selected.offsetLeft;
-    let y = selected.offsetTop;
-    if (selected.offsetParent && selected.offsetParent !== container) {
-      const containerRect = container.getBoundingClientRect();
-      const selectedRect = selected.getBoundingClientRect();
-      x = selectedRect.left - containerRect.left + container.scrollLeft;
-      y = selectedRect.top - containerRect.top + container.scrollTop;
-    }
-
-    const inset = Math.min(8, Math.floor(selected.offsetHeight / 4));
-    const next: RailPosition = {
-      x,
-      y: y + inset,
-      h: Math.max(0, selected.offsetHeight - inset * 2),
-      visible: true,
-    };
-
-    setPos((prev) => {
-      if (
-        prev.x === next.x &&
-        prev.y === next.y &&
-        prev.h === next.h &&
-        prev.visible === next.visible
-      ) {
-        return prev;
-      }
-      return next;
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    measure();
-  }, [children, measure]);
-
-  useLayoutEffect(() => {
-    if (!pos.visible) {
-      setCanAnimate(false);
-      return;
-    }
-    if (canAnimate) return;
-    const raf = window.requestAnimationFrame(() => {
-      setCanAnimate(true);
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [pos.visible, canAnimate]);
-
-  useLayoutEffect(() => {
-    const container = groupRef.current;
-    if (!container) return;
-
-    const resizeObserver =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measure()) : null;
-    if (resizeObserver) {
-      resizeObserver.observe(container);
-      container.querySelectorAll<HTMLElement>("[data-pick-tile]").forEach((tile) => {
-        resizeObserver.observe(tile);
-      });
-    }
-
-    const mutationObserver =
-      typeof MutationObserver !== "undefined"
-        ? new MutationObserver(() => {
-            if (resizeObserver) {
-              container.querySelectorAll<HTMLElement>("[data-pick-tile]").forEach((tile) => {
-                resizeObserver.observe(tile);
-              });
-            }
-            measure();
-          })
-        : null;
-    if (mutationObserver) {
-      mutationObserver.observe(container, {
-        attributes: true,
-        attributeFilter: ["data-selected", "class", "style"],
-        childList: true,
-        subtree: true,
-      });
-    }
-
-    return () => {
-      resizeObserver?.disconnect();
-      mutationObserver?.disconnect();
-    };
-  }, [measure]);
-
-  return (
-    <div ref={groupRef} data-pick-group="true" className={cx("relative", className)}>
-      {children}
-      <span
-        aria-hidden="true"
-        className={cx(
-          "pick-group-rail w-[2.5px] rounded-full bg-accent-soft transition-[transform,height,opacity] duration-[260ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-          !canAnimate && "!transition-none",
-        )}
-        style={{
-          transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`,
-          height: `${pos.h}px`,
-          opacity: pos.visible ? 1 : 0,
-        }}
-      />
-    </div>
-  );
+  return <div className={className}>{children}</div>;
 }
 
 /* ------------------------------- FormatChip ------------------------------- */
@@ -455,7 +333,7 @@ export interface FormatChipProps {
   className?: string;
 }
 
-/** Chip de formato. Selecionado = SOMENTE contorno azul (sem ícone/check/fill/trilho). */
+/** Chip de formato. Selecionado = contorno azul sutil e fundo leve. */
 export function FormatChip({ label, selected, onToggle, disabled, className }: FormatChipProps) {
   return (
     <button
@@ -464,11 +342,12 @@ export function FormatChip({ label, selected, onToggle, disabled, className }: F
       disabled={disabled}
       onClick={onToggle}
       className={cx(
-        "inline-flex items-center justify-center rounded-pill px-3 h-7 text-xs font-medium tabular-nums",
-        "transition-colors duration-fast disabled:opacity-50 disabled:pointer-events-none",
+        "inline-flex items-center justify-center rounded-pill border px-3 h-7 text-xs font-medium tabular-nums",
+        "transition-[border-color,background-color,color,box-shadow,transform] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97]",
+        "disabled:opacity-50 disabled:pointer-events-none",
         selected
-          ? "border border-[rgba(91,156,255,0.8)] bg-transparent text-text-1"
-          : "border border-line-strong bg-transparent text-text-2 hover:text-text-1 hover:bg-glass-hover",
+          ? "border-[rgba(91,156,255,0.85)] bg-[rgba(91,156,255,0.08)] shadow-[0_0_0_1px_rgba(91,156,255,0.18)] text-text-1"
+          : "border-line-strong bg-transparent text-text-2 hover:text-text-1 hover:bg-glass-hover",
         className,
       )}
     >
@@ -563,5 +442,262 @@ export function SettingsSwitch({
         )}
       />
     </button>
+  );
+}
+
+/* ------------------------ Restaurar configurações ------------------------- */
+
+export type RestoreScope = SectionId | "all";
+
+export interface PendingRestoreEntry {
+  startedAt: number;
+  durationMs: number;
+}
+
+export type PendingRestoreMap = Partial<Record<RestoreScope, PendingRestoreEntry>>;
+
+export type PendingRestoreState = PendingRestoreMap;
+
+export const RESTORABLE_SECTIONS: ReadonlyArray<SectionId> = [
+  "app-folders",
+  "app-download",
+  "ai-model",
+  "ai-search",
+  "ai-instructions",
+  "whisper-model",
+  "whisper-language",
+  "whisper-advanced",
+  "ffmpeg-quality",
+  "ffmpeg-visual",
+  "ffmpeg-audio",
+  "ffmpeg-advanced",
+];
+
+export interface RestoreDefaultsButtonProps {
+  scope: RestoreScope;
+  label?: string;
+  confirmTitle?: string;
+  confirmDescription?: string;
+  pending?: PendingRestoreEntry;
+  onConfirmStart: (scope: RestoreScope) => void;
+  onCancelPending: (scope: RestoreScope) => void;
+  variant?: "section" | "sidebar";
+  className?: string;
+}
+
+interface PopoverCoords {
+  top: number;
+  left: number;
+}
+
+const POPOVER_MARGIN = 12;
+const POPOVER_GAP = 8;
+
+export function RestoreDefaultsButton({
+  scope,
+  label = "Restaurar padrão",
+  confirmTitle = "Tem certeza que deseja restaurar esta seção?",
+  confirmDescription,
+  pending,
+  onConfirmStart,
+  onCancelPending,
+  variant = "section",
+  className,
+}: RestoreDefaultsButtonProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [coords, setCoords] = useState<PopoverCoords>({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const pendingStartedAt = pending?.startedAt;
+  const pendingDurationMs = pending?.durationMs;
+  const pendingAnimationDelayMs = useMemo(() => {
+    if (pendingStartedAt === undefined || pendingDurationMs === undefined) return 0;
+    return Math.max(0, Math.min(pendingDurationMs, Date.now() - pendingStartedAt));
+  }, [pendingStartedAt, pendingDurationMs]);
+
+  useEffect(() => {
+    if (pending) {
+      setMenuOpen(false);
+    }
+  }, [pending]);
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const popoverEl = popoverRef.current;
+    const popoverWidth = popoverEl?.offsetWidth || 264;
+    const popoverHeight = popoverEl?.offsetHeight || 116;
+
+    const maxLeft = Math.max(POPOVER_MARGIN, window.innerWidth - popoverWidth - POPOVER_MARGIN);
+    const preferredLeft =
+      variant === "sidebar" ? triggerRect.left : triggerRect.right - popoverWidth;
+    const left = Math.max(POPOVER_MARGIN, Math.min(maxLeft, preferredLeft));
+
+    const spaceBelow = window.innerHeight - triggerRect.bottom - POPOVER_MARGIN;
+    const spaceAbove = triggerRect.top - POPOVER_MARGIN;
+    let top: number;
+    if (spaceBelow >= popoverHeight + POPOVER_GAP || spaceBelow >= spaceAbove) {
+      top = Math.min(
+        window.innerHeight - popoverHeight - POPOVER_MARGIN,
+        triggerRect.bottom + POPOVER_GAP,
+      );
+    } else {
+      top = Math.max(POPOVER_MARGIN, triggerRect.top - popoverHeight - POPOVER_GAP);
+    }
+
+    setCoords((prev) => (prev.top === top && prev.left === left ? prev : { top, left }));
+  }, [variant]);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    updatePosition();
+  }, [menuOpen, updatePosition, confirmTitle, confirmDescription]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerOutside = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+      setMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenuOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    const handleViewportChange = () => {
+      updatePosition();
+    };
+
+    document.addEventListener("pointerdown", handlePointerOutside, true);
+    document.addEventListener("mousedown", handlePointerOutside, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerOutside, true);
+      document.removeEventListener("mousedown", handlePointerOutside, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [menuOpen, updatePosition]);
+
+  const handleTriggerClick = () => {
+    if (!menuOpen) {
+      updatePosition();
+    }
+    setMenuOpen((prev) => !prev);
+  };
+
+  const handleConfirm = () => {
+    setMenuOpen(false);
+    onConfirmStart(scope);
+  };
+
+  if (pending) {
+    const cancelClasses =
+      variant === "sidebar"
+        ? "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-item border border-[rgba(91,156,255,0.45)] text-sm text-left text-text-1"
+        : "inline-flex items-center justify-center gap-1.5 rounded-pill border border-[rgba(91,156,255,0.45)] px-3 h-8 text-sm font-medium whitespace-nowrap text-text-1";
+
+    return (
+      <button
+        type="button"
+        onClick={() => onCancelPending(scope)}
+        className={cx(
+          "relative overflow-hidden transition-colors duration-fast hover:border-[rgba(91,156,255,0.7)]",
+          cancelClasses,
+          className,
+        )}
+      >
+        <span
+          key={pending.startedAt}
+          aria-hidden="true"
+          className="restore-fill-bar pointer-events-none absolute inset-0 bg-[rgba(91,156,255,0.28)]"
+          style={{
+            animation: `restore-fill-sweep ${pending.durationMs}ms linear forwards`,
+            animationDelay: `-${pendingAnimationDelayMs}ms`,
+          }}
+        />
+        <span className="relative z-[1] inline-flex items-center gap-1.5 min-w-0">
+          <X size={14} weight="regular" className="shrink-0" />
+          <span className="truncate">Cancelar</span>
+        </span>
+      </button>
+    );
+  }
+
+  const triggerClasses =
+    variant === "sidebar"
+      ? "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-item text-sm text-left text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast"
+      : "inline-flex items-center justify-center gap-1.5 rounded-pill border border-line-strong bg-transparent px-3 h-8 text-sm font-medium whitespace-nowrap text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast";
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        onClick={handleTriggerClick}
+        className={cx(triggerClasses, className)}
+      >
+        <ArrowCounterClockwise size={14} weight="regular" className="shrink-0" />
+        <span className="truncate">{label}</span>
+      </button>
+
+      {menuOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            role="dialog"
+            aria-label={confirmTitle}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+            }}
+            className="z-[90] w-[264px] max-w-[calc(100vw-24px)] glass--strong rounded-card p-3 shadow-pop"
+          >
+            <p className="text-xs font-medium text-text-1 leading-snug">{confirmTitle}</p>
+            {confirmDescription && (
+              <p className="mt-1 text-xs text-text-2 leading-relaxed">{confirmDescription}</p>
+            )}
+            <div className="mt-3 flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="h-7 rounded-pill px-2.5 text-xs font-medium text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="h-7 rounded-pill bg-accent hover:bg-accent-hover active:bg-accent-active px-3 text-xs font-medium text-white transition-colors duration-fast"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

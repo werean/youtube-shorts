@@ -197,13 +197,29 @@ export function FFmpegQualitySection({
     }
   }
 
+  const [displayedFormat, setDisplayedFormat] = useState<string>(format);
+  const [helperVisible, setHelperVisible] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (format === displayedFormat) {
+      setHelperVisible(true);
+      return;
+    }
+    setHelperVisible(false);
+    const timer = setTimeout(() => {
+      setDisplayedFormat(format);
+      setHelperVisible(true);
+    }, 110);
+    return () => clearTimeout(timer);
+  }, [format, displayedFormat]);
+
   const activeFormatMeta = useMemo(
-    () => CONTAINER_FORMATS.find((item) => item.id === format),
-    [format],
+    () => CONTAINER_FORMATS.find((item) => item.id === displayedFormat),
+    [displayedFormat],
   );
 
   const formatHelperText =
-    format === "mp4"
+    displayedFormat === "mp4"
       ? "MP4 é o padrão universal e funciona em qualquer rede social."
       : activeFormatMeta
         ? `${activeFormatMeta.label}: ${activeFormatMeta.description}.`
@@ -256,7 +272,13 @@ export function FFmpegQualitySection({
             />
           ))}
         </div>
-        <p className="mt-3 text-sm text-text-3">{formatHelperText}</p>
+        <p
+          className={`mt-3 min-h-[20px] text-sm text-text-3 transition-opacity ease-out ${
+            helperVisible ? "duration-[220ms] opacity-100" : "duration-[110ms] opacity-0"
+          }`}
+        >
+          {formatHelperText}
+        </p>
       </section>
     </div>
   );
@@ -722,19 +744,12 @@ export function FFmpegAudioSection({
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <StatusDot
-              tone={normalizeAudio ? "success" : "neutral"}
-              label={normalizeAudio ? "Ativo" : "Desativado"}
-              className="shrink-0"
-            />
-            <SettingsSwitch
-              checked={normalizeAudio}
-              onChange={(next) => void handleToggleNormalizeAudio(next)}
-              ariaLabelledBy={normalizeTitleId}
-              ariaDescribedBy={normalizeDescId}
-            />
-          </div>
+          <SettingsSwitch
+            checked={normalizeAudio}
+            onChange={(next) => void handleToggleNormalizeAudio(next)}
+            ariaLabelledBy={normalizeTitleId}
+            ariaDescribedBy={normalizeDescId}
+          />
         </div>
       </section>
 
@@ -807,24 +822,33 @@ interface AdvancedFormState {
 }
 
 function toAdvancedFormState(config: FFmpegConfig | null | undefined): AdvancedFormState {
+  const normalized = normalizeFFmpegConfig(config);
   return {
-    format: config?.format ?? "mp4",
-    video_codec: config?.video_codec ?? "h264_nvenc",
-    video_preset: config?.video_preset ?? "p5",
-    video_bitrate: config?.video_bitrate ?? "",
-    framerate: config?.framerate ?? "",
-    aspect_ratio: config ? (config.aspect_ratio ?? "") : "9:16",
-    video_filter: config?.video_filter ?? "",
-    audio_codec: config?.audio_codec ?? "aac",
-    audio_bitrate: config?.audio_bitrate ?? "",
-    audio_sample_rate: config?.audio_sample_rate ?? "",
-    audio_channels: config?.audio_channels ?? "",
-    audio_filter: config?.audio_filter ?? "",
-    metadata: config?.metadata ?? "",
-    disable_video: Boolean(config?.disable_video),
-    disable_audio: Boolean(config?.disable_audio),
-    disable_subtitle: Boolean(config?.disable_subtitle),
+    format: normalized.format ?? "mp4",
+    video_codec: normalized.video_codec ?? "h264_nvenc",
+    video_preset: normalized.video_preset ?? "p5",
+    video_bitrate: normalized.video_bitrate ?? "",
+    framerate: normalized.framerate ?? "",
+    aspect_ratio: normalized.aspect_ratio ?? "",
+    video_filter: normalized.video_filter ?? "",
+    audio_codec: normalized.audio_codec ?? "aac",
+    audio_bitrate: normalized.audio_bitrate ?? "",
+    audio_sample_rate: normalized.audio_sample_rate ?? "",
+    audio_channels: normalized.audio_channels ?? "",
+    audio_filter: normalized.audio_filter ?? "",
+    metadata: normalized.metadata ?? "",
+    disable_video: normalized.disable_video,
+    disable_audio: normalized.disable_audio,
+    disable_subtitle: normalized.disable_subtitle,
   };
+}
+
+function serializeFFmpegConfig(config: FFmpegConfig | null | undefined): string {
+  const normalized = normalizeFFmpegConfig(config);
+  const entries = Object.entries(normalized)
+    .filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(entries);
 }
 
 function formStateToFFmpegConfig(
@@ -875,10 +899,30 @@ export function FFmpegAdvancedSection({
   ffmpegConfigRef.current = ffmpegConfig;
   const reporterRef = useRef(reporter);
   reporterRef.current = reporter;
+  const normalizedConfigKey = useMemo(() => serializeFFmpegConfig(ffmpegConfig), [ffmpegConfig]);
+  const lastExternalConfigKeyRef = useRef<string>(normalizedConfigKey);
+  const lastLocallySavedKeyRef = useRef<string | null>(null);
   const disableVideoLabelId = useId();
   const disableSubtitleLabelId = useId();
 
   useEffect(() => {
+    const prevKey = lastExternalConfigKeyRef.current;
+    lastExternalConfigKeyRef.current = normalizedConfigKey;
+
+    const isSameExternalValue = normalizedConfigKey === prevKey;
+    const isEchoOfLocalSave =
+      lastLocallySavedKeyRef.current !== null &&
+      lastLocallySavedKeyRef.current === normalizedConfigKey;
+
+    if (isEchoOfLocalSave) {
+      lastLocallySavedKeyRef.current = null;
+      if (hasPendingDebounceRef.current) {
+        return;
+      }
+    } else if (isSameExternalValue && hasPendingDebounceRef.current) {
+      return;
+    }
+
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
@@ -886,7 +930,13 @@ export function FFmpegAdvancedSection({
     hasPendingDebounceRef.current = false;
     pendingStateRef.current = null;
     setForm(toAdvancedFormState(ffmpegConfig));
-  }, [ffmpegConfig]);
+  }, [ffmpegConfig, normalizedConfigKey]);
+
+  function commitSave(stateToSave: AdvancedFormState): void {
+    const nextConfig = formStateToFFmpegConfig(stateToSave, ffmpegConfigRef.current);
+    lastLocallySavedKeyRef.current = serializeFFmpegConfig(nextConfig);
+    void persistFFmpegConfig(onSaveFFmpegRef.current, nextConfig, reporterRef.current);
+  }
 
   function flushPendingSave(): void {
     if (debounceTimerRef.current) {
@@ -900,11 +950,7 @@ export function FFmpegAdvancedSection({
     const toSave = pendingStateRef.current;
     pendingStateRef.current = null;
     if (toSave) {
-      void persistFFmpegConfig(
-        onSaveFFmpegRef.current,
-        formStateToFFmpegConfig(toSave, ffmpegConfigRef.current),
-        reporterRef.current,
-      );
+      commitSave(toSave);
     }
   }
 
@@ -925,11 +971,7 @@ export function FFmpegAdvancedSection({
     hasPendingDebounceRef.current = false;
     pendingStateRef.current = null;
     setForm(nextState);
-    void persistFFmpegConfig(
-      onSaveFFmpegRef.current,
-      formStateToFFmpegConfig(nextState, ffmpegConfigRef.current),
-      reporterRef.current,
-    );
+    commitSave(nextState);
   }
 
   function scheduleTextSave(nextState: AdvancedFormState): void {
@@ -945,11 +987,7 @@ export function FFmpegAdvancedSection({
       const toSave = pendingStateRef.current;
       pendingStateRef.current = null;
       if (toSave) {
-        void persistFFmpegConfig(
-          onSaveFFmpegRef.current,
-          formStateToFFmpegConfig(toSave, ffmpegConfigRef.current),
-          reporterRef.current,
-        );
+        commitSave(toSave);
       }
     }, 500);
   }

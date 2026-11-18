@@ -4,7 +4,7 @@ import {
   ArrowCounterClockwise,
   CaretDown,
   Check,
-  DotsThree,
+  DotsThreeVertical,
   DownloadSimple,
   FolderOpen,
   Minus,
@@ -31,6 +31,8 @@ import {
 export interface DockCutItem extends Cut {
   renderedFileName?: string | null;
 }
+
+const DEFAULT_SPEED_STEPS: ReadonlyArray<number> = [1, 1.25, 1.5, 2, 2.5, 3, 4];
 
 interface GlassDockProps {
   sidebarPinned: boolean;
@@ -65,6 +67,8 @@ interface GlassDockProps {
   onPrevCut: () => void;
   onNextCut: () => void;
   onCycleSpeed: () => void;
+  onSelectSpeed?: (nextSpeed: number) => void;
+  speedSteps?: ReadonlyArray<number>;
   onToggleMute: () => void;
   onVolumeChange: (vol: number) => void;
   onToggleTranscript?: () => void;
@@ -119,6 +123,8 @@ export function GlassDock({
   onPrevCut,
   onNextCut,
   onCycleSpeed,
+  onSelectSpeed,
+  speedSteps = DEFAULT_SPEED_STEPS,
   onToggleMute,
   onVolumeChange,
   onSelectCut,
@@ -154,8 +160,18 @@ export function GlassDock({
     bottom?: number;
     left: number;
   } | null>(null);
+  const [cutMenuEntered, setCutMenuEntered] = useState(false);
   const cutMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const cutMenuPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [speedMenuState, setSpeedMenuState] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    openUpward: boolean;
+  } | null>(null);
+  const [speedMenuEntered, setSpeedMenuEntered] = useState(false);
+  const speedMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const speedMenuPopoverRef = useRef<HTMLDivElement | null>(null);
   const [hoveredCutId, setHoveredCutId] = useState<string | null>(null);
   const [focusedCutId, setFocusedCutId] = useState<string | null>(null);
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
@@ -286,6 +302,7 @@ export function GlassDock({
   }, [selectedCutId]);
 
   useEffect(() => {
+    setSpeedMenuState(null);
     if (collapsed) {
       setHoveredCutId(null);
       setFocusedCutId(null);
@@ -293,6 +310,12 @@ export function GlassDock({
       setPresetMenuOpen(false);
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    if (minimizedHidden) {
+      setSpeedMenuState(null);
+    }
+  }, [minimizedHidden]);
 
   useEffect(() => {
     if (!presetMenuOpen) return;
@@ -317,8 +340,16 @@ export function GlassDock({
   }, [presetMenuOpen]);
 
   useEffect(() => {
-    if (!cutMenuState) return;
-    const handlePointerDown = (e: PointerEvent) => {
+    if (!cutMenuState) {
+      setCutMenuEntered(false);
+      return;
+    }
+    setCutMenuEntered(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setCutMenuEntered(true));
+    });
+    const handleOutsidePointer = (e: globalThis.MouseEvent | PointerEvent) => {
       const target = e.target as Node | null;
       if (
         cutMenuPopoverRef.current?.contains(target) ||
@@ -336,17 +367,65 @@ export function GlassDock({
     const handleClose = () => {
       setCutMenuState(null);
     };
-    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointerdown", handleOutsidePointer);
+    window.addEventListener("mousedown", handleOutsidePointer);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleClose);
     window.addEventListener("scroll", handleClose, true);
     return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.removeEventListener("pointerdown", handleOutsidePointer);
+      window.removeEventListener("mousedown", handleOutsidePointer);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleClose);
       window.removeEventListener("scroll", handleClose, true);
     };
   }, [cutMenuState]);
+
+  useEffect(() => {
+    if (!speedMenuState) {
+      setSpeedMenuEntered(false);
+      return;
+    }
+    setSpeedMenuEntered(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setSpeedMenuEntered(true));
+    });
+    const handleOutsidePointer = (e: globalThis.MouseEvent | PointerEvent) => {
+      const target = e.target as Node | null;
+      if (
+        speedMenuPopoverRef.current?.contains(target) ||
+        speedMenuTriggerRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setSpeedMenuState(null);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSpeedMenuState(null);
+      }
+    };
+    const handleClose = () => {
+      setSpeedMenuState(null);
+    };
+    window.addEventListener("pointerdown", handleOutsidePointer);
+    window.addEventListener("mousedown", handleOutsidePointer);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleClose);
+    window.addEventListener("scroll", handleClose, true);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.removeEventListener("pointerdown", handleOutsidePointer);
+      window.removeEventListener("mousedown", handleOutsidePointer);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleClose);
+      window.removeEventListener("scroll", handleClose, true);
+    };
+  }, [speedMenuState]);
 
   useEffect(() => {
     if (hoveredCutId === null) return;
@@ -575,6 +654,7 @@ export function GlassDock({
     ? visibleCuts.find((c) => c.cut_id === cutMenuState.cutId) ?? null
     : null;
 
+  const resolvedSpeedSteps = speedSteps.length > 0 ? speedSteps : DEFAULT_SPEED_STEPS;
   const speedLabel = `${playbackRate}x`;
   const dockBottom = "12px";
   const dockLeft =
@@ -687,12 +767,50 @@ export function GlassDock({
           </div>
 
           <button
+            ref={speedMenuTriggerRef}
             type="button"
-            onClick={onCycleSpeed}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (speedMenuState) {
+                setSpeedMenuState(null);
+                return;
+              }
+              const rect = e.currentTarget.getBoundingClientRect();
+              const menuWidth = 96;
+              const estimatedMenuHeight = resolvedSpeedSteps.length * 24 + 8;
+              const left = Math.max(
+                8,
+                Math.min(window.innerWidth - menuWidth - 8, rect.left),
+              );
+              const fitsBelow = rect.bottom + 6 + estimatedMenuHeight <= window.innerHeight - 8;
+              setSpeedMenuState(
+                fitsBelow
+                  ? {
+                      top: rect.bottom + 6,
+                      left,
+                      openUpward: false,
+                    }
+                  : {
+                      bottom: window.innerHeight - rect.top + 6,
+                      left,
+                      openUpward: true,
+                    },
+              );
+            }}
             aria-label="Velocidade de reprodução"
-            className="h-7 px-2.5 rounded-pill bg-white/[0.06] border border-line text-sm text-text-1 tabular-nums hover:bg-glass-hover transition-colors duration-fast shrink-0"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(speedMenuState)}
+            className="h-7 px-2.5 rounded-pill inline-flex items-center gap-1 bg-white/[0.06] border border-line text-sm text-text-1 tabular-nums hover:bg-glass-hover transition-colors duration-fast shrink-0"
           >
-            {speedLabel}
+            <span>{speedLabel}</span>
+            <CaretDown
+              size={11}
+              weight="regular"
+              className={[
+                "text-text-2 transition-transform duration-fast",
+                speedMenuState ? "rotate-180" : "rotate-0",
+              ].join(" ")}
+            />
           </button>
 
           <span className="text-sm text-text-2 tabular-nums shrink-0">
@@ -1013,22 +1131,20 @@ export function GlassDock({
                                     const estimatedMenuHeight = 84;
                                     const left = Math.max(
                                       8,
-                                      Math.min(
-                                        window.innerWidth - menuWidth - 8,
-                                        rect.right - menuWidth,
-                                      ),
+                                      Math.min(window.innerWidth - menuWidth - 8, rect.right + 6),
                                     );
-                                    const openAbove = rect.top >= estimatedMenuHeight + 12;
+                                    const fitsBelowTop =
+                                      rect.top + estimatedMenuHeight <= window.innerHeight - 8;
                                     setCutMenuState(
-                                      openAbove
+                                      fitsBelowTop
                                         ? {
                                             cutId: cut.cut_id,
-                                            bottom: window.innerHeight - rect.top + 6,
+                                            top: Math.max(8, rect.top),
                                             left,
                                           }
                                         : {
                                             cutId: cut.cut_id,
-                                            top: rect.bottom + 6,
+                                            bottom: Math.max(8, window.innerHeight - rect.bottom),
                                             left,
                                           },
                                     );
@@ -1037,7 +1153,7 @@ export function GlassDock({
                                   aria-expanded={cutMenuState?.cutId === cut.cut_id}
                                   className="grid h-5 w-5 shrink-0 place-items-center rounded text-text-2 hover:text-text-1 hover:bg-white/[0.08] transition-colors duration-fast"
                                 >
-                                  <DotsThree size={15} weight="regular" />
+                                  <DotsThreeVertical size={15} weight="regular" />
                                 </button>
                               </div>
 
@@ -1368,7 +1484,10 @@ export function GlassDock({
                 : { top: `${cutMenuState.top}px` }),
               width: "152px",
             }}
-            className="z-popover rounded-card glass--strong p-1.5 shadow-pop space-y-0.5"
+            className={[
+              "z-popover rounded-card glass--strong p-1.5 shadow-pop space-y-0.5 transition-[opacity,transform] duration-[120ms] ease-out",
+              cutMenuEntered ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-1",
+            ].join(" ")}
           >
             <button
               type="button"
@@ -1396,6 +1515,63 @@ export function GlassDock({
               <FolderOpen size={13} weight="regular" />
               <span>Abrir pasta</span>
             </button>
+          </div>,
+          document.body,
+        )}
+
+      {speedMenuState &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={speedMenuPopoverRef}
+            role="menu"
+            aria-label="Velocidade de reprodução"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              left: `${speedMenuState.left}px`,
+              ...(speedMenuState.bottom !== undefined
+                ? { bottom: `${speedMenuState.bottom}px` }
+                : { top: `${speedMenuState.top}px` }),
+              width: "96px",
+            }}
+            className={[
+              "z-popover rounded-card glass--strong p-1 shadow-pop flex flex-col transition-[opacity,transform] duration-[120ms] ease-out",
+              speedMenuEntered
+                ? "opacity-100 translate-y-0"
+                : speedMenuState.openUpward
+                  ? "opacity-0 translate-y-1"
+                  : "opacity-0 -translate-y-1",
+            ].join(" ")}
+          >
+            {resolvedSpeedSteps.map((step) => {
+              const isActive = Math.abs(playbackRate - step) < 0.001;
+              return (
+                <button
+                  key={step}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={isActive}
+                  onClick={() => {
+                    if (onSelectSpeed) {
+                      onSelectSpeed(step);
+                    } else {
+                      onCycleSpeed();
+                    }
+                    setSpeedMenuState(null);
+                  }}
+                  className={[
+                    "w-full flex items-center justify-between gap-2 px-2.5 py-1 rounded-thumb text-xs tabular-nums transition-colors duration-fast",
+                    isActive
+                      ? "bg-glass-active text-accent-soft font-medium"
+                      : "text-text-2 hover:bg-glass-hover hover:text-text-1",
+                  ].join(" ")}
+                >
+                  <span>{`${step}x`}</span>
+                  {isActive && <Check size={12} weight="bold" className="text-accent-soft shrink-0" />}
+                </button>
+              );
+            })}
           </div>,
           document.body,
         )}

@@ -272,22 +272,14 @@
 
   .hover\:scale-105:hover,
   .active\:scale-95:active,
+  .active\:scale-\[0\.97\]:active,
   .active\:scale-\[0\.98\]:active {
     --tw-scale-x: 1 !important;
     --tw-scale-y: 1 !important;
   }
 
-  .pick-group-rail {
-    transition: none !important;
-  }
-
-  [data-pick-tile]::before {
-    transition: none;
-  }
-
   .pick-check-badge {
-    animation: none;
-    transition: none;
+    animation: pick-check-fade 180ms ease both;
   }
 }
 
@@ -298,68 +290,27 @@
   }
 }
 
-/* Configurações unificadas: card/tile selecionado (único estilo para todas as telas) */
+/* Configurações unificadas: card/tile selecionado (barra lateral curva com fade suave no próprio card) */
 [data-pick-tile] {
   position: relative;
+  box-shadow: inset 2.5px 0 0 rgba(91, 156, 255, 0);
   transition:
-    border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-[data-pick-tile]::before {
-  content: "";
-  position: absolute;
-  left: -0.5px;
-  top: 8px;
-  bottom: 8px;
-  width: 2.5px;
-  border-radius: 9999px;
-  background-color: var(--accent-soft);
-  pointer-events: none;
-  z-index: 2;
-  opacity: 0;
-  transform: scaleY(0.35);
-  transform-origin: center;
-  transition:
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    border-color 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pick,
 [data-pick-tile].pick {
   border-color: rgba(91, 156, 255, 0.55);
   background-color: rgba(91, 156, 255, 0.07);
-}
-
-[data-pick-tile].pick::before,
-.pick::before {
-  opacity: 1;
-  transform: scaleY(1);
-}
-
-[data-pick-group] .pick {
-  box-shadow: none;
-}
-
-[data-pick-group] [data-pick-tile].pick::before,
-[data-pick-group] .pick::before {
-  opacity: 0;
-}
-
-.pick-group-rail {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  z-index: 5;
-  will-change: transform, height, opacity;
+  box-shadow: inset 2.5px 0 0 var(--accent-soft);
 }
 
 @keyframes pick-check-in {
   from {
     opacity: 0;
-    transform: scale(0.6);
+    transform: scale(0.88);
   }
   to {
     opacity: 1;
@@ -367,8 +318,31 @@
   }
 }
 
+@keyframes pick-check-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .pick-check-badge {
   animation: pick-check-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes restore-fill-sweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.restore-fill-bar {
+  transform-origin: left;
+  will-change: transform;
 }
 
 /* Áreas internas roláveis: esmaecimento sutil na base */
