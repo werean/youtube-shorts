@@ -36,6 +36,10 @@ const DEFAULT_SPEED_STEPS: ReadonlyArray<number> = [1, 1.25, 1.5, 2, 2.5, 3, 4];
 
 interface GlassDockProps {
   sidebarPinned: boolean;
+  transcriptPinned?: boolean;
+  pinnedTranscriptSide?: "left" | "right" | null;
+  pinnedTranscriptWithSidebar?: boolean;
+  transcriptAboveDock?: boolean;
   sidebarSide?: "left" | "right";
   collapsed: boolean;
   isImmersive: boolean;
@@ -93,6 +97,10 @@ interface GlassDockProps {
 
 export function GlassDock({
   sidebarPinned,
+  transcriptPinned = false,
+  pinnedTranscriptSide = null,
+  pinnedTranscriptWithSidebar = false,
+  transcriptAboveDock = false,
   sidebarSide = "left",
   collapsed,
   isImmersive,
@@ -147,10 +155,12 @@ export function GlassDock({
 }: GlassDockProps) {
   const scrubberRef = useRef<HTMLDivElement>(null);
   const playbackRowRef = useRef<HTMLDivElement>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const [scrubberMetrics, setScrubberMetrics] = useState<{
     offsetLeft: number;
     width: number;
+    rowWidth: number;
   } | null>(null);
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
@@ -186,6 +196,9 @@ export function GlassDock({
   collapsedRef.current = collapsed;
   const minimizedHiddenRef = useRef(minimizedHidden);
   minimizedHiddenRef.current = minimizedHidden;
+  const transcriptAboveDockRef = useRef(transcriptAboveDock);
+  transcriptAboveDockRef.current = transcriptAboveDock;
+  const effectiveMinimizedHidden = minimizedHidden && !(collapsed && transcriptAboveDock);
 
   const isPointerInsideDockZone = (x: number, y: number): boolean => {
     const sectionEl = sectionRef.current;
@@ -195,8 +208,9 @@ export function GlassDock({
     const rootStyles = getComputedStyle(document.documentElement);
     const collapsedH = parseFloat(rootStyles.getPropertyValue("--dock-h-collapsed")) || 56;
     const dockGap = parseFloat(rootStyles.getPropertyValue("--dock-gap")) || 16;
-    const topY = window.innerHeight - (collapsedH + dockGap);
-    return x >= rect.left && x <= rect.right && y >= topY && y <= window.innerHeight;
+    const bottomY = window.innerHeight;
+    const topY = bottomY - (collapsedH + dockGap);
+    return x >= rect.left && x <= rect.right && y >= topY && y <= bottomY;
   };
 
   const clearHideTimer = () => {
@@ -208,8 +222,10 @@ export function GlassDock({
 
   const scheduleHide = () => {
     clearHideTimer();
+    if (transcriptAboveDockRef.current) return;
     hideTimerRef.current = setTimeout(() => {
       hideTimerRef.current = null;
+      if (transcriptAboveDockRef.current) return;
       const pt = lastPointerRef.current;
       if (pt && isPointerInsideDockZone(pt.x, pt.y)) {
         isDockHoveredRef.current = true;
@@ -224,7 +240,7 @@ export function GlassDock({
   useEffect(() => {
     const handleWindowMouseMove = (e: globalThis.MouseEvent) => {
       lastPointerRef.current = { x: e.clientX, y: e.clientY };
-      if (!collapsedRef.current) return;
+      if (!collapsedRef.current || transcriptAboveDockRef.current) return;
 
       const inside = isPointerInsideDockZone(e.clientX, e.clientY);
       if (isDockHoveredRef.current && !inside) {
@@ -240,7 +256,7 @@ export function GlassDock({
 
     const handleDocumentMouseLeave = () => {
       lastPointerRef.current = null;
-      if (collapsedRef.current && isDockHoveredRef.current) {
+      if (collapsedRef.current && !transcriptAboveDockRef.current && isDockHoveredRef.current) {
         isDockHoveredRef.current = false;
         if (!minimizedHiddenRef.current && hideTimerRef.current === null) {
           scheduleHide();
@@ -261,7 +277,7 @@ export function GlassDock({
     setMinimizedHidden(false);
     onVisibilityChangeRef.current?.(true);
 
-    if (collapsed) {
+    if (collapsed && !transcriptAboveDock) {
       const pt = lastPointerRef.current;
       const inside = pt ? isPointerInsideDockZone(pt.x, pt.y) : false;
       isDockHoveredRef.current = inside;
@@ -275,10 +291,18 @@ export function GlassDock({
     return () => {
       clearHideTimer();
     };
-  }, [collapsed]);
+  }, [collapsed, transcriptAboveDock]);
 
   useEffect(() => {
     if (!collapsed || minimizedVisible === undefined) return;
+    if (transcriptAboveDock) {
+      clearHideTimer();
+      if (minimizedHidden) {
+        setMinimizedHidden(false);
+        onVisibilityChangeRef.current?.(true);
+      }
+      return;
+    }
     if (minimizedVisible && minimizedHidden) {
       clearHideTimer();
       setMinimizedHidden(false);
@@ -293,7 +317,7 @@ export function GlassDock({
       isDockHoveredRef.current = false;
       setMinimizedHidden(true);
     }
-  }, [collapsed, minimizedVisible]);
+  }, [collapsed, minimizedVisible, transcriptAboveDock]);
 
   useEffect(() => {
     setHoveredCutId(null);
@@ -312,10 +336,10 @@ export function GlassDock({
   }, [collapsed]);
 
   useEffect(() => {
-    if (minimizedHidden) {
+    if (effectiveMinimizedHidden) {
       setSpeedMenuState(null);
     }
-  }, [minimizedHidden]);
+  }, [effectiveMinimizedHidden]);
 
   useEffect(() => {
     if (!presetMenuOpen) return;
@@ -464,20 +488,26 @@ export function GlassDock({
       if (scrubRect.width <= 0) return;
       const nextOffset = Math.max(0, scrubRect.left - rowRect.left);
       const nextWidth = scrubRect.width;
+      const nextRowWidth = rowRect.width;
       setScrubberMetrics((prev) =>
         prev &&
         Math.abs(prev.offsetLeft - nextOffset) < 0.5 &&
-        Math.abs(prev.width - nextWidth) < 0.5
+        Math.abs(prev.width - nextWidth) < 0.5 &&
+        Math.abs(prev.rowWidth - nextRowWidth) < 0.5
           ? prev
-          : { offsetLeft: nextOffset, width: nextWidth },
+          : { offsetLeft: nextOffset, width: nextWidth, rowWidth: nextRowWidth },
       );
     };
 
     measure();
+    const timer = window.setTimeout(measure, 320);
 
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
+      return () => {
+        window.clearTimeout(timer);
+        window.removeEventListener("resize", measure);
+      };
     }
 
     const observer = new ResizeObserver(measure);
@@ -488,10 +518,19 @@ export function GlassDock({
     }
     window.addEventListener("resize", measure);
     return () => {
+      window.clearTimeout(timer);
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [collapsed, sidebarPinned, sidebarSide, duration]);
+  }, [
+    collapsed,
+    sidebarPinned,
+    transcriptPinned,
+    pinnedTranscriptSide,
+    pinnedTranscriptWithSidebar,
+    sidebarSide,
+    duration,
+  ]);
 
   const handleDockMouseEnter = (e: ReactMouseEvent<HTMLElement>) => {
     lastPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -507,7 +546,7 @@ export function GlassDock({
       return;
     }
     isDockHoveredRef.current = false;
-    if (collapsed) {
+    if (collapsed && !transcriptAboveDock) {
       scheduleHide();
     }
   };
@@ -528,10 +567,10 @@ export function GlassDock({
 
   // Calcula posições alinhadas ao ponto médio na barra de progressão, mantendo borda esquerda estável ao expandir Retomar
   const { positionedCuts, timelineTrackWidth } = useMemo(() => {
+    const MIN_COMPACT_CARD_W = 42;
     const MINIMIZED_CARD_W = 64;
     const HOVER_RESUME_CARD_W = 166;
-    const EXPANDED_CARD_W = 316;
-    const CARD_GAP = 18;
+    const EXPANDED_CARD_W = 340;
 
     if (visibleCuts.length === 0) {
       return {
@@ -553,24 +592,89 @@ export function GlassDock({
       (hoveredCutId === cut.cut_id || focusedCutId === cut.cut_id);
 
     const scrubberWidth = scrubberMetrics?.width ?? 0;
+    const trackViewportWidth =
+      scrubberMetrics === null
+        ? 720
+        : scrubberWidth >= 380
+          ? scrubberWidth
+          : scrubberMetrics.rowWidth;
+    const barWidth = scrubberWidth > 0 ? scrubberWidth : trackViewportWidth;
 
-    // 1) Layout base (sem expansão de hover/foco) para ancorar borda esquerda de referência
-    const baseItems = visibleCuts.map((cut) => {
-      const baseWidth = cut.cut_id === selectedCutId ? EXPANDED_CARD_W : MINIMIZED_CARD_W;
-      const cardWidth = isHoverResumeCut(cut) ? HOVER_RESUME_CARD_W : baseWidth;
+    // 1) Calcula largura máxima local centrada a partir dos pontos médios na barra
+    const barAnchors = visibleCuts.map(
+      (cut) => ((cut.start + cut.end) / 2 / safeDuration) * barWidth,
+    );
+
+    let minAnchorStep = barWidth;
+    for (let i = 1; i < barAnchors.length; i++) {
+      minAnchorStep = Math.min(minAnchorStep, barAnchors[i] - barAnchors[i - 1]);
+    }
+    const dynamicGap =
+      visibleCuts.length <= 1
+        ? 10
+        : Math.max(4, Math.min(10, Math.floor(minAnchorStep * 0.14)));
+
+    // 2) Layout base (sem expansão de hover/foco) para ancorar borda esquerda de referência
+    const baseItems = visibleCuts.map((cut, i) => {
+      const isSelected = cut.cut_id === selectedCutId;
+      let baseWidth: number;
+      if (isSelected) {
+        baseWidth = EXPANDED_CARD_W;
+      } else {
+        const halfLeft =
+          i > 0 ? (barAnchors[i] - barAnchors[i - 1] - dynamicGap) / 2 : barAnchors[i];
+        const halfRight =
+          i < visibleCuts.length - 1
+            ? (barAnchors[i + 1] - barAnchors[i] - dynamicGap) / 2
+            : barWidth - barAnchors[i];
+        const leftNeed =
+          i > 0 && visibleCuts[i - 1].cut_id === selectedCutId ? EXPANDED_CARD_W / 2 : 0;
+        const maxHalfLeft =
+          i > 0 && leftNeed > 0
+            ? barAnchors[i] - (barAnchors[i - 1] + leftNeed + dynamicGap)
+            : halfLeft;
+        const rightNeed =
+          i < visibleCuts.length - 1 && visibleCuts[i + 1].cut_id === selectedCutId
+            ? EXPANDED_CARD_W / 2
+            : 0;
+        const maxHalfRight =
+          i < visibleCuts.length - 1 && rightNeed > 0
+            ? barAnchors[i + 1] - rightNeed - dynamicGap - barAnchors[i]
+            : halfRight;
+        const localMaxCenteredW = Math.max(
+          MIN_COMPACT_CARD_W,
+          Math.floor(2 * Math.min(halfLeft, halfRight, maxHalfLeft, maxHalfRight)),
+        );
+        const segSpanPx = (Math.max(0, cut.end - cut.start) / safeDuration) * barWidth;
+        const preferredW = Math.max(
+          Math.min(MINIMIZED_CARD_W, localMaxCenteredW),
+          Math.round(segSpanPx),
+        );
+        baseWidth = Math.max(MIN_COMPACT_CARD_W, Math.min(preferredW, localMaxCenteredW));
+      }
+
+      const cardWidth = isHoverResumeCut(cut)
+        ? Math.max(baseWidth, HOVER_RESUME_CARD_W)
+        : baseWidth;
       const segLeftPct = Math.min(100, Math.max(0, (cut.start / safeDuration) * 100));
       const segWidthPct = Math.min(
         100 - segLeftPct,
         Math.max(1.2, ((cut.end - cut.start) / safeDuration) * 100),
       );
-      return { cut, baseWidth, cardWidth, segLeftPct, segWidthPct };
+      return {
+        cut,
+        baseWidth,
+        cardWidth,
+        segLeftPct,
+        segWidthPct,
+      };
     });
 
     const baseTotalSpan = baseItems.reduce(
-      (sum, item, idx) => sum + item.baseWidth + (idx > 0 ? CARD_GAP : 0),
+      (sum, item, idx) => sum + item.baseWidth + (idx > 0 ? dynamicGap : 0),
       0,
     );
-    const baseTrackSpan = Math.max(scrubberWidth || 720, baseTotalSpan);
+    const baseTrackSpan = Math.max(trackViewportWidth || 720, baseTotalSpan);
 
     const anchors = baseItems.map((item) => {
       const midSec = (item.cut.start + item.cut.end) / 2;
@@ -583,31 +687,31 @@ export function GlassDock({
         0,
         Math.min(baseTrackSpan - baseItems[i].baseWidth, anchors[i] - baseItems[i].baseWidth / 2),
       );
-      const minLeft = i === 0 ? 0 : baseLefts[i - 1] + baseItems[i - 1].baseWidth + CARD_GAP;
+      const minLeft = i === 0 ? 0 : baseLefts[i - 1] + baseItems[i - 1].baseWidth + dynamicGap;
       baseLefts[i] = Math.max(desired, minLeft);
     }
     const lastIdx = baseItems.length - 1;
     baseLefts[lastIdx] = Math.min(baseLefts[lastIdx], baseTrackSpan - baseItems[lastIdx].baseWidth);
     for (let i = lastIdx - 1; i >= 0; i--) {
-      const maxLeft = baseLefts[i + 1] - CARD_GAP - baseItems[i].baseWidth;
+      const maxLeft = baseLefts[i + 1] - dynamicGap - baseItems[i].baseWidth;
       baseLefts[i] = Math.min(baseLefts[i], maxLeft);
     }
 
     // 2) Expande cards em Retomar prioritariamente para a direita a partir de baseLefts[i]
     const totalCardsSpan = baseItems.reduce(
-      (sum, item, idx) => sum + item.cardWidth + (idx > 0 ? CARD_GAP : 0),
+      (sum, item, idx) => sum + item.cardWidth + (idx > 0 ? dynamicGap : 0),
       0,
     );
     const trackSpan = Math.max(baseTrackSpan, totalCardsSpan);
 
     const lefts = [...baseLefts];
     for (let i = 1; i < baseItems.length; i++) {
-      const minLeft = lefts[i - 1] + baseItems[i - 1].cardWidth + CARD_GAP;
+      const minLeft = lefts[i - 1] + baseItems[i - 1].cardWidth + dynamicGap;
       lefts[i] = Math.max(lefts[i], minLeft);
     }
     lefts[lastIdx] = Math.min(lefts[lastIdx], trackSpan - baseItems[lastIdx].cardWidth);
     for (let i = lastIdx - 1; i >= 0; i--) {
-      const maxLeft = lefts[i + 1] - CARD_GAP - baseItems[i].cardWidth;
+      const maxLeft = lefts[i + 1] - dynamicGap - baseItems[i].cardWidth;
       lefts[i] = Math.min(lefts[i], maxLeft);
     }
 
@@ -636,7 +740,29 @@ export function GlassDock({
     cutResumePositions,
     safeDuration,
     scrubberMetrics?.width,
+    scrubberMetrics?.rowWidth,
   ]);
+
+  useEffect(() => {
+    if (collapsed || !selectedCutId) return;
+    const scrollSelectedIntoView = () => {
+      const container = timelineScrollRef.current;
+      if (!container) return;
+      const cards = container.querySelectorAll<HTMLElement>("[data-cut-card]");
+      for (const card of cards) {
+        if (card.getAttribute("data-cut-card") === selectedCutId) {
+          card.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+          break;
+        }
+      }
+    };
+    const rafId = requestAnimationFrame(scrollSelectedIntoView);
+    const settleTimer = window.setTimeout(scrollSelectedIntoView, 340);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.clearTimeout(settleTimer);
+    };
+  }, [selectedCutId, collapsed, transcriptPinned, pinnedTranscriptSide, scrubberMetrics?.width]);
 
   const handleScrub = (clientX: number) => {
     if (!scrubberRef.current || duration <= 0) return;
@@ -657,6 +783,7 @@ export function GlassDock({
   const resolvedSpeedSteps = speedSteps.length > 0 ? speedSteps : DEFAULT_SPEED_STEPS;
   const speedLabel = `${playbackRate}x`;
   const dockBottom = "12px";
+  const isNarrowDock = false;
   const dockLeft =
     sidebarPinned && sidebarSide !== "right" ? "calc(var(--sidebar-w) + 24px)" : "12px";
   const dockRight =
@@ -664,7 +791,7 @@ export function GlassDock({
 
   return (
     <>
-      {collapsed && minimizedHidden && (
+      {collapsed && effectiveMinimizedHidden && (
         <div
           aria-hidden="true"
           onMouseEnter={(e) => {
@@ -674,10 +801,11 @@ export function GlassDock({
             setMinimizedHidden(false);
             onVisibilityChangeRef.current?.(true);
           }}
-          className="fixed bottom-0 z-dock"
+          className="fixed z-dock bottom-0"
           style={{
             left: dockLeft,
             right: dockRight,
+            bottom: "0px",
             height: "calc(var(--dock-h-collapsed) + var(--dock-gap))",
           }}
         />
@@ -690,8 +818,11 @@ export function GlassDock({
         onMouseEnter={handleDockMouseEnter}
         onMouseLeave={handleDockMouseLeave}
         className={[
-          "fixed z-dock glass rounded-panel transition-[bottom,left,right,height,border-radius,opacity,transform] duration-slow ease-out overflow-visible",
-          collapsed && minimizedHidden
+          "fixed z-dock glass transition-[bottom,left,right,height,border-radius,opacity,transform] duration-slow ease-out overflow-visible",
+          transcriptAboveDock && !(collapsed && effectiveMinimizedHidden)
+            ? "rounded-b-panel rounded-t-none border-t-0"
+            : "rounded-panel",
+          collapsed && effectiveMinimizedHidden
             ? "opacity-0 translate-y-4 pointer-events-none"
             : "opacity-100 translate-y-0",
         ].join(" ")}
@@ -931,9 +1062,10 @@ export function GlassDock({
         >
           {/* Área rolável dos cartões alinhada diretamente sob a barra de progressão */}
           <div
+            ref={timelineScrollRef}
             className="overflow-x-auto overflow-y-hidden no-scrollbar snap-x snap-proximity h-full shrink-0"
             style={
-              scrubberMetrics
+              scrubberMetrics && scrubberMetrics.width >= 380
                 ? {
                     marginLeft: `${scrubberMetrics.offsetLeft}px`,
                     width: `${scrubberMetrics.width}px`,
@@ -943,7 +1075,7 @@ export function GlassDock({
           >
             <div className="relative h-full" style={{ width: timelineTrackWidth }}>
               {/* Cartões posicionados pelo tempo real */}
-              <div className="relative h-[120px] mt-0.5">
+              <div className="relative h-[136px] mt-0.5">
                 {positionedCuts.length === 0 ? (
                   <div className="h-full flex items-center text-xs text-text-3">
                     {isProcessing
@@ -962,6 +1094,7 @@ export function GlassDock({
                       !isSelected &&
                       resumePos !== undefined &&
                       (hoveredCutId === cut.cut_id || focusedCutId === cut.cut_id);
+                    const isCompactMini = !isSelected && !isHoverResume && cardWidth < 56;
                     const statusText = isReady
                       ? "Pronto"
                       : isApproved
@@ -975,7 +1108,7 @@ export function GlassDock({
                       <div
                         className={[
                           "relative aspect-square shrink-0 rounded-[8px] overflow-hidden bg-black/50 border border-line transition-[width,height] duration-slow ease-out",
-                          isSelected ? "w-14 h-14" : "w-10 h-10",
+                          isSelected ? "w-16 h-16" : isCompactMini ? "w-8 h-8" : "w-10 h-10",
                         ].join(" ")}
                       >
                         {thumbUrl ? (
@@ -1023,7 +1156,7 @@ export function GlassDock({
                         className={[
                           "absolute top-4 snap-start rounded-card border flex flex-col transition-[left,width,opacity,background-color,border-color,box-shadow] duration-slow ease-out",
                           isSelected
-                            ? "min-h-[70px] p-1.5 -translate-y-0.5 bg-[rgba(91,156,255,0.10)] border-transparent shadow-[0_0_0_1.5px_var(--accent-ring),var(--shadow-card)] z-10"
+                            ? "min-h-[96px] p-3 -translate-y-0.5 bg-[rgba(91,156,255,0.10)] border-transparent shadow-[0_0_0_1.5px_var(--accent-ring),var(--shadow-card)] z-10"
                             : isHoverResume
                               ? "h-[70px] p-0 bg-white/[0.08] border-line-strong shadow-card"
                               : "h-[70px] p-0 bg-white/[0.05] border-line shadow-card hover:bg-white/[0.08] hover:border-line-strong",
@@ -1055,7 +1188,7 @@ export function GlassDock({
                         />
 
                         {isSelected ? (
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-3">
                             <button
                               type="button"
                               data-enter-watch="true"
@@ -1072,7 +1205,7 @@ export function GlassDock({
                               {thumbnailEl}
                             </button>
 
-                            <div className="min-w-0 flex-1 flex flex-col min-h-[56px] justify-between gap-1">
+                            <div className="min-w-0 flex-1 flex flex-col min-h-[68px] justify-between gap-2.5">
                               <div className="flex items-start justify-between gap-1.5">
                                 {editingTitleId === cut.cut_id ? (
                                   <input
@@ -1254,25 +1387,17 @@ export function GlassDock({
                                   : `Tocar do início (${formatShortTime(cut.start)})`
                               }
                               className={[
-                                "p-1.5 h-full flex items-center justify-center transition-colors duration-fast cursor-pointer",
+                                "h-full flex items-center justify-center transition-colors duration-fast cursor-pointer",
                                 isHoverResume
-                                  ? "w-[62px] shrink-0 hover:bg-white/[0.06]"
-                                  : "w-full flex-col gap-1",
+                                  ? "p-1.5 w-[62px] shrink-0 hover:bg-white/[0.06]"
+                                  : isCompactMini
+                                    ? "p-1 w-full flex-col gap-0.5"
+                                    : "p-1.5 w-full flex-col gap-1",
                               ].join(" ")}
                             >
                               {thumbnailEl}
                               {!isHoverResume && (
-                                <div className="w-full flex items-center justify-center gap-1 text-[10px] leading-none text-text-3 tabular-nums">
-                                  <span
-                                    className={[
-                                      "w-1.5 h-1.5 rounded-pill inline-block shrink-0",
-                                      isCutRendering
-                                        ? "bg-[var(--cut-rendering-strong)]"
-                                        : isReady || isApproved
-                                          ? "bg-accent-soft"
-                                          : "bg-success",
-                                    ].join(" ")}
-                                  />
+                                <div className="w-full flex items-center justify-center text-[10px] leading-none text-text-3 tabular-nums">
                                   <span className="truncate">{formatShortTime(cutDuration)}</span>
                                 </div>
                               )}
@@ -1314,31 +1439,37 @@ export function GlassDock({
         {/* Rodapé de ações do dock (oculto quando recolhido) */}
         <div
           className={[
-            "flex items-center justify-between gap-3 h-9 shrink-0 transition-opacity duration-base",
+            "flex items-center justify-between min-h-9 shrink-0 transition-opacity duration-base",
+            isNarrowDock ? "flex-nowrap gap-2" : "flex-wrap gap-3 gap-y-2",
             collapsed ? "opacity-0 pointer-events-none hidden" : "opacity-100",
           ].join(" ")}
         >
           {/* Esquerda: status de erro/processamento (quando sem seleção) OU ações do corte */}
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div
+            className={[
+              "flex items-center min-w-0",
+              isNarrowDock ? "gap-1" : "gap-1.5",
+            ].join(" ")}
+          >
             {!selectedCut && (jobStatus === "ERROR" || jobError) ? (
               <div className="inline-flex items-center gap-2 px-3 h-7 rounded-pill bg-[var(--danger-bg)] border border-danger/30 text-xs text-danger truncate">
                 <span className="truncate">{getHumanErrorMessage(jobError)}</span>
                 <button
                   type="button"
                   onClick={onRetryError}
-                  className="inline-flex items-center gap-1 font-medium underline shrink-0"
+                  className="inline-flex items-center gap-1 font-medium underline shrink-0 whitespace-nowrap"
                 >
                   <ArrowCounterClockwise size={12} />
                   <span>Tentar de novo</span>
                 </button>
               </div>
             ) : !selectedCut && isProcessing && statusLabel ? (
-              <div className="inline-flex items-center gap-2 text-sm text-text-2">
-                <span>{statusLabel}</span>
+              <div className="inline-flex items-center gap-2 text-sm text-text-2 min-w-0">
+                <span className="truncate">{statusLabel}</span>
                 <button
                   type="button"
                   onClick={onCancelProcessing}
-                  className="text-xs text-text-3 hover:text-text-1 underline"
+                  className="text-xs text-text-3 hover:text-text-1 underline shrink-0 whitespace-nowrap"
                 >
                   Cancelar
                 </button>
@@ -1350,7 +1481,10 @@ export function GlassDock({
                   disabled={!selectedCut}
                   title={!selectedCut ? "Selecione um corte" : undefined}
                   onClick={() => selectedCut && onWatchCut(selectedCut)}
-                  className="h-7 px-2.5 rounded-pill inline-flex items-center gap-1.5 text-sm bg-white/[0.06] border border-line text-text-1 enabled:hover:bg-white/[0.12] disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
+                  className={[
+                    "h-7 rounded-pill inline-flex items-center text-sm bg-white/[0.06] border border-line text-text-1 enabled:hover:bg-white/[0.12] disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast whitespace-nowrap shrink-0",
+                    isNarrowDock ? "px-2 gap-1" : "px-2.5 gap-1.5",
+                  ].join(" ")}
                 >
                   <Play size={13} weight="regular" />
                   <span>Assistir</span>
@@ -1362,7 +1496,8 @@ export function GlassDock({
                   title={!selectedCut ? "Selecione um corte" : undefined}
                   onClick={() => selectedCut && onApproveCut(selectedCut.cut_id)}
                   className={[
-                    "h-7 px-2.5 rounded-pill inline-flex items-center gap-1.5 text-sm border transition-colors duration-fast disabled:opacity-40 disabled:cursor-not-allowed",
+                    "h-7 rounded-pill inline-flex items-center text-sm border transition-colors duration-fast disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0",
+                    isNarrowDock ? "px-2 gap-1" : "px-2.5 gap-1.5",
                     selectedCut?.status === "approved"
                       ? "bg-accent/20 border-accent-soft/40 text-text-1"
                       : "bg-white/[0.06] border-line text-text-1 enabled:hover:bg-white/[0.12]",
@@ -1377,7 +1512,10 @@ export function GlassDock({
                   disabled={!selectedCut}
                   title={!selectedCut ? "Selecione um corte" : undefined}
                   onClick={() => selectedCut && onDiscardCut(selectedCut.cut_id)}
-                  className="h-7 px-2.5 rounded-pill inline-flex items-center gap-1.5 text-sm bg-white/[0.06] border border-line text-text-1 enabled:hover:bg-[var(--danger-bg)] enabled:hover:text-danger disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast"
+                  className={[
+                    "h-7 rounded-pill inline-flex items-center text-sm bg-white/[0.06] border border-line text-text-1 enabled:hover:bg-[var(--danger-bg)] enabled:hover:text-danger disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-fast whitespace-nowrap shrink-0",
+                    isNarrowDock ? "px-2 gap-1" : "px-2.5 gap-1.5",
+                  ].join(" ")}
                 >
                   <X size={13} weight="regular" />
                   <span>Descartar</span>
@@ -1387,13 +1525,21 @@ export function GlassDock({
           </div>
 
           {/* Direita: Preset + Revisar antes + Gerar cortes */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div ref={presetMenuRef} className="relative">
+          <div
+            className={[
+              "flex items-center shrink-0",
+              isNarrowDock ? "gap-1.5" : "gap-2.5",
+            ].join(" ")}
+          >
+            <div ref={presetMenuRef} className="relative shrink-0">
               <button
                 type="button"
                 onClick={() => setPresetMenuOpen((o) => !o)}
                 aria-expanded={presetMenuOpen}
-                className="h-9 px-3.5 rounded-pill inline-flex items-center gap-2 bg-white/[0.06] border border-line text-base text-text-1 hover:bg-glass-hover transition-colors duration-fast"
+                className={[
+                  "h-9 rounded-pill inline-flex items-center bg-white/[0.06] border border-line text-base text-text-1 hover:bg-glass-hover transition-colors duration-fast whitespace-nowrap shrink-0",
+                  isNarrowDock ? "px-2.5 gap-1.5" : "px-3.5 gap-2",
+                ].join(" ")}
               >
                 <span>{activePreset.label}</span>
                 <CaretDown size={13} weight="regular" className="text-text-2" />
@@ -1424,8 +1570,13 @@ export function GlassDock({
               )}
             </div>
 
-            <div className="h-9 px-3 rounded-pill inline-flex items-center gap-2 bg-white/[0.06] border border-line">
-              <span className="text-sm text-text-1 select-none">Revisar antes</span>
+            <div
+              className={[
+                "h-9 rounded-pill inline-flex items-center bg-white/[0.06] border border-line whitespace-nowrap shrink-0",
+                isNarrowDock ? "px-2.5 gap-1.5" : "px-3 gap-2",
+              ].join(" ")}
+            >
+              <span className="text-sm text-text-1 select-none whitespace-nowrap">Revisar antes</span>
               <button
                 type="button"
                 role="switch"
@@ -1433,7 +1584,7 @@ export function GlassDock({
                 aria-label="Revisar antes"
                 onClick={onToggleReviewBefore}
                 className={[
-                  "relative w-9 h-5 rounded-pill transition-colors duration-base ease-out",
+                  "relative w-9 h-5 rounded-pill transition-colors duration-base ease-out shrink-0",
                   reviewBeforeRender ? "bg-accent" : "bg-white/[0.18]",
                 ].join(" ")}
               >
@@ -1450,7 +1601,10 @@ export function GlassDock({
               <button
                 type="button"
                 onClick={onContinueApproval}
-                className="h-9 px-4 rounded-pill bg-accent text-accent-fg text-base font-medium hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] transition-[background-color,transform] duration-fast"
+                className={[
+                  "h-9 rounded-pill bg-accent text-accent-fg text-base font-medium hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] transition-[background-color,transform] duration-fast whitespace-nowrap shrink-0",
+                  isNarrowDock ? "px-3" : "px-4",
+                ].join(" ")}
               >
                 Renderizar aprovados
               </button>
@@ -1459,7 +1613,10 @@ export function GlassDock({
                 type="button"
                 disabled={isProcessing}
                 onClick={onGenerateCuts}
-                className="h-9 px-4 rounded-pill bg-accent text-accent-fg text-base font-medium hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed transition-[background-color,transform] duration-fast"
+                className={[
+                  "h-9 rounded-pill bg-accent text-accent-fg text-base font-medium hover:bg-accent-hover active:bg-accent-active active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed transition-[background-color,transform] duration-fast whitespace-nowrap shrink-0",
+                  isNarrowDock ? "px-3" : "px-4",
+                ].join(" ")}
               >
                 {isProcessing ? "Processando…" : "Gerar cortes"}
               </button>

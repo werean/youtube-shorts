@@ -24,6 +24,8 @@ interface ArcSidebarProps {
   pinned: boolean;
   open: boolean;
   side: "left" | "right";
+  transcriptAttached?: boolean;
+  keepOpenForAttached?: boolean;
   immersiveIdle: boolean;
   activeVideoHasTranscription?: boolean;
   processingJobIds?: ReadonlySet<string>;
@@ -72,6 +74,8 @@ export function ArcSidebar({
   pinned,
   open,
   side = "left",
+  transcriptAttached = false,
+  keepOpenForAttached = false,
   immersiveIdle,
   activeVideoHasTranscription,
   processingJobIds,
@@ -94,6 +98,10 @@ export function ArcSidebar({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuOpenRef = useRef(false);
   menuOpenRef.current = menuState !== null;
+  const keepOpenRef = useRef(Boolean(keepOpenForAttached));
+  keepOpenRef.current = Boolean(keepOpenForAttached);
+  const prevKeepOpenRef = useRef(Boolean(keepOpenForAttached));
+  const prevPinnedRef = useRef(pinned);
 
   const displayedVideos = videoView === "active" ? videos : archivedVideos;
   const orderedVideos = displayedVideos.slice().reverse();
@@ -156,15 +164,65 @@ export function ArcSidebar({
   };
 
   const scheduleClose = () => {
-    if (pinned || menuOpenRef.current) return;
+    if (pinned || menuOpenRef.current || keepOpenRef.current) return;
     if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null;
-      if (menuOpenRef.current) return;
+      if (menuOpenRef.current || keepOpenRef.current) return;
       setMenuState(null);
+      if (
+        sidebarRef.current &&
+        document.activeElement instanceof HTMLElement &&
+        sidebarRef.current.contains(document.activeElement)
+      ) {
+        document.activeElement.blur();
+      }
       onSetOpen(false);
     }, 250);
   };
+
+  useEffect(() => {
+    const wasKeepOpen = prevKeepOpenRef.current;
+    const isKeepOpen = Boolean(keepOpenForAttached);
+    prevKeepOpenRef.current = isKeepOpen;
+
+    if (isKeepOpen) {
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (
+      wasKeepOpen &&
+      !isKeepOpen &&
+      !pinned &&
+      open &&
+      !menuOpenRef.current &&
+      !sidebarRef.current?.matches(":hover")
+    ) {
+      scheduleClose();
+    }
+  }, [keepOpenForAttached, pinned, open]);
+
+  useEffect(() => {
+    const wasPinned = prevPinnedRef.current;
+    prevPinnedRef.current = pinned;
+    if (wasPinned && !pinned) {
+      if (
+        sidebarRef.current &&
+        document.activeElement instanceof HTMLElement &&
+        sidebarRef.current.contains(document.activeElement)
+      ) {
+        document.activeElement.blur();
+      }
+      if (!sidebarRef.current?.matches(":hover") && !menuOpenRef.current && !keepOpenRef.current) {
+        clearTimers();
+        onSetOpen(false);
+      }
+    }
+  }, [pinned, onSetOpen]);
 
   useEffect(() => {
     return () => clearTimers();
@@ -192,7 +250,7 @@ export function ArcSidebar({
       }
       blurMenuTrigger(menuState.jobId);
       setMenuState(null);
-      if (!pinned && (!sidebarRef.current || !target || !sidebarRef.current.contains(target))) {
+      if (!pinned && !keepOpenRef.current && (!sidebarRef.current || !target || !sidebarRef.current.contains(target))) {
         if (closeTimerRef.current) {
           window.clearTimeout(closeTimerRef.current);
           closeTimerRef.current = null;
@@ -305,10 +363,15 @@ export function ArcSidebar({
         }}
         className={[
           "fixed z-sidebar flex flex-col gap-2 p-3 glass transition-[opacity,transform,border-radius] duration-slow ease-out",
-          "focus-within:opacity-100 focus-within:translate-x-0 focus-within:pointer-events-auto",
+          "[&:has(:focus-visible)]:opacity-100 [&:has(:focus-visible)]:translate-x-0 [&:has(:focus-visible)]:pointer-events-auto",
           isRight
-            ? "top-[12px] bottom-[12px] right-[12px] rounded-panel"
-            : "top-[12px] bottom-[12px] left-[12px] rounded-panel",
+            ? "top-[12px] bottom-[12px] right-[12px]"
+            : "top-[12px] bottom-[12px] left-[12px]",
+          transcriptAttached && isVisible
+            ? isRight
+              ? "rounded-r-panel rounded-l-none border-l-0"
+              : "rounded-l-panel rounded-r-none border-r-0"
+            : "rounded-panel",
           !pinned && !open
             ? isRight
               ? "opacity-0 translate-x-3 pointer-events-none"
@@ -343,7 +406,10 @@ export function ArcSidebar({
 
           <button
             type="button"
-            onClick={onTogglePin}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onTogglePin();
+            }}
             aria-label={pinned ? "Desafixar barra lateral" : "Fixar barra lateral"}
             aria-pressed={pinned}
             className={[
@@ -388,63 +454,76 @@ export function ArcSidebar({
                   ? `${apiBaseUrl}/media/videos/${jobId}#t=1`
                   : undefined;
 
+              const menuButton = (
+                <button
+                  type="button"
+                  data-arc-menu-trigger={jobId}
+                  aria-label={`Ações de ${title}`}
+                  aria-haspopup="menu"
+                  aria-expanded={isMenuOpen}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isMenuOpen) {
+                      if (!pinned) e.currentTarget.blur();
+                      menuOpenRef.current = false;
+                      setMenuState(null);
+                      return;
+                    }
+                    const rowEl =
+                      (e.currentTarget.closest("[data-video-row]") as HTMLElement | null) ??
+                      e.currentTarget;
+                    const rowRect = rowEl.getBoundingClientRect();
+                    const sidebarRect = sidebarRef.current?.getBoundingClientRect();
+                    const rawLeft = isRight
+                      ? (sidebarRect ? sidebarRect.left : rowRect.left) - MENU_WIDTH - 8
+                      : (sidebarRect ? sidebarRect.right : rowRect.right) + 8;
+                    const left = Math.max(
+                      8,
+                      Math.min(rawLeft, window.innerWidth - MENU_WIDTH - 8),
+                    );
+                    const estHeight = hasTranscription ? 80 : 44;
+                    const top = Math.max(
+                      8,
+                      Math.min(rowRect.top, window.innerHeight - estHeight - 8),
+                    );
+                    setMenuState({ jobId, top, left });
+                  }}
+                  className={[
+                    "shrink-0 grid h-6 w-5 place-items-center rounded-pill transition-[opacity,background-color,color] duration-fast",
+                    "hover:bg-glass-active hover:text-text-1",
+                    isMenuOpen
+                      ? "opacity-100 bg-glass-active text-text-1"
+                      : isActive
+                        ? "opacity-85 text-text-1 group-hover:opacity-100"
+                        : "opacity-45 text-text-3 group-hover:opacity-100 group-hover:text-text-1 focus-visible:opacity-100",
+                  ].join(" ")}
+                >
+                  <DotsThreeVertical size={16} weight="bold" />
+                </button>
+              );
+
+              const spinnerEl = isProcessing ? (
+                <SpinnerGap
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-text-1 animate-spin"
+                  aria-label="Processando"
+                />
+              ) : null;
+
               return (
                 <div
                   key={jobId}
                   data-video-row={jobId}
                   className={[
-                    "group relative flex items-center gap-1 rounded-item pl-1 pr-2 transition-[background-color,color] duration-fast",
+                    "group relative flex items-center gap-1 rounded-item transition-[background-color,color] duration-fast",
+                    isRight ? "pl-2 pr-1" : "pl-1 pr-2",
                     isActive
                       ? "bg-glass-active text-text-1 shadow-[inset_0_0_0_1px_var(--glass-border-strong)]"
                       : "text-text-2 hover:bg-glass-hover hover:text-text-1",
                   ].join(" ")}
                 >
-                  {/* Botão 3 pontinhos verticais à esquerda */}
-                  <button
-                    type="button"
-                    data-arc-menu-trigger={jobId}
-                    aria-label={`Ações de ${title}`}
-                    aria-haspopup="menu"
-                    aria-expanded={isMenuOpen}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isMenuOpen) {
-                        if (!pinned) e.currentTarget.blur();
-                        menuOpenRef.current = false;
-                        setMenuState(null);
-                        return;
-                      }
-                      const rowEl =
-                        (e.currentTarget.closest("[data-video-row]") as HTMLElement | null) ??
-                        e.currentTarget;
-                      const rowRect = rowEl.getBoundingClientRect();
-                      const sidebarRect = sidebarRef.current?.getBoundingClientRect();
-                      const rawLeft = isRight
-                        ? (sidebarRect ? sidebarRect.left : rowRect.left) - MENU_WIDTH - 8
-                        : (sidebarRect ? sidebarRect.right : rowRect.right) + 8;
-                      const left = Math.max(
-                        8,
-                        Math.min(rawLeft, window.innerWidth - MENU_WIDTH - 8),
-                      );
-                      const estHeight = hasTranscription ? 80 : 44;
-                      const top = Math.max(
-                        8,
-                        Math.min(rowRect.top, window.innerHeight - estHeight - 8),
-                      );
-                      setMenuState({ jobId, top, left });
-                    }}
-                    className={[
-                      "shrink-0 grid h-6 w-5 place-items-center rounded-pill transition-[opacity,background-color,color] duration-fast",
-                      "hover:bg-glass-active hover:text-text-1",
-                      isMenuOpen
-                        ? "opacity-100 bg-glass-active text-text-1"
-                        : isActive
-                          ? "opacity-85 text-text-1 group-hover:opacity-100"
-                          : "opacity-45 text-text-3 group-hover:opacity-100 group-hover:text-text-1 focus-visible:opacity-100",
-                    ].join(" ")}
-                  >
-                    <DotsThreeVertical size={16} weight="bold" />
-                  </button>
+                  {!isRight ? menuButton : null}
 
                   <button
                     type="button"
@@ -454,8 +533,13 @@ export function ArcSidebar({
                         onSelectVideo(jobId);
                       }
                     }}
-                    className="flex-1 min-w-0 overflow-hidden flex items-center gap-2.5 py-2 pr-0.5 text-left"
+                    className={[
+                      "flex-1 min-w-0 overflow-hidden flex items-center gap-2.5 py-2 text-left",
+                      isRight ? "pl-0.5 pr-0" : "pr-0.5",
+                    ].join(" ")}
                   >
+                    {isRight ? spinnerEl : null}
+
                     <div className="w-9 h-9 rounded-lg overflow-hidden bg-black/40 border border-line shrink-0 grid place-items-center">
                       {thumbSrc ? (
                         <video
@@ -474,15 +558,10 @@ export function ArcSidebar({
                       {title}
                     </span>
 
-                    {isProcessing ? (
-                      <SpinnerGap
-                        size={14}
-                        weight="regular"
-                        className="shrink-0 text-text-1 animate-spin"
-                        aria-label="Processando"
-                      />
-                    ) : null}
+                    {!isRight ? spinnerEl : null}
                   </button>
+
+                  {isRight ? menuButton : null}
                 </div>
               );
             })

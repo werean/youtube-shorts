@@ -7,6 +7,10 @@ interface ImmersiveVideoStageProps {
   videoRef: RefObject<HTMLVideoElement>;
   videoSrc: string | null;
   sidebarPinned: boolean;
+  transcriptPinned?: boolean;
+  pinnedTranscriptSide?: "left" | "right" | null;
+  pinnedTranscriptWithSidebar?: boolean;
+  pinnedTranscriptHorizontal?: "above-dock" | null;
   sidebarSide?: "left" | "right";
   dockCollapsed?: boolean;
   dockHidden?: boolean;
@@ -21,6 +25,10 @@ export function ImmersiveVideoStage({
   videoRef,
   videoSrc,
   sidebarPinned,
+  transcriptPinned = false,
+  pinnedTranscriptSide,
+  pinnedTranscriptWithSidebar = false,
+  pinnedTranscriptHorizontal = null,
   sidebarSide = "left",
   dockCollapsed = false,
   hasActiveVideo,
@@ -84,17 +92,43 @@ export function ImmersiveVideoStage({
   };
 
   const showMaximizedStageMargins = hasActiveVideo && Boolean(videoSrc) && !dockCollapsed;
-  const stageOffset = "calc(var(--sidebar-w) + 24px)";
   const stageEdge = showMaximizedStageMargins ? "12px" : "0px";
+  const legacyTranscriptOnSidebar = pinnedTranscriptSide === undefined && transcriptPinned;
   const stageTop = showMaximizedStageMargins ? "12px" : "0px";
-  const stageLeft = sidebarPinned && sidebarSide !== "right" ? stageOffset : stageEdge;
-  const stageRight = sidebarPinned && sidebarSide === "right" ? stageOffset : stageEdge;
-  const stageBottom = showMaximizedStageMargins ? "calc(var(--dock-h) + 24px)" : "0px";
+  const stageLeft =
+    pinnedTranscriptSide === "left"
+      ? pinnedTranscriptWithSidebar
+        ? "calc(var(--sidebar-w) + var(--transcript-w) + 24px)"
+        : "calc(var(--transcript-w) + 12px)"
+      : (sidebarPinned || legacyTranscriptOnSidebar) && sidebarSide !== "right"
+        ? legacyTranscriptOnSidebar
+          ? "calc(var(--sidebar-w) + var(--transcript-w) + 24px)"
+          : "calc(var(--sidebar-w) + 24px)"
+        : stageEdge;
+  const stageRight =
+    pinnedTranscriptSide === "right"
+      ? pinnedTranscriptWithSidebar
+        ? "calc(var(--sidebar-w) + var(--transcript-w) + 24px)"
+        : "calc(var(--transcript-w) + 12px)"
+      : (sidebarPinned || legacyTranscriptOnSidebar) && sidebarSide === "right"
+        ? legacyTranscriptOnSidebar
+          ? "calc(var(--sidebar-w) + var(--transcript-w) + 24px)"
+          : "calc(var(--sidebar-w) + 24px)"
+        : stageEdge;
+  const stageBottom =
+    pinnedTranscriptHorizontal === "above-dock"
+      ? showMaximizedStageMargins
+        ? "calc(var(--dock-h) + var(--transcript-h) + 24px)"
+        : "calc(var(--dock-h-collapsed) + var(--transcript-h) + 24px)"
+      : showMaximizedStageMargins
+        ? "calc(var(--dock-h) + 24px)"
+        : "0px";
   const stageRadiusClass = showMaximizedStageMargins ? "rounded-panel" : "rounded-none";
   const videoObjectFitClass = isPortraitVideo ? "object-contain" : "object-cover";
 
   return (
     <main
+      data-video-stage="true"
       className={`fixed z-[var(--z-video)] bg-canvas ${stageRadiusClass} overflow-hidden transition-[top,left,right,bottom,border-radius] duration-slow ease-out`}
       style={{
         top: stageTop,

@@ -72,9 +72,11 @@
 
   /* Dimensões */
   --sidebar-w: 260px;
+  --transcript-w: clamp(300px, 24vw, 360px);
+  --transcript-h: clamp(128px, 18vh, 176px);
   --sidebar-gap: 12px;
   --edge-hot: 8px;
-  --dock-h: 238px;
+  --dock-h: 256px;
   --dock-h-collapsed: 56px;
   --dock-gap: 16px;
   --card-w: 164px;
@@ -187,8 +189,17 @@
   color: var(--text-1);
 }
 
+.glass-transparent-caption {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.96);
+}
+
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass,
+  .glass:not(.glass-transparent-caption),
   .glass--strong {
     background: rgba(20, 22, 28, 0.94);
   }
@@ -281,11 +292,22 @@
   .pick-check-badge {
     animation: pick-check-fade 180ms ease both;
   }
+
+  .transcript-snap-preview {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .transcript-caption-line {
+    transition-property: color, background-color, opacity !important;
+    transform: none !important;
+  }
 }
 
 @media (max-width: 1024px) {
   :root {
     --sidebar-w: 220px;
+    --transcript-w: 270px;
     --card-w: 148px;
   }
 }
@@ -349,4 +371,28 @@
 .settings-scroll-fade {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent 100%);
+}
+
+/* Transições compositoras de pré-visualização de encaixe e destaque de legenda */
+@keyframes transcript-snap-preview-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.transcript-snap-preview {
+  animation: transcript-snap-preview-in var(--dur-base) var(--ease-out) both;
+}
+
+.transcript-caption-line {
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out);
 }

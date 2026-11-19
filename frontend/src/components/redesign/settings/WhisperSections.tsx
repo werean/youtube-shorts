@@ -4,6 +4,8 @@ import {
   Globe,
   Lightning,
   Medal,
+  Minus,
+  Plus,
   Scales,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -17,9 +19,11 @@ import {
 import { generateWhisperCommand } from "../../../utils/whisperCommandBuilder";
 import {
   FormatChip,
+  GhostButton,
   PickTile,
   PickTileGroup,
   SettingsSectionLabel,
+  SettingsSwitch,
   type AutoSaveReporter,
 } from "./settingsShared";
 
@@ -1610,6 +1614,283 @@ export function WhisperAdvancedSection({
         <SettingsSectionLabel>PRÉVIA DO COMANDO</SettingsSectionLabel>
         <div className="rounded-card border border-line bg-white/[0.02] px-3.5 py-2.5 font-sans text-xs tabular-nums text-text-2 overflow-x-auto whitespace-nowrap">
           {whisperCommand}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tela 09B — Transcrição · Exibição (`transcript-display`)                   */
+/* -------------------------------------------------------------------------- */
+
+const TRANSCRIPT_FONT_MIN = 13;
+const TRANSCRIPT_FONT_MAX = 24;
+const TRANSCRIPT_FONT_DEFAULT = 16;
+
+const TRANSCRIPT_BLACK_OPACITY_MIN = 15;
+const TRANSCRIPT_BLACK_OPACITY_MAX = 90;
+const TRANSCRIPT_BLACK_OPACITY_STEP = 5;
+const TRANSCRIPT_BLACK_OPACITY_DEFAULT = 45;
+
+function clampTranscriptFont(val: number): number {
+  if (!Number.isFinite(val)) return TRANSCRIPT_FONT_DEFAULT;
+  return Math.min(TRANSCRIPT_FONT_MAX, Math.max(TRANSCRIPT_FONT_MIN, Math.round(val)));
+}
+
+function clampTranscriptBlackOpacity(val: number): number {
+  if (!Number.isFinite(val)) return TRANSCRIPT_BLACK_OPACITY_DEFAULT;
+  return Math.min(
+    TRANSCRIPT_BLACK_OPACITY_MAX,
+    Math.max(TRANSCRIPT_BLACK_OPACITY_MIN, Math.round(val)),
+  );
+}
+
+export interface TranscriptDisplaySectionProps {
+  fontSizePx: number;
+  blackOverVideoBg: boolean;
+  blackOverVideoOpacity: number;
+  onChangeFontSize: (px: number) => void;
+  onChangeBlackOverVideoBg: (enabled: boolean) => void;
+  onChangeBlackOverVideoOpacity: (opacityPct: number) => void;
+  reporter?: AutoSaveReporter;
+}
+
+export function TranscriptDisplaySection({
+  fontSizePx,
+  blackOverVideoBg,
+  blackOverVideoOpacity,
+  onChangeFontSize,
+  onChangeBlackOverVideoBg,
+  onChangeBlackOverVideoOpacity,
+  reporter,
+}: TranscriptDisplaySectionProps) {
+  const safeFontSize = clampTranscriptFont(fontSizePx);
+  const safeOpacity = clampTranscriptBlackOpacity(blackOverVideoOpacity);
+  const ratio =
+    ((safeFontSize - TRANSCRIPT_FONT_MIN) / (TRANSCRIPT_FONT_MAX - TRANSCRIPT_FONT_MIN)) * 100;
+  const opacityRatio =
+    ((safeOpacity - TRANSCRIPT_BLACK_OPACITY_MIN) /
+      (TRANSCRIPT_BLACK_OPACITY_MAX - TRANSCRIPT_BLACK_OPACITY_MIN)) *
+    100;
+  const switchLabelId = useId();
+  const switchDescId = useId();
+  const fontSliderId = useId();
+  const opacitySliderId = useId();
+
+  const handleFontSizeChange = (val: number) => {
+    const clamped = clampTranscriptFont(val);
+    onChangeFontSize(clamped);
+    reporter?.reportSaved();
+  };
+
+  const handleToggleBlackBg = (next: boolean) => {
+    onChangeBlackOverVideoBg(next);
+    reporter?.reportSaved();
+  };
+
+  const handleOpacityChange = (val: number) => {
+    const clamped = clampTranscriptBlackOpacity(val);
+    onChangeBlackOverVideoOpacity(clamped);
+    reporter?.reportSaved();
+  };
+
+  return (
+    <div className="space-y-6">
+      <section aria-label="Tamanho do texto da transcrição">
+        <SettingsSectionLabel>TAMANHO DO TEXTO DA TRANSCRIÇÃO</SettingsSectionLabel>
+        <div className="rounded-card border border-line bg-glass p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor={fontSliderId} className="text-sm font-medium text-text-1">
+              Tamanho da fonte
+            </label>
+            <div className="flex items-center gap-2">
+              {safeFontSize !== TRANSCRIPT_FONT_DEFAULT && (
+                <GhostButton
+                  onClick={() => handleFontSizeChange(TRANSCRIPT_FONT_DEFAULT)}
+                  className="h-7 px-2.5 text-xs"
+                >
+                  Padrão
+                </GhostButton>
+              )}
+              <span className="min-w-[52px] text-right text-sm font-medium text-text-1 tabular-nums">
+                {safeFontSize} px
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              aria-label="Diminuir tamanho do texto"
+              disabled={safeFontSize <= TRANSCRIPT_FONT_MIN}
+              onClick={() => handleFontSizeChange(safeFontSize - 1)}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-pill border border-line-strong bg-transparent text-text-2 transition-colors duration-fast hover:bg-glass-hover hover:text-text-1 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Minus size={14} weight="bold" />
+            </button>
+
+            <div className="relative h-4 flex-1">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-pill bg-white/[0.18]"
+              >
+                <div className="h-full rounded-pill bg-accent" style={{ width: `${ratio}%` }} />
+              </div>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+                style={{ left: `${ratio}%` }}
+              />
+              <input
+                id={fontSliderId}
+                type="range"
+                min={TRANSCRIPT_FONT_MIN}
+                max={TRANSCRIPT_FONT_MAX}
+                step={1}
+                value={safeFontSize}
+                aria-label="Tamanho do texto da transcrição"
+                aria-valuetext={`${safeFontSize} pixels`}
+                onChange={(event) => handleFontSizeChange(Number(event.target.value))}
+                className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-pill peer-focus-visible:ring-2 peer-focus-visible:ring-accent-ring"
+              />
+            </div>
+
+            <button
+              type="button"
+              aria-label="Aumentar tamanho do texto"
+              disabled={safeFontSize >= TRANSCRIPT_FONT_MAX}
+              onClick={() => handleFontSizeChange(safeFontSize + 1)}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-pill border border-line-strong bg-transparent text-text-2 transition-colors duration-fast hover:bg-glass-hover hover:text-text-1 disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Plus size={14} weight="bold" />
+            </button>
+          </div>
+
+          <p className="text-xs text-text-3 tabular-nums">
+            Padrão: 16 px · Limite: 13 px a 24 px
+          </p>
+        </div>
+      </section>
+
+      <section aria-label="Contraste sobre o vídeo">
+        <SettingsSectionLabel>CONTRASTE SOBRE O VÍDEO</SettingsSectionLabel>
+        <div className="rounded-card border border-line bg-glass p-4 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p id={switchLabelId} className="text-sm font-medium text-text-1">
+                Fundo preto sobre o vídeo
+              </p>
+              <p id={switchDescId} className="mt-0.5 text-xs text-text-2 leading-relaxed">
+                Adiciona um fundo preto esfumaçado apenas na legenda ativa quando o card está sobre o vídeo.
+              </p>
+            </div>
+            <SettingsSwitch
+              checked={blackOverVideoBg}
+              onChange={handleToggleBlackBg}
+              ariaLabelledBy={switchLabelId}
+              ariaDescribedBy={switchDescId}
+            />
+          </div>
+
+          <div
+            className={`space-y-3 border-t border-line pt-3 transition-opacity duration-fast ${
+              blackOverVideoBg ? "opacity-100" : "opacity-45 pointer-events-none"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor={opacitySliderId} className="text-sm font-medium text-text-1">
+                Intensidade do fundo preto
+              </label>
+              <div className="flex items-center gap-2">
+                {safeOpacity !== TRANSCRIPT_BLACK_OPACITY_DEFAULT && (
+                  <GhostButton
+                    disabled={!blackOverVideoBg}
+                    onClick={() => handleOpacityChange(TRANSCRIPT_BLACK_OPACITY_DEFAULT)}
+                    className="h-7 px-2.5 text-xs"
+                  >
+                    Padrão
+                  </GhostButton>
+                )}
+                <span className="min-w-[44px] text-right text-sm font-medium text-text-1 tabular-nums">
+                  {safeOpacity}%
+                </span>
+              </div>
+            </div>
+
+            <div className="relative h-4">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-pill bg-white/[0.18]"
+              >
+                <div className="h-full rounded-pill bg-accent" style={{ width: `${opacityRatio}%` }} />
+              </div>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+                style={{ left: `${opacityRatio}%` }}
+              />
+              <input
+                id={opacitySliderId}
+                type="range"
+                min={TRANSCRIPT_BLACK_OPACITY_MIN}
+                max={TRANSCRIPT_BLACK_OPACITY_MAX}
+                step={TRANSCRIPT_BLACK_OPACITY_STEP}
+                value={safeOpacity}
+                disabled={!blackOverVideoBg}
+                aria-label="Intensidade do fundo preto"
+                aria-valuetext={`${safeOpacity}%`}
+                onChange={(event) => handleOpacityChange(Number(event.target.value))}
+                className="peer absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+              />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-pill peer-focus-visible:ring-2 peer-focus-visible:ring-accent-ring"
+              />
+            </div>
+
+            <p className="text-xs text-text-3 tabular-nums">
+              Padrão: 45% · Limite: 15% a 90%
+            </p>
+          </div>
+
+          <div className="rounded-item border border-line bg-gradient-to-r from-zinc-800 via-zinc-300/80 to-zinc-800 p-3">
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.05em] text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+              Pré-visualização ao vivo
+            </div>
+            <div
+              className="space-y-1.5 px-2 py-1.5 leading-relaxed"
+              style={{ fontSize: `${safeFontSize}px` }}
+            >
+              <div className="inline-flex items-baseline gap-2 font-normal text-white/60 drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)]">
+                <span className="font-mono text-[0.76em] tabular-nums">[0:04]</span>
+                <span>Linha anterior esmaecida para contexto</span>
+              </div>
+              <div>
+                <span className="relative inline-flex max-w-full items-center gap-2.5 font-semibold text-white">
+                  {blackOverVideoBg && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -inset-x-2 -inset-y-1 z-0 rounded-[14px] blur-[5px]"
+                      style={{
+                        background: `radial-gradient(ellipse 92% 88% at 50% 50%, rgba(0, 0, 0, ${safeOpacity / 100}) 45%, rgba(0, 0, 0, ${((safeOpacity / 100) * 0.45).toFixed(3)}) 75%, transparent 100%)`,
+                      }}
+                    />
+                  )}
+                  <span className="relative z-10 font-mono text-[0.76em] text-accent-soft tabular-nums">
+                    [0:08]
+                  </span>
+                  <span className="relative z-10 min-w-0 break-words">
+                    Exemplo de legenda exibida sobre o vídeo
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </div>

@@ -26,6 +26,7 @@ export type SectionId =
   | "whisper-model"
   | "whisper-language"
   | "whisper-advanced"
+  | "transcript-display"
   | "ffmpeg-quality"
   | "ffmpeg-visual"
   | "ffmpeg-audio"
@@ -93,6 +94,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
       { id: "whisper-model", label: "Modelo" },
       { id: "whisper-language", label: "Idioma" },
       { id: "whisper-advanced", label: "Avançado" },
+      { id: "transcript-display", label: "Exibição" },
     ],
   },
   {

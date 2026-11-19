@@ -62,7 +62,11 @@ import type {
   RestoreScope,
   SectionId,
 } from "./components/redesign/settings/settingsShared";
-import { TranscriptPopover } from "./components/redesign/TranscriptPopover";
+import {
+  TranscriptPopover,
+  type TranscriptFreeRect,
+  type TranscriptSlot,
+} from "./components/redesign/TranscriptPopover";
 import { CUT_PRESETS, isJobProcessingStatus, type CutPreset } from "./components/redesign/presets";
 import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
 
@@ -103,6 +107,46 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
     // ignore storage errors
   }
   return fallback;
+}
+
+function clampTranscriptFontSize(value: number): number {
+  if (!Number.isFinite(value)) return 16;
+  return Math.min(24, Math.max(13, Math.round(value)));
+}
+
+function readStoredTranscriptFontSize(): number {
+  try {
+    const val = window.localStorage.getItem("ui.transcriptFontSize");
+    if (val !== null) {
+      const parsed = Number(val);
+      if (Number.isFinite(parsed)) {
+        return clampTranscriptFontSize(parsed);
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return 16;
+}
+
+function clampTranscriptBlackOpacity(value: number): number {
+  if (!Number.isFinite(value)) return 45;
+  return Math.min(90, Math.max(15, Math.round(value)));
+}
+
+function readStoredTranscriptBlackOpacity(): number {
+  try {
+    const val = window.localStorage.getItem("ui.transcriptBlackBgOpacity");
+    if (val !== null) {
+      const parsed = Number(val);
+      if (Number.isFinite(parsed)) {
+        return clampTranscriptBlackOpacity(parsed);
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return 45;
 }
 
 function readStoredPreset(): CutPreset["id"] {
@@ -151,6 +195,8 @@ export default function App() {
   const activeVideoIdRef = useRef<string | null>(activeVideoId);
   activeVideoIdRef.current = activeVideoId;
   const blocksJobIdRef = useRef<string | null>(null);
+  const loadingBlocksJobIdRef = useRef<string | null>(null);
+  const loadingTranscriptionJobIdRef = useRef<string | null>(null);
   const hydrateTranscriptionsRef = useRef<
     ((items: VideoItem[], updater: (jobId: string, updates: Partial<VideoItem>) => void) => Promise<void>) | null
   >(null);
@@ -223,6 +269,60 @@ export default function App() {
     readStoredBoolean("ui.reviewBeforeRender", true),
   );
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [transcriptPinned, setTranscriptPinned] = useState<boolean>(() =>
+    readStoredBoolean("ui.transcriptPinned", false),
+  );
+  const [transcriptFontSize, setTranscriptFontSize] = useState<number>(
+    readStoredTranscriptFontSize,
+  );
+  const [transcriptBlackOverVideoBg, setTranscriptBlackOverVideoBg] = useState<boolean>(() =>
+    readStoredBoolean("ui.transcriptBlackOverVideoBg", false),
+  );
+  const [transcriptBlackOverVideoOpacity, setTranscriptBlackOverVideoOpacity] = useState<number>(
+    readStoredTranscriptBlackOpacity,
+  );
+  const [transcriptPlacementSlot, setTranscriptPlacementSlot] =
+    useState<TranscriptSlot>("beside-sidebar");
+  const [transcriptFreeRect, setTranscriptFreeRect] =
+    useState<TranscriptFreeRect | null>(null);
+  const [transcriptTransparentOverVideo, setTranscriptTransparentOverVideo] =
+    useState<boolean>(false);
+  const [transcriptAttachedHovered, setTranscriptAttachedHovered] = useState(false);
+  const transcriptPinnedRef = useRef<boolean>(transcriptPinned);
+  transcriptPinnedRef.current = transcriptPinned;
+  const sidebarVisible = sidebarPinned || sidebarOpen;
+  const safeTranscriptPlacementSlot: TranscriptSlot =
+    transcriptPlacementSlot === "beside-sidebar" ||
+    transcriptPlacementSlot === "opposite-edge" ||
+    transcriptPlacementSlot === "above-dock"
+      ? transcriptPlacementSlot
+      : "beside-sidebar";
+  const isPositionedAtSidebar =
+    safeTranscriptPlacementSlot === "beside-sidebar" && transcriptFreeRect === null;
+  const transcriptHiddenBySidebar =
+    transcriptOpen && isPositionedAtSidebar && !sidebarVisible;
+  const transcriptEffectiveVisible = transcriptOpen && !transcriptHiddenBySidebar;
+  const activeDockedTranscriptSlot: TranscriptSlot | null =
+    transcriptEffectiveVisible && transcriptFreeRect === null
+      ? safeTranscriptPlacementSlot
+      : null;
+  const transcriptAttachedToSidebar =
+    transcriptEffectiveVisible &&
+    isPositionedAtSidebar &&
+    sidebarVisible;
+  const effectivePinnedTranscriptSide: "left" | "right" | null =
+    transcriptPinned &&
+    (activeDockedTranscriptSlot === "beside-sidebar" ||
+      activeDockedTranscriptSlot === "opposite-edge")
+      ? activeDockedTranscriptSlot === "beside-sidebar"
+        ? sidebarSide
+        : sidebarSide === "left"
+          ? "right"
+          : "left"
+      : null;
+  const pinnedTranscriptWithSidebar =
+    effectivePinnedTranscriptSide === sidebarSide &&
+    activeDockedTranscriptSlot === "beside-sidebar";
   const [showDiscarded, setShowDiscarded] = useState(false);
   const [showSettingsHub, setShowSettingsHub] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SectionId>("app-folders");
@@ -652,6 +752,44 @@ export default function App() {
   }, [dockCollapsed]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.transcriptPinned", String(transcriptPinned));
+    } catch {
+      // ignore
+    }
+  }, [transcriptPinned]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ui.transcriptFontSize", String(transcriptFontSize));
+    } catch {
+      // ignore
+    }
+  }, [transcriptFontSize]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "ui.transcriptBlackOverVideoBg",
+        String(transcriptBlackOverVideoBg),
+      );
+    } catch {
+      // ignore
+    }
+  }, [transcriptBlackOverVideoBg]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "ui.transcriptBlackBgOpacity",
+        String(transcriptBlackOverVideoOpacity),
+      );
+    } catch {
+      // ignore
+    }
+  }, [transcriptBlackOverVideoOpacity]);
+
+  useEffect(() => {
     if (!dockCollapsed) {
       setDockMinimizedVisible(true);
     }
@@ -805,8 +943,12 @@ export default function App() {
   const selectVideo = useCallback(
     (jobId: string, keepTranscriptOpen = false) => {
       setImmersiveCutId(null);
-      if (!keepTranscriptOpen) {
+      if (!keepTranscriptOpen && !transcriptPinnedRef.current) {
         setTranscriptOpen(false);
+      }
+      if (jobId !== activeVideoIdRef.current) {
+        blocksJobIdRef.current = null;
+        setBlocks([]);
       }
       activeVideoIdRef.current = jobId;
       setActiveVideoId(jobId);
@@ -1065,7 +1207,7 @@ export default function App() {
 
       if (e.key === "Escape") {
         if (hasOpenModal) return;
-        if (transcriptOpen) {
+        if (transcriptOpen && !transcriptPinned) {
           setTranscriptOpen(false);
           return;
         }
@@ -1226,6 +1368,9 @@ export default function App() {
     immersiveCut && !isPlayingRenderedFile
       ? Math.max(1, immersiveCut.end - immersiveCut.start)
       : duration;
+
+  const transcriptCurrentTime =
+    immersiveCut && isPlayingRenderedFile ? immersiveCut.start + currentTime : currentTime;
 
   function handleTogglePlay() {
     const video = videoRef.current;
@@ -1512,11 +1657,14 @@ export default function App() {
       videos.find((v) => v.job.job_id === jobId) ??
       archivedVideos.find((v) => v.job.job_id === jobId);
     const needsTranscriptionHydration =
-      !targetVideo?.transcription && !(targetVideo?.transcriptionSegments?.length);
+      !targetVideo?.transcription &&
+      !(targetVideo?.transcriptionSegments?.length) &&
+      loadingTranscriptionJobIdRef.current !== jobId;
 
     const tasks: Promise<void>[] = [];
 
     if (needsTranscriptionHydration) {
+      loadingTranscriptionJobIdRef.current = jobId;
       tasks.push(
         getTranscription(jobId)
           .then((result) => {
@@ -1531,11 +1679,17 @@ export default function App() {
           })
           .catch(() => {
             // Silent fallback when transcription is not yet generated
+          })
+          .finally(() => {
+            if (loadingTranscriptionJobIdRef.current === jobId) {
+              loadingTranscriptionJobIdRef.current = null;
+            }
           }),
       );
     }
 
-    if (shouldLoadBlocks) {
+    if (shouldLoadBlocks && loadingBlocksJobIdRef.current !== jobId) {
+      loadingBlocksJobIdRef.current = jobId;
       markJobProcessing(jobId, true);
       tasks.push(
         buildBlocks(jobId)
@@ -1549,6 +1703,9 @@ export default function App() {
             // Silent fallback when blocks are not yet generated
           })
           .finally(() => {
+            if (loadingBlocksJobIdRef.current === jobId) {
+              loadingBlocksJobIdRef.current = null;
+            }
             markJobProcessing(jobId, false);
           }),
       );
@@ -1556,6 +1713,17 @@ export default function App() {
 
     await Promise.all(tasks);
   }
+
+  const loadTranscriptAndBlocksForJobRef = useRef(loadTranscriptAndBlocksForJob);
+  loadTranscriptAndBlocksForJobRef.current = loadTranscriptAndBlocksForJob;
+
+  useEffect(() => {
+    if (!transcriptOpen || !activeVideoId) return;
+    void loadTranscriptAndBlocksForJobRef.current(
+      activeVideoId,
+      blocksJobIdRef.current !== activeVideoId,
+    );
+  }, [transcriptOpen, activeVideoId]);
 
   async function handleOpenVideoTranscript(jobId: string) {
     if (jobId !== activeVideoId) {
@@ -1975,6 +2143,14 @@ export default function App() {
         videoRef={videoRef}
         videoSrc={videoSrc}
         sidebarPinned={sidebarPinned}
+        transcriptPinned={Boolean(effectivePinnedTranscriptSide)}
+        pinnedTranscriptSide={effectivePinnedTranscriptSide}
+        pinnedTranscriptWithSidebar={pinnedTranscriptWithSidebar}
+        pinnedTranscriptHorizontal={
+          transcriptPinned && activeDockedTranscriptSlot === "above-dock"
+            ? "above-dock"
+            : null
+        }
         sidebarSide={sidebarSide}
         hasActiveVideo={Boolean(activeVideo)}
         dockCollapsed={dockCollapsed}
@@ -1995,6 +2171,8 @@ export default function App() {
         pinned={sidebarPinned}
         side={sidebarSide}
         open={sidebarOpen}
+        transcriptAttached={transcriptAttachedToSidebar}
+        keepOpenForAttached={transcriptAttachedToSidebar && transcriptAttachedHovered}
         immersiveIdle={immersiveIdle}
         activeVideoHasTranscription={Boolean(
           activeVideo?.transcription || (activeVideo?.transcriptionSegments?.length ?? 0) > 0,
@@ -2048,6 +2226,10 @@ export default function App() {
         <GlassDock
           key={activeVideo.job.job_id}
           sidebarPinned={sidebarPinned}
+          transcriptPinned={Boolean(effectivePinnedTranscriptSide)}
+          pinnedTranscriptSide={effectivePinnedTranscriptSide}
+          pinnedTranscriptWithSidebar={pinnedTranscriptWithSidebar}
+          transcriptAboveDock={activeDockedTranscriptSlot === "above-dock"}
           sidebarSide={sidebarSide}
           collapsed={dockCollapsed}
           isImmersive={Boolean(immersiveCut)}
@@ -2123,13 +2305,46 @@ export default function App() {
       {/* Popover de transcrição */}
       <TranscriptPopover
         open={transcriptOpen}
+        pinned={transcriptPinned}
+        dockCollapsed={dockCollapsed}
         sidebarPinned={sidebarPinned}
+        sidebarOpen={sidebarOpen}
         sidebarSide={sidebarSide}
+        hiddenWithSidebar={transcriptHiddenBySidebar}
+        videoKey={activeVideo?.job.job_id ?? ""}
         transcriptionText={activeVideo?.transcription || ""}
         segments={(activeVideo?.transcriptionSegments as any) || []}
         blocks={blocks}
         showDiscardedCuts={showDiscarded}
         discardedCount={discardedCount}
+        currentTime={transcriptCurrentTime}
+        isPlaying={isPlaying}
+        placementSlot={safeTranscriptPlacementSlot}
+        freeRect={transcriptFreeRect}
+        transparentOverVideo={transcriptTransparentOverVideo}
+        fontSizePx={transcriptFontSize}
+        blackOverVideoBg={transcriptBlackOverVideoBg}
+        blackOverVideoOpacity={transcriptBlackOverVideoOpacity}
+        onPlacementChange={({ slot, freeRect }) => {
+          setTranscriptPlacementSlot(
+            slot === "beside-sidebar" ||
+              slot === "opposite-edge" ||
+              slot === "above-dock"
+              ? slot
+              : "beside-sidebar",
+          );
+          setTranscriptFreeRect(freeRect);
+        }}
+        onTransparentOverVideoChange={setTranscriptTransparentOverVideo}
+        onAttachedHoverChange={setTranscriptAttachedHovered}
+        onTogglePin={() => {
+          const next = !transcriptPinned;
+          setTranscriptPinned(next);
+          if (next) {
+            setTranscriptFreeRect(null);
+            setTranscriptTransparentOverVideo(false);
+          }
+        }}
         onToggleShowDiscarded={() => setShowDiscarded((s) => !s)}
         onSeekTo={(seconds) => {
           handleSeek(seconds);
@@ -2137,7 +2352,10 @@ export default function App() {
             void videoRef.current.play().catch(() => {});
           }
         }}
-        onClose={() => setTranscriptOpen(false)}
+        onClose={() => {
+          setTranscriptOpen(false);
+          setTranscriptTransparentOverVideo(false);
+        }}
       />
 
       {/* Modais de Novo Vídeo e Central de Configurações */}
@@ -2201,6 +2419,16 @@ export default function App() {
         whisperDevice={whisperDevice}
         whisperFormats={whisperFormats}
         onSaveWhisper={handleAutoSaveWhisper}
+        transcriptFontSize={transcriptFontSize}
+        onChangeTranscriptFontSize={(px) =>
+          setTranscriptFontSize(clampTranscriptFontSize(px))
+        }
+        transcriptBlackOverVideoBg={transcriptBlackOverVideoBg}
+        onChangeTranscriptBlackOverVideoBg={setTranscriptBlackOverVideoBg}
+        transcriptBlackOverVideoOpacity={transcriptBlackOverVideoOpacity}
+        onChangeTranscriptBlackOverVideoOpacity={(pct) =>
+          setTranscriptBlackOverVideoOpacity(clampTranscriptBlackOpacity(pct))
+        }
         ffmpegConfig={ffmpegConfig}
         onSaveFFmpeg={handleAutoSaveFFmpeg}
         watermark={watermark}

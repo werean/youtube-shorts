@@ -56,6 +56,7 @@ import {
 } from "./settings/settingsShared";
 import { WatermarkSection } from "./settings/WatermarkSection";
 import {
+  TranscriptDisplaySection,
   WhisperAdvancedSection,
   WhisperLanguageSection,
   WhisperModelSection,
@@ -119,6 +120,12 @@ export interface SettingsHubModalProps {
   whisperDevice: "cpu" | "cuda";
   whisperFormats: string[];
   onSaveWhisper: (patch: Partial<WhisperConfig>) => Promise<void> | void;
+  transcriptFontSize: number;
+  onChangeTranscriptFontSize: (px: number) => void;
+  transcriptBlackOverVideoBg: boolean;
+  onChangeTranscriptBlackOverVideoBg: (enabled: boolean) => void;
+  transcriptBlackOverVideoOpacity: number;
+  onChangeTranscriptBlackOverVideoOpacity: (opacityPct: number) => void;
 
   // Renderização / FFmpeg (Telas 10–12)
   ffmpegConfig: FFmpegConfig | null;
@@ -207,6 +214,12 @@ export function SettingsHubModal({
   whisperDevice,
   whisperFormats,
   onSaveWhisper,
+  transcriptFontSize,
+  onChangeTranscriptFontSize,
+  transcriptBlackOverVideoBg,
+  onChangeTranscriptBlackOverVideoBg,
+  transcriptBlackOverVideoOpacity,
+  onChangeTranscriptBlackOverVideoOpacity,
   ffmpegConfig,
   onSaveFFmpeg,
   watermark,
@@ -494,6 +507,18 @@ export function SettingsHubModal({
             whisperDevice={whisperDevice}
             whisperFormats={whisperFormats}
             onSaveWhisper={onSaveWhisper}
+            reporter={reporter}
+          />
+        );
+      case "transcript-display":
+        return (
+          <TranscriptDisplaySection
+            fontSizePx={transcriptFontSize}
+            blackOverVideoBg={transcriptBlackOverVideoBg}
+            blackOverVideoOpacity={transcriptBlackOverVideoOpacity}
+            onChangeFontSize={onChangeTranscriptFontSize}
+            onChangeBlackOverVideoBg={onChangeTranscriptBlackOverVideoBg}
+            onChangeBlackOverVideoOpacity={onChangeTranscriptBlackOverVideoOpacity}
             reporter={reporter}
           />
         );
