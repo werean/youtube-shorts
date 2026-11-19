@@ -12,6 +12,8 @@ interface BatchPipelineControlsProps {
   activeBatchId: string | null;
   showBatchCompletionNotification: boolean;
   batchCompletionMessage: string;
+  batchFailedJobs?: { jobId: string; label: string }[];
+  onOpenJobLogs?: (jobId: string) => void;
   onCloseDialog: () => void;
   onVideoToggle: (videoId: string) => void;
   onOptionChange: (changes: Partial<BatchPipelineOptions>) => void;
@@ -29,6 +31,8 @@ export function BatchPipelineControls({
   activeBatchId,
   showBatchCompletionNotification,
   batchCompletionMessage,
+  batchFailedJobs = [],
+  onOpenJobLogs,
   onCloseDialog,
   onVideoToggle,
   onOptionChange,
@@ -65,7 +69,18 @@ export function BatchPipelineControls({
             </div>
             <div className="dialog-content" style={{ padding: "20px" }}>
               <p style={{ whiteSpace: "pre-line", lineHeight: "1.8" }}>{batchCompletionMessage}</p>
-              <div style={{ display: "flex", justifyContent: "center", marginTop: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "8px", marginTop: "20px" }}>
+                {batchFailedJobs.map(({ jobId, label }) => (
+                <GlassButton
+                  key={jobId}
+                  variant="glass"
+                  size="sm"
+                  onClick={() => onOpenJobLogs?.(jobId)}
+                  title="Abrir a pasta com os logs deste erro"
+                >
+                  {batchFailedJobs.length > 1 ? `Exibir logs: ${label}` : "Exibir logs"}
+                </GlassButton>
+              ))}
                 <GlassButton variant="primary" onClick={onCloseCompletionNotification}>
                   OK
                 </GlassButton>

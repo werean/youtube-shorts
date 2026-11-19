@@ -419,7 +419,7 @@ class StageLogger:
         if include_env_diagnostics:
             diag = collect_environment_diagnostics(context=None)
             raw_lines.append(f"EnvironmentDiagnostics: {_safe_json_preview(diag, max_len=6000)}")
-        return self.log_lines(
+        formatted = self.log_lines(
             job_id,
             stage,
             raw_lines,
@@ -427,6 +427,138 @@ class StageLogger:
             write_backend_log=True,
             fsync=True,
         )
+        # Dedicated failure record (`erro.log` + `last_error.json`). Never raises into the pipeline.
+        try:
+            self.record_failure(job_id, stage, exc, tb_text=tb_text)
+        except Exception:
+            pass
+        return formatted
+
+    # --- Dedicated failure record -------------------------------------------------------------------------
+
+    @staticmethod
+    def _is_cancellation(exc: BaseException) -> bool:
+        return any(k.__name__ in ("OperationCancelledError", "CancelledError") for k in type(exc).__mro__)
+
+    @staticmethod
+    def _already_recorded(job_id: str, exc: BaseException) -> bool:
+        """True when `exc` (or an exception in its cause/context chain) was already recorded for `job_id`.
+
+        The stage logs the failure and the orchestrator/batch logs the (possibly re-wrapped) exception again: one
+        failure must produce one entry.
+        """
+        seen: set[int] = set()
+        cur: BaseException | None = exc
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            if job_id in getattr(cur, "_yts_error_logged", ()):
+                return True
+            cur = cur.__cause__ or cur.__context__
+        return False
+
+    @staticmethod
+    def _mark_recorded(job_id: str, exc: BaseException) -> None:
+        try:
+            marks = getattr(exc, "_yts_error_logged", None)
+            if not isinstance(marks, set):
+                marks = set()
+                setattr(exc, "_yts_error_logged", marks)
+            marks.add(job_id)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _short_message(exc: BaseException, limit: int = 300) -> str:
+        text = " ".join(str(exc).split()) or type(exc).__name__
+        return text if len(text) <= limit else text[: limit - 3] + "..."
+
+    def record_failure(
+        self,
+        job_id: str,
+        stage: str,
+        exc: BaseException,
+        *,
+        tb_text: str | None = None,
+    ) -> bool:
+        """Append one entry to `{logs}/<job_id>/erro.log` and refresh `last_error.json`.
+
+        User cancellation is not a failure and creates nothing. Returns True when an entry was written.
+        """
+        if self._is_cancellation(exc) or self._already_recorded(job_id, exc):
+            return False
+        clean_stage = (stage or "").strip() or "general"
+        at = _utc_timestamp()
+        short = self._short_message(exc)
+        if tb_text is None:
+            tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip()
+
+        diagnostic = ""
+        diag_fn = getattr(exc, "diagnostic", None)
+        if callable(diag_fn):
+            try:
+                diagnostic = str(diag_fn()).strip()
+            except Exception:
+                diagnostic = ""
+
+        lines = [
+            "=" * 78,
+            f"[{at}] ERRO na etapa: {clean_stage}",
+            f"Mensagem: {short}",
+            f"Tipo: {type(exc).__name__}",
+        ]
+        if diagnostic:
+            lines.append("Diagnóstico:")
+            lines.extend(f"  {ln}" for ln in diagnostic.splitlines())
+        if tb_text:
+            lines.append("Traceback:")
+            lines.extend(f"  {ln}" for ln in tb_text.splitlines())
+        lines.append("")
+
+        self._append_to_file(paths.job_error_log_path(job_id), lines, fsync=True)
+        self._mark_recorded(job_id, exc)
+        self._write_last_error(job_id, {"stage": clean_stage, "message": short, "at": at})
+        return True
+
+    def _write_last_error(self, job_id: str, payload: dict[str, Any]) -> None:
+        target = paths.job_last_error_path(job_id)
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            with self._lock:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, ensure_ascii=False)
+                    fh.flush()
+                    try:
+                        os.fsync(fh.fileno())
+                    except OSError:
+                        pass
+                os.replace(tmp, target)
+        except OSError:
+            pass
+
+    def read_last_error(self, job_id: str) -> dict[str, Any] | None:
+        target = paths.job_last_error_path(job_id)
+        try:
+            if not target.is_file():
+                return None
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or not data.get("message"):
+            return None
+        return {
+            "stage": str(data.get("stage") or ""),
+            "message": str(data["message"]),
+            "at": str(data.get("at") or ""),
+        }
+
+    def clear_last_error(self, job_id: str) -> None:
+        """Drop the sidecar (the `erro.log` history stays). Called when the job leaves the ERROR state."""
+        try:
+            with self._lock:
+                paths.job_last_error_path(job_id).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def read_stage_log(self, job_id: str, stage: str, *, tail: int = 400) -> list[str]:
         target = (

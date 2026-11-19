@@ -69,6 +69,11 @@ def isolated_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
         if Path(file_path).exists() and Path(file_path).is_file()
         else {"ok": False, "detail": "File not found", "status_code": 404}
     )
+    container.dir_opener = lambda dir_path, allowed_roots=None: (
+        {"ok": True}
+        if Path(dir_path).exists() and Path(dir_path).is_dir()
+        else {"ok": False, "detail": "Folder not found", "status_code": 404}
+    )
     container.terminal_opener = lambda command: {"success": True, "command": command}
 
     async def _fake_llm_fetcher(method: str, url: str, body: dict | None = None) -> tuple[int, dict]:

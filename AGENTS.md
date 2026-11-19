@@ -60,6 +60,7 @@ Nunca quebre estes invariantes durante a implementação:
 - `/jobs/:job_id/rename` (`POST` e `PUT` — **retorna o objeto `Job` diretamente no top-level**)
 - `/jobs/:job_id/ingest` (`POST` — **`video_path` é `/media/videos/:job_id` e `full_path` o caminho físico no disco**)
 - `/jobs/:job_id/logs/:task` (`GET` — `task` $\in$ `ingest | transcription | render`)
+- `/jobs/:job_id/logs/open-folder` (`POST` — abre `{media.base_dir}/logs/<job_id>/` no explorador (com `erro.log` selecionado quando existe); somente local (`require_local_ui`); `404` job desconhecido, `400` id inválido; resposta `{ "ok": true }`). Toda falha de etapa grava uma entrada em `logs/<job_id>/erro.log` (+ sidecar `last_error.json`), exposta como `last_error?: { stage, message, at }` opcional em `GET /jobs/:id` e `GET /videos` enquanto o job está em `ERROR`; cancelamento não gera entrada
 - `/jobs/:job_id/transcribe` (`POST` — **retorna `transcription`, `segments` e `available_formats: { segments, text, vtt }`**)
 - `/jobs/:job_id/transcribe/cancel` (`POST`)
 - `/jobs/:job_id/transcription` (`GET`, `DELETE`)

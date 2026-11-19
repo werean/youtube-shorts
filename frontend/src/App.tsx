@@ -22,6 +22,7 @@ import {
   listArchivedVideos,
   listVideos,
   openVideoFolder,
+  openJobLogsFolder,
   renameVideo,
   updateCuts,
   uploadVideoFile,
@@ -67,7 +68,7 @@ import {
   type TranscriptFreeRect,
   type TranscriptSlot,
 } from "./components/redesign/TranscriptPopover";
-import { CUT_PRESETS, isJobProcessingStatus, type CutPreset } from "./components/redesign/presets";
+import { isJobProcessingStatus } from "./components/redesign/presets";
 import { VideoItem, recordToVideoItem } from "./utils/videoHelpers";
 
 interface ActionState {
@@ -147,18 +148,6 @@ function readStoredTranscriptBlackOpacity(): number {
     // ignore storage errors
   }
   return 45;
-}
-
-function readStoredPreset(): CutPreset["id"] {
-  try {
-    const val = window.localStorage.getItem("ui.cutPreset");
-    if (val === "podcast" || val === "dinamico" || val === "curtos") {
-      return val;
-    }
-  } catch {
-    // ignore
-  }
-  return "dinamico";
 }
 
 export default function App() {
@@ -264,7 +253,6 @@ export default function App() {
     readStoredBoolean("ui.dockCollapsed", false),
   );
   const [dockMinimizedVisible, setDockMinimizedVisible] = useState(true);
-  const [selectedPreset, setSelectedPreset] = useState<CutPreset["id"]>(readStoredPreset);
   const [reviewBeforeRender, setReviewBeforeRender] = useState<boolean>(() =>
     readStoredBoolean("ui.reviewBeforeRender", true),
   );
@@ -393,6 +381,7 @@ export default function App() {
     startBatchPipelineDialog,
     startSingleJobPipeline,
     closeBatchCompletionNotification,
+    batchFailedJobIds,
   } = useBatchPipelineWorkflow({
     onActiveVideosLoaded: (items) => {
       setVideos(items);
@@ -579,7 +568,23 @@ export default function App() {
       localProcessingJobsRef.current.has(activeVideoId) ||
       activeBatchJobIdRef.current === activeVideoId;
 
-    if (isActiveStatus && (hasLiveActivity || isTrackedLocally)) {
+    // Status persistido/reproduzido pelo SSE NÃO prova que há tarefa viva (job travado de uma
+    // execução anterior). Só marca processamento quando esta sessão iniciou a tarefa; o restante
+    // vem do `is_processing` do backend (GET /videos).
+    if (isActiveStatus && !isTrackedLocally) {
+      if (hasLiveActivity) {
+        setVideos((current) =>
+          current.map((v) =>
+            v.job.job_id === activeVideoId && v.job.status !== sseJobStatus
+              ? { ...v, job: { ...v.job, status: sseJobStatus } }
+              : v,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (isActiveStatus && isTrackedLocally) {
       markJobProcessing(activeVideoId, true);
       setVideos((current) =>
         current.map((v) =>
@@ -694,6 +699,47 @@ export default function App() {
     markJobProcessing,
   ]);
 
+  const backendProcessingActive = useMemo(
+    () => videos.some((v) => v.is_processing === true) || archivedVideos.some((v) => v.is_processing === true),
+    [videos, archivedVideos],
+  );
+  const anyProcessingForPoll = backendProcessingActive || localProcessingJobs.size > 0;
+
+  // Enquanto houver algo em processamento, relê só o flag `is_processing` (tarefa viva no
+  // runtime do backend) para que o spinner da barra lateral apague assim que a tarefa acabar.
+  useEffect(() => {
+    if (!anyProcessingForPoll) return;
+    let cancelled = false;
+    const refreshFlags = async () => {
+      try {
+        const records = await listVideos();
+        if (cancelled) return;
+        const flags = new Map<string, boolean>(
+          records.map((r) => [r.job.job_id, (r as { is_processing?: boolean }).is_processing === true]),
+        );
+        const apply = (current: VideoItem[]) => {
+          let changed = false;
+          const next = current.map((v) => {
+            const flag = flags.get(v.job.job_id);
+            if (flag === undefined || Boolean(v.is_processing) === flag) return v;
+            changed = true;
+            return { ...v, is_processing: flag };
+          });
+          return changed ? next : current;
+        };
+        setVideos(apply);
+        setArchivedVideos(apply);
+      } catch {
+        // falha transitória: tenta no próximo ciclo
+      }
+    };
+    const timer = window.setInterval(() => void refreshFlags(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [anyProcessingForPoll]);
+
   const processingJobIds = useMemo(() => {
     const ids = new Set<string>(localProcessingJobs);
     for (const v of videos) {
@@ -794,14 +840,6 @@ export default function App() {
       setDockMinimizedVisible(true);
     }
   }, [dockCollapsed]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("ui.cutPreset", selectedPreset);
-    } catch {
-      // ignore
-    }
-  }, [selectedPreset]);
 
   useEffect(() => {
     try {
@@ -2130,12 +2168,6 @@ export default function App() {
     [cuts],
   );
 
-  // Sync preset selection with active preset metadata if needed
-  const activePresetObj = useMemo(
-    () => CUT_PRESETS.find((p) => p.id === selectedPreset) ?? CUT_PRESETS[1],
-    [selectedPreset],
-  );
-
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-bg text-text-1 select-none">
       {/* Palco principal de vídeo */}
@@ -2240,6 +2272,7 @@ export default function App() {
           volume={volume}
           muted={muted}
           videoSrc={videoSrc}
+          activeJobId={activeVideo.job.job_id}
           jobStatus={activeVideo.job.status}
           isActivelyProcessing={Boolean(
             activeVideo && processingJobIds.has(activeVideo.job.job_id),
@@ -2250,10 +2283,10 @@ export default function App() {
             (activeVideo.job as { error?: string | null }).error ??
             null
           }
+          jobLastError={activeVideo.job.last_error ?? null}
           cuts={dockCuts}
           selectedCutId={selectedSuggestedCutId}
           showDiscarded={showDiscarded}
-          selectedPreset={activePresetObj.id}
           reviewBeforeRender={reviewBeforeRender}
           waitingApproval={batchWaitingForApproval}
           transcriptOpen={transcriptOpen}
@@ -2293,12 +2326,12 @@ export default function App() {
             activeVideo && void runAction(() => openVideoFolder(activeVideo.job.job_id))
           }
           onDeleteRenderedCut={(fileName) => void deleteRenderOutputFile(fileName)}
-          onChangePreset={setSelectedPreset}
           onToggleReviewBefore={() => setReviewBeforeRender((r) => !r)}
           onGenerateCuts={() => void handleGenerateCuts()}
           onContinueApproval={() => void continueActiveBatchPipeline()}
           onCancelProcessing={() => void handleCancelProcessing()}
           onRetryError={() => void handleGenerateCuts()}
+          onOpenLogs={() => void runAction(() => openJobLogsFolder(activeVideo.job.job_id))}
         />
       )}
 
@@ -2581,6 +2614,11 @@ export default function App() {
         activeBatchId={activeBatchId}
         showBatchCompletionNotification={showBatchCompletionNotification}
         batchCompletionMessage={batchCompletionMessage}
+        batchFailedJobs={batchFailedJobIds.map((jobId) => ({
+          jobId,
+          label: videos.find((v) => v.job.job_id === jobId)?.job.video_name || jobId,
+        }))}
+        onOpenJobLogs={(jobId) => void runAction(() => openJobLogsFolder(jobId))}
         onCloseDialog={() => setShowBatchPipelineDialog(false)}
         onVideoToggle={toggleBatchVideo}
         onOptionChange={updateBatchPipelineOptions}
@@ -2616,6 +2654,11 @@ export default function App() {
         onMoveUploadDecision={handleMoveUploadDecision}
         showBatchCompletionNotification={showBatchCompletionNotification}
         batchCompletionMessage={batchCompletionMessage}
+        batchFailedJobs={batchFailedJobIds.map((jobId) => ({
+          jobId,
+          label: videos.find((v) => v.job.job_id === jobId)?.job.video_name || jobId,
+        }))}
+        onOpenJobLogs={(jobId) => void runAction(() => openJobLogsFolder(jobId))}
         onBatchCompletionClose={closeBatchCompletionNotification}
       />
 

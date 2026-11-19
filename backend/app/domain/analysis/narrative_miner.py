@@ -22,6 +22,7 @@ Implements:
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from collections import Counter
 from pathlib import Path
@@ -51,6 +52,7 @@ from app.domain.segmentation.semantic_blocks import build_semantic_blocks, ends_
 from app.domain.segmentation.topic_segmentation import build_topic_segments
 from app.infrastructure.llm.unified_adapter import (
     InvalidLLMJsonResponseError,
+    LLMOutputTruncatedError,
     LocalLLMUnavailableError,
     UnifiedLocalLLMAdapter,
 )
@@ -366,7 +368,7 @@ def parse_candidate_cuts_from_llm_payload(
     blocks: Sequence[SemanticBlock],
     *,
     topics: Sequence[TopicSegment] | None = None,
-    stats: dict[str, int] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> list[CandidateCut]:
     """Parse candidate cuts (`v4` Evidence-First + legacy `v3`) and run deterministic score calibration."""
     raw_items: list[Any] = []
@@ -733,9 +735,15 @@ async def mine_narrative_cuts(
     rms_10ms: np.ndarray | None = None,
     audio_wav_path: Path | None = None,
     llm_adapter: UnifiedLocalLLMAdapter | None = None,
-    stats: dict[str, int] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[list[Cut], str]:
-    """Run the complete 3-Phase Narrative Arc Mining pipeline over `blocks`."""
+    """Run the complete 3-Phase Narrative Arc Mining pipeline over `blocks`.
+
+    A window whose answer was cut by the output limit (`LLMOutputTruncatedError`) or is not valid JSON
+    (`InvalidLLMJsonResponseError`, already retried once by the adapter) is skipped and recorded in
+    `stats["failed_windows"]`; the other windows still count. If every window fails the last error is raised.
+    Cancellation, provider unavailability, context overflow and empty responses abort immediately.
+    """
     if not blocks:
         return [], "[]"
 
@@ -761,6 +769,8 @@ async def mine_narrative_cuts(
 
     phase_4a_candidates: list[CandidateCut] = []
     raw_responses: list[Any] = []
+    failed_windows: list[dict[str, Any]] = []
+    last_window_error: Exception | None = None
 
     async with adapter.container.scheduler.gpu_slot(holder="analysis"):
         for w_idx, win_blocks in enumerate(windows):
@@ -770,19 +780,39 @@ async def mine_narrative_cuts(
                 f"=== TRANSCRIPT WINDOW {w_idx + 1}/{len(windows)} ===\n"
                 f"{transcript_body}"
             )
-            parsed, _raw_str = await adapter.chat_json(
-                sys_prompt,
-                user_prompt,
-                json_schema=CUTS_RESPONSE_JSON_SCHEMA,
-                schema_name="narrative_cuts",
-                max_tokens=config.LLM_MAX_TOKENS_MINER,
-                acquire_gpu_slot=False,
-            )
+            try:
+                parsed, _raw_str = await adapter.chat_json(
+                    sys_prompt,
+                    user_prompt,
+                    json_schema=CUTS_RESPONSE_JSON_SCHEMA,
+                    schema_name="narrative_cuts",
+                    max_tokens=config.LLM_MAX_TOKENS_MINER,
+                    acquire_gpu_slot=False,
+                )
+            except (LLMOutputTruncatedError, InvalidLLMJsonResponseError) as exc:
+                last_window_error = exc
+                failed_windows.append(
+                    {
+                        "window": w_idx + 1,
+                        "windows_total": len(windows),
+                        "first_block": win_blocks[0].block_id,
+                        "last_block": win_blocks[-1].block_id,
+                        "reason": str(exc),
+                        "kind": "truncated" if isinstance(exc, LLMOutputTruncatedError) else "invalid_json",
+                        "diagnostic": exc.diagnostic(),
+                    }
+                )
+                if stats is not None:
+                    stats["failed_windows"] = failed_windows
+                continue
             raw_responses.append(parsed)
             win_cands = parse_candidate_cuts_from_llm_payload(
                 parsed, blocks, topics=topics, stats=stats
             )
             phase_4a_candidates.extend(win_cands)
+
+        if failed_windows and len(failed_windows) == len(windows) and last_window_error is not None:
+            raise last_window_error
 
         # Phase 4B: Top-18 pre-filter + Hybrid [-3, +3] Boundary Lookaround
         phase_4b_candidates = await run_phase_4b_top_k_lookaround(
@@ -814,6 +844,34 @@ async def mine_narrative_cuts(
         ensure_ascii=False,
     )
     return final_cuts, raw_response_str
+
+
+_HEX32_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def _usable_video_title(raw_title: Any, job_id: str) -> str | None:
+    """A title worth showing the model, or None.
+
+    Locally added videos are named after their 32-hex job/folder id; sending that as "Title:" makes the model
+    title every cut with it. Structural check on the identifier format only.
+    """
+    title = str(raw_title or "").strip()
+    if not title or title == str(job_id) or _HEX32_RE.match(title):
+        return None
+    return title
+
+
+def _log_failed_windows(c: ServiceContainer, job_id: str, stats: dict[str, Any]) -> None:
+    """Write one job-log warning per window the miner had to skip (each is reported once)."""
+    failed = stats.pop("failed_windows", None) or []
+    for item in failed:
+        c.runtime.log_warning(
+            job_id,
+            "analysis",
+            f"[analysis] Janela {item['window']}/{item['windows_total']} "
+            f"(blocos {item['first_block']}..{item['last_block']}) falhou e foi ignorada: "
+            f"{item['reason']} Diagnóstico: {item['diagnostic']}",
+        )
 
 
 async def analyze_job(
@@ -877,6 +935,7 @@ async def analyze_job(
         message="[analysis] Executando mineração de arco narrativo em 3 fases...",
     )
 
+    mining_stats: dict[str, Any] = {}
     try:
         tool_cfgs = c.load_active_tool_configs()
         llm_cfg = dict(tool_cfgs.get("llm") or {})
@@ -908,10 +967,9 @@ async def analyze_job(
 
         source_info = c.jobs.load_source_info(job_id) or {}
         chapters = source_info.get("chapters") if isinstance(source_info, dict) else None
-        video_title = (
-            str(source_info.get("title") or job.video_name or "").strip()
-            if isinstance(source_info, dict)
-            else (job.video_name or "")
+        video_title = _usable_video_title(
+            (source_info.get("title") or job.video_name) if isinstance(source_info, dict) else job.video_name,
+            job_id,
         )
 
         words = c.jobs.load_transcription_words(job_id)
@@ -937,7 +995,6 @@ async def analyze_job(
                     )
                     break
 
-        mining_stats: dict[str, int] = {}
 
         async def _run_mining() -> tuple[list[Cut], str]:
             return await mine_narrative_cuts(
@@ -969,6 +1026,7 @@ async def analyze_job(
         else:
             cuts, raw_response = await _run_mining()
 
+        _log_failed_windows(c, job_id, mining_stats)
         discarded = mining_stats.get("discarded_duration", 0)
         if discarded:
             c.runtime.log_warning(
@@ -997,6 +1055,7 @@ async def analyze_job(
     except OperationCancelledError:
         raise
     except Exception as exc:
+        _log_failed_windows(c, job_id, mining_stats)
         c.runtime.log_exception(
             job_id,
             "analysis",

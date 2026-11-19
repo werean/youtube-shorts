@@ -1067,3 +1067,22 @@ async def test_rendering_service_runs_cuts_concurrently_and_preserves_order(
     assert len(urls) == 2
     assert "00_01-00_04" in urls[0]
     assert "00_06-00_09" in urls[1]
+
+
+def test_all_task_logs_keep_arrival_order_across_stages(container: ServiceContainer) -> None:
+    """GET logs/all returns lines in the order they were written, not grouped by stage."""
+    job = container.jobs.create_job("https://youtube.com/watch?v=chrono001")
+    rt = container.runtime
+    rt.append_task_log(job.job_id, "render", "r-first")
+    rt.append_task_log(job.job_id, "ingest", "i-second")
+    rt.append_task_logs(job.job_id, "analysis", ["a-third", "a-fourth"])
+    rt.append_task_log(job.job_id, "orchestrator", "o-fifth")
+
+    assert rt.get_task_logs(job.job_id, "all") == [
+        "r-first",
+        "i-second",
+        "a-third",
+        "a-fourth",
+        "o-fifth",
+    ]
+    assert rt.get_task_logs(job.job_id, "ingest") == ["i-second"]

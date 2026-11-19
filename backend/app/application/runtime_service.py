@@ -267,11 +267,24 @@ class OperationRuntimeService:
             self._logs[job_id] = store
         return store
 
+    def _append_chronological(
+        self, store: dict[str, collections.deque[str]], task: str, lines: list[str]
+    ) -> None:
+        """Mirror every line into the per-job "all" buffer so the merged log keeps arrival order."""
+        if task == "all":
+            return
+        merged = store.get("all")
+        if merged is None:
+            merged = collections.deque(maxlen=self.max_log_lines)
+            store["all"] = merged
+        merged.extend(lines)
+
     def _append_ring_buffer_line(self, job_id: str, task: str, line: str) -> None:
         store = self._get_job_log_store(job_id)
         if task not in store:
             store[task] = collections.deque(maxlen=self.max_log_lines)
         store[task].append(line)
+        self._append_chronological(store, task, [line])
         self._cleared_tasks.discard((job_id, task))
         self._cleared_tasks.discard((job_id, "all"))
 
@@ -282,6 +295,7 @@ class OperationRuntimeService:
         if task not in store:
             store[task] = collections.deque(maxlen=self.max_log_lines)
         store[task].extend(lines)
+        self._append_chronological(store, task, lines)
         self._cleared_tasks.discard((job_id, task))
         self._cleared_tasks.discard((job_id, "all"))
 
@@ -378,6 +392,9 @@ class OperationRuntimeService:
         if task == "all":
             if job_id in self._logs:
                 store = self._logs[job_id]
+                chronological = store.get("all")
+                if chronological:
+                    return list(chronological)
                 ordered_keys = [
                     "orchestrator",
                     "batch",
@@ -792,6 +809,7 @@ class ServiceContainer:
         # Pluggable OS / external adapters (overridable in tests)
         self.folder_picker: Callable[[], dict[str, Any]] | None = None
         self.folder_opener: Callable[[Path, list[Path] | None], dict[str, Any]] | None = None
+        self.dir_opener: Callable[[Path, list[Path] | None], dict[str, Any]] | None = None
         self.llm_http_fetcher: Callable[[str, str, dict[str, Any] | None], Awaitable[tuple[int, Any]]] | None = None
         self.ollama_command_runner: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None
         self.lms_command_runner: LmsCommandRunner | None = None

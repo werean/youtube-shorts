@@ -19,12 +19,23 @@ from app.core.settings import (
     get_video_dir,
     load_settings,
 )
+from app.infrastructure.logging.stage_logger import get_stage_logger
 from app.models.domain import Job, JobStatus
 from app.models.schemas import VideoRecord
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".flv"}
+
+
+def attach_last_error(job_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Additive optional `last_error {stage, message, at}` on a serialized job, only while the job is in ERROR."""
+    if not isinstance(job_payload, dict) or str(job_payload.get("status")) != JobStatus.ERROR.value:
+        return job_payload
+    last_error = get_stage_logger().read_last_error(str(job_payload.get("job_id") or ""))
+    if last_error:
+        job_payload["last_error"] = last_error
+    return job_payload
 
 
 def _is_video_file(file_name: str) -> bool:
@@ -107,7 +118,10 @@ def _list_videos_from_dir(root_dir: Path, archived: bool) -> list[dict[str, Any]
         )
 
     records.sort(key=lambda r: (r.job.created_at if r.job else ""))
-    return [r.model_dump() for r in records]
+    dumped = [r.model_dump() for r in records]
+    for rec in dumped:
+        attach_last_error(rec.get("job"))
+    return dumped
 
 
 def _is_subpath(parent_dir: Path, child_path: Path) -> bool:
@@ -144,6 +158,38 @@ def default_open_folder_for_file(
 
     try:
         subprocess.Popen(["explorer.exe", "/select,", str(resolved)])
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "detail": str(exc) or "Failed to open folder", "status_code": 500}
+
+
+def default_open_directory(
+    dir_path: Path,
+    allowed_roots: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Open a folder (no file selected) in the OS file explorer; same result shape as the file helper."""
+    if not dir_path or not str(dir_path).strip():
+        return {"ok": False, "detail": "Invalid path", "status_code": 400}
+
+    resolved = dir_path.resolve()
+    if not resolved.exists():
+        return {"ok": False, "detail": "Folder not found", "status_code": 404}
+    if not resolved.is_dir():
+        return {"ok": False, "detail": "Path is not a folder", "status_code": 400}
+
+    if allowed_roots:
+        if not any(_is_subpath(root, resolved) for root in allowed_roots):
+            return {"ok": False, "detail": "Path not allowed", "status_code": 400}
+
+    if os.name != "nt":
+        return {
+            "ok": False,
+            "detail": "Open Folder is only supported on Windows",
+            "status_code": 500,
+        }
+
+    try:
+        subprocess.Popen(["explorer.exe", str(resolved)])
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "detail": str(exc) or "Failed to open folder", "status_code": 500}

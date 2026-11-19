@@ -213,6 +213,13 @@ class RenderingService:
         except WatermarkMissingError as exc:
             # Fixed message in the render log and in the job state (the image vanished after the route check).
             c.runtime.append_task_log(job_id, "render", f"[rendering] ✗ Error: {exc.detail}")
+            c.runtime.log_exception(
+                job_id,
+                "render",
+                exc,
+                message="[rendering] Marca d'água ausente",
+                include_env_diagnostics=False,
+            )
             c.jobs.update_job_status(job_id, JobStatus.ERROR)
             c.runtime.publish_state_change(job_id, JobStatus.ERROR, exc.detail)
             raise

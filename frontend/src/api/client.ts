@@ -23,7 +23,11 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
             message?: unknown;
             error?: unknown;
           };
-          detail = String(parsed.detail || parsed.message || parsed.error || "").trim();
+          const rawDetail =
+            parsed.detail && typeof parsed.detail === "object"
+              ? (parsed.detail as { detail?: unknown }).detail
+              : parsed.detail;
+          detail = String(rawDetail || parsed.message || parsed.error || "").trim();
         } catch {
           detail = text.trim();
         }

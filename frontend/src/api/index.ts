@@ -50,7 +50,7 @@ export {
 export { cancelJob, cancelTranscription, cancelRendering } from "./cancel";
 
 // Logs API
-export { getJobLogs } from "./logs";
+export { getJobLogs, openJobLogsFolder } from "./logs";
 
 // Batch Pipeline API
 export {

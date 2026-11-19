@@ -311,7 +311,19 @@ class JobLifecycleService:
         else:
             job.updated_at = utc_now_iso()
         self.save_job(job)
+        self._clear_last_error_if_recovered(job)
         return job
+
+    @staticmethod
+    def _clear_last_error_if_recovered(job: Job) -> None:
+        """`last_error` lives only while the job is in ERROR: any other status (new run) drops the sidecar."""
+        try:
+            if str(job.status) != JobStatus.ERROR.value:
+                from app.infrastructure.logging.stage_logger import get_stage_logger
+
+                get_stage_logger().clear_last_error(job.job_id)
+        except Exception:
+            pass
 
     def update_job_status(self, job_id: str, status: JobStatus | str) -> Job:
         next_status = JobStatus(status)
@@ -319,6 +331,7 @@ class JobLifecycleService:
         job.status = next_status
         job.updated_at = utc_now_iso()
         self.save_job(job)
+        self._clear_last_error_if_recovered(job)
         return job
 
     # --- Path helpers ---

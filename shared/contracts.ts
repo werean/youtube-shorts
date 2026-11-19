@@ -21,6 +21,16 @@ export interface Job {
   source_file_name?: string;
   video_name?: string;
   video_duration_seconds?: number;
+  /** Última falha de etapa; só presente enquanto `status === "ERROR"` (GET /jobs/:id, GET /videos). */
+  last_error?: JobLastError;
+}
+
+export interface JobLastError {
+  /** Etapa que falhou: ingest, transcription, blocks, topics, analysis, render, orchestrator, batch. */
+  stage: string;
+  message: string;
+  /** ISO-8601 UTC. */
+  at: string;
 }
 
 export interface NarrativeArc {
@@ -58,6 +68,22 @@ export interface VideoRecord {
   hasAnalysis?: boolean;
   attempts_count?: number;
   is_processing?: boolean;
+}
+
+export type JobLogTask =
+  | "ingest"
+  | "transcription"
+  | "blocks"
+  | "topics"
+  | "analysis"
+  | "render"
+  | "orchestrator"
+  | "batch"
+  | "all";
+
+export interface JobLogsResponse {
+  task: JobLogTask;
+  logs: string[];
 }
 
 export interface BatchPipelineOptions {

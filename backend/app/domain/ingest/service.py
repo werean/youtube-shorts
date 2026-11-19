@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import inspect
+import math
 import shutil
 import uuid
 from pathlib import Path
@@ -64,6 +66,50 @@ def normalize_chapters(raw_chapters: Any) -> list[ChapterAnchor]:
     return anchors
 
 
+_UNSERIALISABLE: Any = object()
+_JSON_SAFE_MAX_DEPTH = 24
+
+
+def _json_safe(value: Any, _depth: int = 0) -> Any:
+    """Recursively convert `value` into plain JSON types; return `_UNSERIALISABLE` for what cannot be represented.
+
+    Mappings/sequences/sets are rebuilt with unrepresentable members dropped, bytes are decoded, datetimes become
+    ISO strings, non-finite floats become None. Any other object (e.g. a yt-dlp postprocessor) is dropped.
+    """
+    if _depth > _JSON_SAFE_MAX_DEPTH:
+        return _UNSERIALISABLE
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, (str, int, float, bool)) or isinstance(key, float) and not math.isfinite(key):
+                continue
+            safe_item = _json_safe(item, _depth + 1)
+            if safe_item is not _UNSERIALISABLE:
+                out[str(key)] = safe_item
+        return out
+    if isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+        if isinstance(value, (set, frozenset)):
+            items.sort(key=repr)
+        result: list[Any] = []
+        for item in items:
+            safe_item = _json_safe(item, _depth + 1)
+            if safe_item is not _UNSERIALISABLE:
+                result.append(safe_item)
+        return result
+    return _UNSERIALISABLE
+
+
 def build_source_video_info(
     info_dict: dict[str, Any],
     *,
@@ -81,13 +127,17 @@ def build_source_video_info(
         except (TypeError, ValueError):
             duration_val = None
 
-    # Keep a clean JSON-serializable snapshot of info_dict without internal hooks/streams
+    # Keep a clean JSON-serializable snapshot of info_dict without internal hooks/streams. The filter is applied
+    # recursively: yt-dlp nests live objects (e.g. requested_downloads[].__postprocessors) inside lists/dicts.
     serializable_raw: dict[str, Any] = {}
     for k, v in info_dict.items():
+        if not isinstance(k, str):
+            continue
         if k.startswith("_") or k in ("formats", "thumbnails", "automatic_captions", "subtitles", "requested_formats"):
             continue
-        if isinstance(v, (str, int, float, bool, list, dict)) or v is None:
-            serializable_raw[k] = v
+        safe_value = _json_safe(v)
+        if safe_value is not _UNSERIALISABLE:
+            serializable_raw[k] = safe_value
 
     model = SourceVideoInfo(
         id=str(info_dict.get("id")) if info_dict.get("id") is not None else None,

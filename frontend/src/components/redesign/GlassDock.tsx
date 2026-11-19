@@ -13,6 +13,7 @@ import {
   Plus,
   SkipBack,
   SkipForward,
+  SpinnerGap,
   SpeakerHigh,
   SpeakerSlash,
   Trash,
@@ -20,13 +21,13 @@ import {
 } from "@phosphor-icons/react";
 import type { Cut, JobStatus } from "../../types";
 import {
-  CUT_PRESETS,
+  formatLastError,
   formatShortTime,
   getHumanErrorMessage,
   getHumanJobStatusLabel,
   isJobProcessingStatus,
-  type CutPreset,
 } from "./presets";
+import { TerminalPanel } from "./TerminalPanel";
 
 export interface DockCutItem extends Cut {
   renderedFileName?: string | null;
@@ -50,13 +51,15 @@ interface GlassDockProps {
   volume: number;
   muted: boolean;
   videoSrc: string | null;
+  activeJobId?: string | null;
   jobStatus?: JobStatus | null;
   jobError?: string | null;
+  /** `job.last_error` (etapa + mensagem curta da última falha), quando o backend informa. */
+  jobLastError?: { stage?: string | null; message?: string | null } | null;
   isActivelyProcessing?: boolean;
   cuts: DockCutItem[];
   selectedCutId: string | null;
   showDiscarded: boolean;
-  selectedPreset: CutPreset["id"];
   reviewBeforeRender: boolean;
   waitingApproval: boolean;
   transcriptOpen?: boolean;
@@ -87,12 +90,13 @@ interface GlassDockProps {
   onOpenRenderedFolder: (fileName: string) => void;
   onOpenVideoFolder?: () => void;
   onDeleteRenderedCut: (fileName: string) => void;
-  onChangePreset: (preset: CutPreset["id"]) => void;
   onToggleReviewBefore: () => void;
   onGenerateCuts: () => void;
   onContinueApproval: () => void;
   onCancelProcessing: () => void;
   onRetryError: () => void;
+  /** Abre a pasta de logs do vídeo atual no computador. */
+  onOpenLogs?: () => void;
 }
 
 export function GlassDock({
@@ -111,13 +115,14 @@ export function GlassDock({
   volume,
   muted,
   videoSrc,
+  activeJobId = null,
   jobStatus,
   jobError,
+  jobLastError,
   isActivelyProcessing,
   cuts,
   selectedCutId,
   showDiscarded,
-  selectedPreset,
   reviewBeforeRender,
   waitingApproval,
   cutResumePositions,
@@ -146,12 +151,12 @@ export function GlassDock({
   onOpenRenderedFolder,
   onOpenVideoFolder,
   onDeleteRenderedCut: _onDeleteRenderedCut,
-  onChangePreset,
   onToggleReviewBefore,
   onGenerateCuts,
   onContinueApproval,
   onCancelProcessing,
   onRetryError,
+  onOpenLogs,
 }: GlassDockProps) {
   const scrubberRef = useRef<HTMLDivElement>(null);
   const playbackRowRef = useRef<HTMLDivElement>(null);
@@ -162,8 +167,7 @@ export function GlassDock({
     width: number;
     rowWidth: number;
   } | null>(null);
-  const [presetMenuOpen, setPresetMenuOpen] = useState(false);
-  const presetMenuRef = useRef<HTMLDivElement | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [cutMenuState, setCutMenuState] = useState<{
     cutId: string;
     top?: number;
@@ -331,7 +335,7 @@ export function GlassDock({
       setHoveredCutId(null);
       setFocusedCutId(null);
       setCutMenuState(null);
-      setPresetMenuOpen(false);
+      setTerminalOpen(false);
     }
   }, [collapsed]);
 
@@ -340,28 +344,6 @@ export function GlassDock({
       setSpeedMenuState(null);
     }
   }, [effectiveMinimizedHidden]);
-
-  useEffect(() => {
-    if (!presetMenuOpen) return;
-    const handlePointerDown = (e: PointerEvent) => {
-      const target = e.target as Node | null;
-      if (presetMenuRef.current?.contains(target)) {
-        return;
-      }
-      setPresetMenuOpen(false);
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPresetMenuOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [presetMenuOpen]);
 
   useEffect(() => {
     if (!cutMenuState) {
@@ -771,7 +753,7 @@ export function GlassDock({
     onSeek(ratio * duration);
   };
 
-  const activePreset = CUT_PRESETS.find((p) => p.id === selectedPreset) || CUT_PRESETS[0];
+  const lastErrorView = useMemo(() => formatLastError(jobLastError), [jobLastError]);
   const isProcessing =
     isActivelyProcessing !== undefined ? isActivelyProcessing : isJobProcessingStatus(jobStatus);
   const statusLabel = getHumanJobStatusLabel(jobStatus);
@@ -1077,11 +1059,14 @@ export function GlassDock({
               {/* Cartões posicionados pelo tempo real */}
               <div className="relative h-[136px] mt-0.5">
                 {positionedCuts.length === 0 ? (
-                  <div className="h-full flex items-center text-xs text-text-3">
-                    {isProcessing
-                      ? statusLabel || "Processando…"
-                      : "Nenhum corte gerado ainda. Escolha um preset e clique em Gerar cortes."}
-                  </div>
+                  isProcessing || jobStatus === "ERROR" || jobError ? null : (
+                    <div
+                      className="sticky left-0 h-full flex items-center justify-center text-center text-xs text-text-3"
+                      style={{ width: scrubberMetrics && scrubberMetrics.width >= 380 ? `${scrubberMetrics.width}px` : "100%" }}
+                    >
+                      Nenhum corte gerado ainda. Clique em Gerar cortes.
+                    </div>
+                  )
                 ) : (
                   positionedCuts.map(({ cut, leftPx, cardWidth, dotOffsetPx }) => {
                     const isSelected = cut.cut_id === selectedCutId;
@@ -1453,7 +1438,12 @@ export function GlassDock({
           >
             {!selectedCut && (jobStatus === "ERROR" || jobError) ? (
               <div className="inline-flex items-center gap-2 px-3 h-7 rounded-pill bg-[var(--danger-bg)] border border-danger/30 text-xs text-danger truncate">
-                <span className="truncate">{getHumanErrorMessage(jobError)}</span>
+                <span
+                  className="truncate"
+                  title={lastErrorView?.full ?? getHumanErrorMessage(jobError)}
+                >
+                  {lastErrorView?.text ?? getHumanErrorMessage(jobError)}
+                </span>
                 <button
                   type="button"
                   onClick={onRetryError}
@@ -1462,9 +1452,26 @@ export function GlassDock({
                   <ArrowCounterClockwise size={12} />
                   <span>Tentar de novo</span>
                 </button>
+                {onOpenLogs && (
+                  <button
+                    type="button"
+                    onClick={onOpenLogs}
+                    title="Abrir a pasta com os logs deste erro"
+                    className="inline-flex items-center gap-1 font-medium underline shrink-0 whitespace-nowrap"
+                  >
+                    <FolderOpen size={12} />
+                    <span>Exibir logs</span>
+                  </button>
+                )}
               </div>
             ) : !selectedCut && isProcessing && statusLabel ? (
               <div className="inline-flex items-center gap-2 text-sm text-text-2 min-w-0">
+                <SpinnerGap
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-text-1 animate-spin"
+                  aria-hidden="true"
+                />
                 <span className="truncate">{statusLabel}</span>
                 <button
                   type="button"
@@ -1524,49 +1531,35 @@ export function GlassDock({
             )}
           </div>
 
-          {/* Direita: Preset + Revisar antes + Gerar cortes */}
+          {/* Direita: Terminal + Revisar antes + Gerar cortes */}
           <div
             className={[
               "flex items-center shrink-0",
               isNarrowDock ? "gap-1.5" : "gap-2.5",
             ].join(" ")}
           >
-            <div ref={presetMenuRef} className="relative shrink-0">
+            <div className="relative shrink-0">
               <button
                 type="button"
-                onClick={() => setPresetMenuOpen((o) => !o)}
-                aria-expanded={presetMenuOpen}
+                onClick={() => setTerminalOpen((o) => !o)}
+                aria-expanded={terminalOpen}
                 className={[
-                  "h-9 rounded-pill inline-flex items-center bg-white/[0.06] border border-line text-base text-text-1 hover:bg-glass-hover transition-colors duration-fast whitespace-nowrap shrink-0",
-                  isNarrowDock ? "px-2.5 gap-1.5" : "px-3.5 gap-2",
+                  "h-9 rounded-pill inline-flex items-center border text-base text-text-1 transition-colors duration-fast whitespace-nowrap shrink-0",
+                  terminalOpen
+                    ? "bg-glass-active border-line"
+                    : "bg-white/[0.06] border-line hover:bg-glass-hover",
+                  isNarrowDock ? "px-2.5" : "px-3.5",
                 ].join(" ")}
               >
-                <span>{activePreset.label}</span>
-                <CaretDown size={13} weight="regular" className="text-text-2" />
+                {terminalOpen ? "Ocultar terminal" : "Exibir terminal"}
               </button>
 
-              {presetMenuOpen && (
-                <div className="absolute bottom-[calc(100%+8px)] right-0 z-popover w-56 rounded-card glass--strong p-1.5 shadow-pop">
-                  {CUT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => {
-                        onChangePreset(preset.id);
-                        setPresetMenuOpen(false);
-                      }}
-                      className={[
-                        "w-full flex flex-col items-start px-3 py-2 rounded-thumb text-left transition-colors duration-fast",
-                        preset.id === selectedPreset
-                          ? "bg-glass-active text-text-1"
-                          : "text-text-2 hover:bg-glass-hover hover:text-text-1",
-                      ].join(" ")}
-                    >
-                      <span className="text-sm font-medium text-text-1">{preset.label}</span>
-                      <span className="text-xs text-text-3">{preset.description}</span>
-                    </button>
-                  ))}
-                </div>
+              {terminalOpen && (
+                <TerminalPanel
+                  jobId={activeJobId}
+                  isProcessing={isProcessing}
+                  onClose={() => setTerminalOpen(false)}
+                />
               )}
             </div>
 

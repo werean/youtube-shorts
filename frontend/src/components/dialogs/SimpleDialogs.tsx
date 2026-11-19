@@ -19,6 +19,9 @@ interface SimpleDialogsProps {
   // Batch Completion Notification
   showBatchCompletionNotification: boolean;
   batchCompletionMessage: string;
+  /** Jobs que falharam no lote: cada um ganha uma ação "Exibir logs". */
+  batchFailedJobs?: { jobId: string; label: string }[];
+  onOpenJobLogs?: (jobId: string) => void;
   onBatchCompletionClose: () => void;
 }
 
@@ -35,6 +38,8 @@ export function SimpleDialogs({
   onMoveUploadDecision,
   showBatchCompletionNotification,
   batchCompletionMessage,
+  batchFailedJobs = [],
+  onOpenJobLogs,
   onBatchCompletionClose,
 }: SimpleDialogsProps) {
   return (
@@ -113,7 +118,18 @@ export function SimpleDialogs({
           onClose={onBatchCompletionClose}
           size="sm"
           footer={
-            <div className="flex justify-end w-full">
+            <div className="flex flex-wrap justify-end gap-2 w-full">
+              {batchFailedJobs.map(({ jobId, label }) => (
+                <GlassButton
+                  key={jobId}
+                  variant="glass"
+                  size="sm"
+                  onClick={() => onOpenJobLogs?.(jobId)}
+                  title="Abrir a pasta com os logs deste erro"
+                >
+                  {batchFailedJobs.length > 1 ? `Exibir logs: ${label}` : "Exibir logs"}
+                </GlassButton>
+              ))}
               <GlassButton
                 variant="primary"
                 onClick={onBatchCompletionClose}

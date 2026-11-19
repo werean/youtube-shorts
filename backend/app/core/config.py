@@ -72,11 +72,26 @@ Instructions:
 
 Return ONLY valid JSON matching the schema."""
 
+# Output budget of one v1 miner call (one transcript window). A cut in CUTS_RESPONSE_JSON_SCHEMA (16 required
+# fields, several of them near-verbatim transcript) costs ~350-450 output tokens (measured: 2139 tokens for a
+# window that returned 5-6 cuts). 6 cuts x 450 = 2700 tokens, so a 3072-token cap leaves 372 tokens (~14%) of margin.
+# The cap cannot just be raised freely: the adapter refuses a request when
+# ceil(chars/3) + 64 + len("/no_think") + max_tokens > context (8192). For the largest v1 window (8000 chars of
+# transcript + system prompt 2076 chars + header). Measured with the real builders: typical header (349 chars)
+# -> 3536 estimated prompt tokens, 3536 + 3072 = 6608 (repair retry: 7087); worst-case header (20 chapters of 60
+# chars + 20 topics + 100-char title = 3446 chars) -> 4569, 4569 + 3072 = 7641 (repair retry, +~1.5k chars: 8120).
+# 8120 <= 8192, so the guard never trips, but the worst case has only ~70 tokens of room: do not raise either
+# value without re-running test_fix_truncation_and_ingest.py, which recomputes all of this from the real builders.
+MAX_CUTS_PER_WINDOW: int = 6
+LLM_MAX_TOKENS_MINER_VALUE: int = 3072
+
 CUTS_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "cuts": {
             "type": "array",
+            # Bounds the output so it fits LLM_MAX_TOKENS_MINER (see the arithmetic next to that constant).
+            "maxItems": MAX_CUTS_PER_WINDOW,
             "items": {
                 "type": "object",
                 "properties": {
@@ -139,7 +154,7 @@ class AppConfig:
     OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
     OLLAMA_API_KEY: str = os.environ.get("OLLAMA_API_KEY", "")
     OLLAMA_TIMEOUT_SECONDS: int = 180
-    LLM_MAX_TOKENS_MINER: int = 2560
+    LLM_MAX_TOKENS_MINER: int = LLM_MAX_TOKENS_MINER_VALUE
     LLM_MAX_TOKENS_LOOKAROUND: int = 1280
     EMBEDDING_MODEL: str = "nomic-embed-text"
 

@@ -211,7 +211,7 @@ data: {"job_id":"7ca821c3e9594946b2f3131309baaac2","status":"TRANSCRIBING","task
 ```
 
 #### `GET /jobs/:job_id/logs/:task`
-Retorna as linhas de log em tempo real da tarefa (`task` $\in$ `["ingest", "transcription", "render"]`).
+Retorna as linhas de log da tarefa (`task` $\in$ `["ingest", "transcription", "blocks", "topics", "analysis", "render", "orchestrator", "batch", "all"]`). `all` devolve o log de todas as etapas do job em ordem cronológica (usado pelo painel "Exibir terminal"); após reinício do backend cai para o arquivo `pipeline.log` em disco.
 - **Response `200 OK`:**
 ```json
 {
@@ -223,6 +223,13 @@ Retorna as linhas de log em tempo real da tarefa (`task` $\in$ `["ingest", "tran
   ]
 }
 ```
+
+#### `POST /jobs/:job_id/logs/open-folder`
+Abre `{media.base_dir}/logs/<job_id>/` no explorador de arquivos do sistema operacional (cria a pasta se ainda não existir). Quando `erro.log` existe, a pasta abre com ele selecionado (`explorer /select,`). Protegida por `require_local_ui` (só pode ser chamada deste computador: `403` `{ "detail": { "detail": "...", "code": "local_only" } }` caso contrário). O `job_id` deve ser um token simples (`[A-Za-z0-9_-]{1,128}`) e a pasta resolvida precisa ficar dentro de `{media.base_dir}/logs`.
+- **Response `200 OK`:** `{ "ok": true }`.
+- **Response `404 Not Found`:** `{ "detail": "Job not found" }`; **`400`:** `{ "detail": "Invalid job id" }`.
+
+**Registro de falhas (`erro.log` e `last_error`).** Toda falha de etapa (`ingest`, `transcription`, `blocks`, `topics`, `analysis`, `render`, `orchestrator`, `batch`) acrescenta uma entrada em `{media.base_dir}/logs/<job_id>/erro.log` (timestamp UTC, etapa, mensagem curta, tipo, diagnóstico quando a exceção oferece `diagnostic()`, traceback completo; entradas separadas por uma linha de `=`; a mais recente no fim) e reescreve atomicamente o sidecar `last_error.json`. Cancelamento pelo usuário não é erro e não gera entrada; a mesma falha reportada pela etapa e pelo orquestrador gera uma única entrada. `GET /jobs/:job_id` e `GET /videos` devolvem, enquanto `job.status == "ERROR"`, o campo aditivo opcional `last_error: { "stage": "ingest", "message": "...", "at": "2026-..Z" }` (nunca persistido em `job.json`); o sidecar é apagado quando o job sai de `ERROR` (nova execução), o `erro.log` permanece como histórico.
 
 ---
 

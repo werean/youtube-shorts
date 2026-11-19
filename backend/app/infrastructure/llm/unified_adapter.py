@@ -99,13 +99,87 @@ class LocalLLMUnavailableError(RuntimeError):
         }
 
 
+_RAW_TEXT_LOG_EDGE_CHARS = 300
+
+
+def describe_raw_text(raw_text: str, edge_chars: int = _RAW_TEXT_LOG_EDGE_CHARS) -> str:
+    """Bounded view of a raw LLM text: its head and its tail (a cut-off JSON shows the problem at the tail)."""
+    text = str(raw_text or "")
+    if len(text) <= 2 * edge_chars:
+        return repr(text)
+    return f"{text[:edge_chars]!r} ... [{len(text) - 2 * edge_chars} chars omitted] ... {text[-edge_chars:]!r}"
+
+
+def _format_token_numbers(
+    finish_reason: str | None,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    max_tokens: int | None,
+) -> str:
+    parts = [
+        f"finish_reason={finish_reason if finish_reason else 'n/a'}",
+        f"prompt_tokens={prompt_tokens if prompt_tokens is not None else 'n/a'}",
+        f"completion_tokens={completion_tokens if completion_tokens is not None else 'n/a'}",
+        f"max_tokens={max_tokens if max_tokens is not None else 'n/a'}",
+    ]
+    return ", ".join(parts)
+
+
 class InvalidLLMJsonResponseError(ValueError):
-    """Raised when the LLM returns a response that cannot be parsed as JSON."""
+    """Raised when the LLM returns a response that cannot be parsed as JSON.
+
+    The diagnostic attributes are filled by the adapter when the provider reports them.
+    """
 
     def __init__(self, raw_text: str, message: str | None = None) -> None:
         msg = message or f"LLM response is not valid JSON. Raw: {raw_text[:300]}"
         super().__init__(msg)
         self.raw_text = raw_text
+        self.finish_reason: str | None = None
+        self.prompt_tokens: int | None = None
+        self.completion_tokens: int | None = None
+        self.max_tokens: int | None = None
+
+    def diagnostic(self) -> str:
+        return (
+            f"{_format_token_numbers(self.finish_reason, self.prompt_tokens, self.completion_tokens, self.max_tokens)}; "
+            f"raw={describe_raw_text(self.raw_text)}"
+        )
+
+
+class LLMOutputTruncatedError(RuntimeError):
+    """Raised when the provider stopped because the output token limit was reached and the JSON is cut off.
+
+    Deliberately NOT an InvalidLLMJsonResponseError: retrying with the same limit, temperature and seed would be
+    truncated identically, so it must not trigger the JSON-repair retry.
+    """
+
+    def __init__(
+        self,
+        *,
+        raw_text: str,
+        finish_reason: str,
+        max_tokens: int,
+        completion_tokens: int | None = None,
+        prompt_tokens: int | None = None,
+    ) -> None:
+        used = f"{completion_tokens} tokens gerados" if completion_tokens is not None else "tokens gerados não informados"
+        super().__init__(
+            f"A resposta do LLM foi cortada pelo limite de saída (max_tokens={max_tokens}; {used}), "
+            "então o JSON ficou incompleto. Reduza o tamanho da janela ou o número de itens pedidos, "
+            "ou aumente o limite de saída."
+        )
+        self.raw_text = raw_text
+        self.finish_reason = finish_reason
+        self.max_tokens = max_tokens
+        self.completion_tokens = completion_tokens
+        self.prompt_tokens = prompt_tokens
+
+    def diagnostic(self) -> str:
+        return (
+            f"{_format_token_numbers(self.finish_reason, self.prompt_tokens, self.completion_tokens, self.max_tokens)}; "
+            f"raw={describe_raw_text(self.raw_text)}"
+        )
 
 
 class LLMContextOverflowError(RuntimeError):
@@ -201,6 +275,56 @@ def _strip_reasoning_tokens(text: str) -> str:
         flags=re.IGNORECASE,
     )
     return cleaned.strip()
+
+
+def _strict_json_payload(text: str) -> dict[str, Any] | list[Any] | None:
+    """Parse the WHOLE text (after reasoning/fence stripping) as JSON, with no substring salvage.
+
+    Used only for responses the provider says were cut by the token limit: salvaging an inner object or array of
+    a truncated document would silently drop the missing part.
+    """
+    candidate = _strip_reasoning_tokens(str(text or ""))
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", candidate, flags=re.IGNORECASE)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _opt_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_stop_info(payload: Any) -> tuple[str | None, int | None, int | None]:
+    """(finish_reason, prompt_tokens, completion_tokens) from an LM Studio/OpenAI or Ollama response."""
+    if not isinstance(payload, dict):
+        return None, None, None
+    finish: Any = None
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        finish = choices[0].get("finish_reason")
+    if not finish:
+        finish = payload.get("done_reason")
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        prompt_tokens = _opt_int(usage.get("prompt_tokens"))
+        completion_tokens = _opt_int(usage.get("completion_tokens"))
+    if prompt_tokens is None:
+        prompt_tokens = _opt_int(payload.get("prompt_eval_count"))
+    if completion_tokens is None:
+        completion_tokens = _opt_int(payload.get("eval_count"))
+    finish_text = str(finish).strip().lower() if isinstance(finish, str) and finish.strip() else None
+    return finish_text, prompt_tokens, completion_tokens
 
 
 def _extract_json_payload(raw_content: Any) -> tuple[dict[str, Any] | list[Any], str]:
@@ -933,16 +1057,52 @@ class UnifiedLocalLLMAdapter:
         elif isinstance(payload, (list, str)):
             raw_content = payload
 
+        finish_reason, prompt_tokens, completion_tokens = _read_stop_info(payload)
+
+        def _annotate(err: InvalidLLMJsonResponseError) -> InvalidLLMJsonResponseError:
+            err.finish_reason = finish_reason
+            err.prompt_tokens = prompt_tokens
+            err.completion_tokens = completion_tokens
+            err.max_tokens = effective_max_tokens
+            return err
+
+        def _check_truncation(text_value: Any) -> dict[str, Any] | list[Any] | None:
+            """Stop reason "length": return the payload if the document is nevertheless complete, else raise."""
+            if finish_reason != "length" or isinstance(text_value, (dict, list)):
+                return None
+            text_str = str(text_value)
+            complete = _strict_json_payload(text_str)
+            if complete is not None:
+                return complete
+            raise LLMOutputTruncatedError(
+                raw_text=text_str,
+                finish_reason=finish_reason,
+                max_tokens=effective_max_tokens,
+                completion_tokens=completion_tokens,
+                prompt_tokens=prompt_tokens,
+            )
+
         if raw_content is not None:
-            return _extract_json_payload(raw_content)
+            complete = _check_truncation(raw_content)
+            if complete is not None:
+                return complete, str(raw_content).strip()
+            try:
+                return _extract_json_payload(raw_content)
+            except InvalidLLMJsonResponseError as exc:
+                raise _annotate(exc)
 
         if reasoning_fallback is not None:
+            complete = _check_truncation(reasoning_fallback)
+            if complete is not None:
+                return complete, str(reasoning_fallback).strip()
             try:
                 return _extract_json_payload(reasoning_fallback)
             except InvalidLLMJsonResponseError as exc:
-                raise InvalidLLMJsonResponseError(
-                    str(reasoning_fallback),
-                    "LLM returned empty content and reasoning_content did not contain valid JSON",
+                raise _annotate(
+                    InvalidLLMJsonResponseError(
+                        str(reasoning_fallback),
+                        "LLM returned empty content and reasoning_content did not contain valid JSON",
+                    )
                 ) from exc
 
         raise LLMEmptyResponseError(
@@ -998,8 +1158,9 @@ class UnifiedLocalLLMAdapter:
                 cancel_token.raise_if_cancelled()
 
             logger.warning(
-                "LLM returned invalid JSON (%s); attempting 1 automatic JSON-repair retry.",
+                "LLM returned invalid JSON (%s); attempting 1 automatic JSON-repair retry. Diagnostic: %s",
                 exc,
+                exc.diagnostic(),
             )
             repair_user_prompt = (
                 f"{user_prompt}\n\n"

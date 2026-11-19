@@ -36,6 +36,7 @@ export function useBatchPipelineWorkflow({
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [showBatchCompletionNotification, setShowBatchCompletionNotification] = useState(false);
   const [batchCompletionMessage, setBatchCompletionMessage] = useState("");
+  const [batchFailedJobIds, setBatchFailedJobIds] = useState<string[]>([]);
   const [batchWaitingForApproval, setBatchWaitingForApproval] = useState(false);
   const [batchPendingCuts, setBatchPendingCuts] = useState<any[]>([]);
   const batchPollRef = useRef<number | null>(null);
@@ -103,7 +104,13 @@ export function useBatchPipelineWorkflow({
           setIsBatchProcessing(false);
           setBatchWaitingForApproval(false);
 
-          const completionMessage = `Pipeline em Lote Concluído!\n\nSucesso: ${progress.completed_jobs.length}\nFalhas: ${progress.failed_jobs.length}`;
+          const failureDetails =
+            progress.failed_jobs.length > 0
+              ? `\n\nMotivo da falha:\n${progress.failed_jobs
+                  .map((f) => `- ${f.job_id}: ${f.error || "motivo não informado"}`)
+                  .join("\n")}\n\nAbra "Exibir terminal" para ver os logs completos.`
+              : "";
+          const completionMessage = `Pipeline em Lote Concluído!\n\nSucesso: ${progress.completed_jobs.length}\nFalhas: ${progress.failed_jobs.length}${failureDetails}`;
 
           setBatchProcessingLogs((prev) => [
             ...prev,
@@ -123,6 +130,7 @@ export function useBatchPipelineWorkflow({
           }
 
           setBatchCompletionMessage(completionMessage);
+          setBatchFailedJobIds(progress.failed_jobs.map((f) => f.job_id));
           setShowBatchCompletionNotification(true);
 
           const activeVideos = await listVideos();
@@ -226,6 +234,7 @@ export function useBatchPipelineWorkflow({
   function closeBatchCompletionNotification() {
     setShowBatchCompletionNotification(false);
     setBatchCompletionMessage("");
+    setBatchFailedJobIds([]);
   }
 
   async function startSingleJobPipeline(jobId: string, options: BatchPipelineOptions) {
@@ -273,5 +282,6 @@ export function useBatchPipelineWorkflow({
     startBatchPipelineDialog,
     startSingleJobPipeline,
     closeBatchCompletionNotification,
+    batchFailedJobIds,
   };
 }

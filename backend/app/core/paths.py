@@ -155,6 +155,16 @@ def job_pipeline_log_path(job_id: str) -> Path:
     return job_logs_dir(job_id) / "pipeline.log"
 
 
+def job_error_log_path(job_id: str) -> Path:
+    """Human-readable failure record (`erro.log`): one entry per failed stage, newest last."""
+    return job_logs_dir(job_id) / "erro.log"
+
+
+def job_last_error_path(job_id: str) -> Path:
+    """JSON sidecar `{stage, message, at}` of the latest failure, exposed as `last_error` on the job payload."""
+    return job_logs_dir(job_id) / "last_error.json"
+
+
 def job_stage_log_path(job_id: str, stage: str) -> Path:
     safe_stage = _sanitize_log_segment(stage, "general")
     return job_logs_dir(job_id) / f"{safe_stage}.log"

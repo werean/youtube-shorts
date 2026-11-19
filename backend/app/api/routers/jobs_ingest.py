@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+import re
 
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from app.api.local_only import require_local_ui
+from app.api.routers.videos import attach_last_error, default_open_directory, default_open_folder_for_file
 from app.application.job_lifecycle import JobNotFoundError
+from app.core import paths
 from app.application.runtime_service import JobEvent, VALID_TASK_NAMES, get_container
 from app.domain.ingest.service import get_ingest_service
 
@@ -50,7 +55,7 @@ async def upload_job(file: UploadFile | None = File(default=None)) -> dict[str, 
 async def get_job(job_id: str) -> dict[str, Any]:
     c = get_container()
     job = c.jobs.load_job(job_id)
-    return job.model_dump()
+    return attach_last_error(job.model_dump()) or {}
 
 
 @router.get("/jobs/{job_id}/events")
@@ -171,6 +176,52 @@ async def ingest_job_route(job_id: str) -> dict[str, Any]:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+@router.post(
+    "/jobs/{job_id}/logs/open-folder",
+    response_model=None,
+    dependencies=[Depends(require_local_ui)],
+)
+async def open_job_logs_folder(job_id: str) -> Any:
+    """Open the job's logs folder in the OS file explorer (`erro.log` selected when it exists).
+
+    Local-only (it launches a program on the host). The id must be a plain token and the resolved folder must
+    stay inside `{media.base_dir}/logs`, so no other path can ever be opened.
+    """
+    if not _JOB_ID_RE.fullmatch(job_id):
+        return JSONResponse(status_code=400, content={"detail": "Invalid job id"})
+
+    container = get_container()
+    try:
+        container.jobs.load_job(job_id)
+    except JobNotFoundError:
+        return JSONResponse(status_code=404, content={"detail": "Job not found"})
+
+    logs_root = paths.logs_dir()
+    folder = paths.job_logs_dir(job_id)
+    try:
+        folder.resolve().relative_to(logs_root.resolve())
+    except ValueError:
+        return JSONResponse(status_code=400, content={"detail": "Invalid job id"})
+    folder.mkdir(parents=True, exist_ok=True)
+
+    error_file = paths.job_error_log_path(job_id)
+    if error_file.is_file():
+        opener = container.folder_opener or default_open_folder_for_file
+        result = opener(error_file, [logs_root])
+    else:
+        dir_opener = container.dir_opener or default_open_directory
+        result = dir_opener(folder, [logs_root])
+    if not result.get("ok"):
+        return JSONResponse(
+            status_code=int(result.get("status_code") or 500),
+            content={"detail": result.get("detail") or "Failed to open folder"},
+        )
+    return {"ok": True}
 
 
 @router.get("/jobs/{job_id}/logs/{task}")

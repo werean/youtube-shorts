@@ -1,33 +1,5 @@
 import type { JobStatus } from "../../types";
 
-export interface CutPreset {
-  id: "podcast" | "dinamico" | "curtos";
-  label: string;
-  description: string;
-  targetDurationHint: string;
-}
-
-export const CUT_PRESETS: CutPreset[] = [
-  {
-    id: "podcast",
-    label: "Podcast",
-    description: "Cortes completos de raciocínio e histórias",
-    targetDurationHint: "45s–90s",
-  },
-  {
-    id: "dinamico",
-    label: "Dinâmico",
-    description: "Momentos de maior impacto e ritmo",
-    targetDurationHint: "25s–50s",
-  },
-  {
-    id: "curtos",
-    label: "Cortes curtos",
-    description: "Pílulas diretas e ganchos rápidos",
-    targetDurationHint: "15s–30s",
-  },
-];
-
 export function getHumanJobStatusLabel(status?: JobStatus | string | null): string | null {
   switch (status) {
     case "CREATED":
@@ -82,6 +54,32 @@ export function getHumanErrorMessage(rawError?: string | null): string {
     return "Não foi possível baixar o vídeo a partir desse link.";
   }
   return rawError;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  ingest: "Download",
+  transcription: "Transcrição",
+  blocks: "Blocos",
+  topics: "Tópicos",
+  analysis: "Análise",
+  render: "Renderização",
+  orchestrator: "Processamento",
+  batch: "Lote",
+};
+
+export interface LastErrorLike {
+  stage?: string | null;
+  message?: string | null;
+}
+
+/** Texto do pill de erro a partir de `job.last_error`: frase amigável quando houver, senão "Etapa: mensagem". */
+export function formatLastError(lastError?: LastErrorLike | null): { text: string; full: string } | null {
+  const message = lastError?.message?.trim();
+  if (!message) return null;
+  const label = (lastError?.stage && STAGE_LABELS[lastError.stage]) || lastError?.stage || "";
+  const full = label ? `${label}: ${message}` : message;
+  const human = getHumanErrorMessage(message);
+  return { text: human !== message ? human : full, full };
 }
 
 export function formatShortTime(seconds: number): string {
