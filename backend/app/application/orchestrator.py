@@ -75,6 +75,54 @@ def _publish_step(
     )
 
 
+async def _recover_job_from_error(
+    c: ServiceContainer,
+    job_id: str,
+    job: Job,
+    source_video: Any,
+    log_tasks: tuple[str, ...],
+) -> Job:
+    """Map a job left in ERROR to the resume status implied by the artifacts on disk.
+
+    cuts -> WAITING_APPROVAL, topics -> ANALYZING, blocks -> BUILDING_TOPICS,
+    transcription -> BUILDING_BLOCKS, else DOWNLOADED; CREATED when the source video is missing.
+    No-op when the job is not in ERROR. Logs the recovery to every task in `log_tasks`.
+    """
+    if _status_str(job.status) != JobStatus.ERROR.value:
+        return job
+    if source_video and source_video.exists():
+        updates: dict[str, Any] = {}
+        if not job.source_video_path:
+            updates["source_video_path"] = str(source_video)
+        if not job.video_duration_seconds:
+            from app.infrastructure.audio.pcm_extractor import probe_media_duration
+
+            probed = await probe_media_duration(source_video)
+            if probed and probed > 0:
+                updates["video_duration_seconds"] = probed
+        if c.jobs.load_cuts(job_id):
+            recovered_status = JobStatus.WAITING_APPROVAL
+        elif c.jobs.load_topic_segments(job_id):
+            recovered_status = JobStatus.ANALYZING
+        elif c.jobs.load_semantic_blocks(job_id):
+            recovered_status = JobStatus.BUILDING_TOPICS
+        elif c.jobs.has_transcription(job_id):
+            recovered_status = JobStatus.BUILDING_BLOCKS
+        else:
+            recovered_status = JobStatus.DOWNLOADED
+        updates["status"] = recovered_status
+        job = c.jobs.update_job(job_id, updates)
+    else:
+        job = c.jobs.update_job_status(job_id, JobStatus.CREATED)
+    for task in log_tasks:
+        c.runtime.append_task_log(
+            job_id,
+            task,
+            f"[{task}] Recovered job from ERROR to {_status_str(job.status)}",
+        )
+    return job
+
+
 async def run_job_pipeline(
     job_id: str,
     include_render: bool = True,
@@ -128,36 +176,7 @@ async def run_job_pipeline(
 
         # Recover cleanly if re-running a job previously left in ERROR
         source_video = c.jobs.find_source_video(job_id)
-        if _status_str(job.status) == JobStatus.ERROR.value:
-            if source_video and source_video.exists():
-                updates: dict[str, Any] = {}
-                if not job.source_video_path:
-                    updates["source_video_path"] = str(source_video)
-                if not job.video_duration_seconds:
-                    from app.infrastructure.audio.pcm_extractor import probe_media_duration
-
-                    probed = await probe_media_duration(source_video)
-                    if probed and probed > 0:
-                        updates["video_duration_seconds"] = probed
-                if c.jobs.load_cuts(job_id):
-                    recovered_status = JobStatus.WAITING_APPROVAL
-                elif c.jobs.load_topic_segments(job_id):
-                    recovered_status = JobStatus.ANALYZING
-                elif c.jobs.load_semantic_blocks(job_id):
-                    recovered_status = JobStatus.BUILDING_TOPICS
-                elif c.jobs.has_transcription(job_id):
-                    recovered_status = JobStatus.BUILDING_BLOCKS
-                else:
-                    recovered_status = JobStatus.DOWNLOADED
-                updates["status"] = recovered_status
-                job = c.jobs.update_job(job_id, updates)
-            else:
-                job = c.jobs.update_job_status(job_id, JobStatus.CREATED)
-            c.runtime.append_task_log(
-                job_id,
-                "orchestrator",
-                f"[orchestrator] Recovered job from ERROR to {_status_str(job.status)}",
-            )
+        job = await _recover_job_from_error(c, job_id, job, source_video, ("orchestrator",))
 
         # Step 1/5: Ingest (if not already downloaded)
         is_pending_status = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(
@@ -714,6 +733,7 @@ class BatchRunner:
                 status.current_step = "starting"
                 self._sync_runtime_batch(c, batch_id, status, batch_status="running")
                 active_stage = "batch"
+                skip_render = False
                 job_t0 = time.perf_counter()
 
                 c.runtime.log_stage_start(
@@ -728,6 +748,10 @@ class BatchRunner:
 
                     # Step 1/5: Ingestion if needed
                     source_video = c.jobs.find_source_video(job_id)
+                    # A job left in ERROR resumes from the stage implied by its artifacts
+                    job = await _recover_job_from_error(
+                        c, job_id, job, source_video, ("batch", "orchestrator")
+                    )
                     is_pending = job.status in (JobStatus.CREATED, JobStatus.DOWNLOADING) or str(
                         job.status
                     ).upper() in ("CREATED", "PENDING", "DOWNLOADING")
@@ -900,7 +924,37 @@ class BatchRunner:
                             await _run_batch_topics_and_analysis()
 
                         # Pre-approval gate
-                        if pre_approve:
+                        # Never wait when there is nothing to approve.
+                        gate_job = c.jobs.load_job(job_id)
+                        gate_status = _status_str(gate_job.status)
+                        gate_cuts: list[Any] = []
+                        if pre_approve and gate_status == JobStatus.WAITING_APPROVAL.value:
+                            try:
+                                gate_cuts = list(c.jobs.load_cuts(job_id) or [])
+                            except Exception:
+                                gate_cuts = []
+                        if pre_approve and gate_status != JobStatus.WAITING_APPROVAL.value:
+                            job = gate_job
+                            if gate_status == JobStatus.ERROR.value:
+                                raise RuntimeError(
+                                    "Nenhum corte foi gerado para aprovar: a etapa "
+                                    f"'{active_stage}' terminou com erro."
+                                )
+                            raise RuntimeError(
+                                "Nenhum corte foi gerado para aprovar "
+                                f"(status atual do job: {gate_status})."
+                            )
+                        if pre_approve and not gate_cuts:
+                            job = gate_job
+                            skip_render = True
+                            c.runtime.append_task_log(
+                                job_id,
+                                "batch",
+                                "[batch] A análise não gerou nenhum corte; "
+                                "nada para aprovar nem renderizar.",
+                                level="WARNING",
+                            )
+                        elif pre_approve:
                             status.current_step = "waiting_approval"
                             status.waiting_for_approval = True
                             c.runtime.append_task_log(
@@ -940,7 +994,7 @@ class BatchRunner:
                             break
                         status.current_step = "rendering"
                         self._sync_runtime_batch(c, batch_id, status, batch_status="running")
-                        if job.status == JobStatus.WAITING_APPROVAL:
+                        if job.status == JobStatus.WAITING_APPROVAL and not skip_render:
                             active_stage = "render"
                             t0 = time.perf_counter()
                             c.runtime.log_stage_start(
