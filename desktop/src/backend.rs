@@ -16,6 +16,7 @@ pub const DEFAULT_HEALTH_URL: &str = "http://127.0.0.1:8000/health";
 pub const BACKEND_HOST: &str = "127.0.0.1";
 pub const BACKEND_PORT: &str = "8000";
 pub const EMBEDDED_VERSION_FILE: &str = ".embedded-version";
+pub const STARTUP_LOG_FILE: &str = "desktop-startup.log";
 
 pub const EMBEDDED_RUNTIME_ZIP: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/embedded-runtime.zip"));
@@ -164,6 +165,41 @@ pub fn resolve_portable_root_from(
 
 pub fn resolve_portable_root() -> Result<PathBuf, String> {
     resolve_runtime_mode().map(|mode| mode.root().to_path_buf())
+}
+
+pub fn resolve_webview_data_dir_with(
+    mode: &RuntimeMode,
+    local_app_data: Option<&Path>,
+) -> PathBuf {
+    match mode {
+        RuntimeMode::Portable(root) => root.join("data").join("webview"),
+        RuntimeMode::DevRepo(root) => local_app_data
+            .map(|p| p.join("YouTubeShorts").join("webview"))
+            .unwrap_or_else(|| root.join("data").join("webview")),
+    }
+}
+
+pub fn resolve_webview_data_dir(mode: &RuntimeMode) -> PathBuf {
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    resolve_webview_data_dir_with(mode, local_app_data.as_deref())
+}
+
+pub fn append_startup_log(root: &Path, message: &str) {
+    use std::io::Write;
+
+    let _ = fs::create_dir_all(root);
+    let log_path = root.join(STARTUP_LOG_FILE);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        let _ = writeln!(file, "[{secs}] {message}");
+    }
 }
 
 fn is_allowed_embedded_entry(rel_posix: &str) -> bool {
@@ -766,5 +802,42 @@ mod tests {
         let _ = handle.join();
 
         assert!(!is_health_ok(&url, Duration::from_millis(300)));
+    }
+
+    #[test]
+    fn test_resolve_webview_data_dir_portable_and_dev_repo() {
+        let portable_root = PathBuf::from("D:\\Portable\\YouTubeShorts");
+        let dev_root = PathBuf::from("C:\\src\\youtube-shorts");
+        let local_app_data = PathBuf::from("C:\\Users\\alice\\AppData\\Local");
+
+        assert_eq!(
+            resolve_webview_data_dir_with(
+                &RuntimeMode::Portable(portable_root.clone()),
+                Some(&local_app_data),
+            ),
+            portable_root.join("data").join("webview")
+        );
+        assert_eq!(
+            resolve_webview_data_dir_with(
+                &RuntimeMode::DevRepo(dev_root.clone()),
+                Some(&local_app_data),
+            ),
+            local_app_data.join("YouTubeShorts").join("webview")
+        );
+        assert_eq!(
+            resolve_webview_data_dir_with(&RuntimeMode::DevRepo(dev_root.clone()), None),
+            dev_root.join("data").join("webview")
+        );
+    }
+
+    #[test]
+    fn test_append_startup_log_creates_and_appends() {
+        let tmp = TempDir::new().unwrap();
+        append_startup_log(tmp.path(), "first line");
+        append_startup_log(tmp.path(), "second line");
+
+        let log_text = fs::read_to_string(tmp.path().join(STARTUP_LOG_FILE)).unwrap();
+        assert!(log_text.contains("first line"));
+        assert!(log_text.contains("second line"));
     }
 }

@@ -2,7 +2,8 @@
 param(
     [string]$Version = "",
     [string]$BinaryPath = "desktop/target/release/youtube-shorts-desktop.exe",
-    [string]$OutputDir = "dist-portable"
+    [string]$OutputDir = "dist-portable",
+    [switch]$IncludeManifest = $false
 )
 
 Set-StrictMode -Version Latest
@@ -97,16 +98,21 @@ try {
 }
 $Sha256 = ([System.BitConverter]::ToString($HashBytes) -replace '-', '').ToLowerInvariant()
 
-$ManifestObj = [ordered]@{
-    version    = $ResolvedVersion
-    asset_name = $AssetName
-    sha256     = $Sha256
-}
-$ManifestJson = ($ManifestObj | ConvertTo-Json -Depth 2) -replace "`r`n", "`n"
-[System.IO.File]::WriteAllText($ManifestPath, "$ManifestJson`n", $Utf8NoBom)
-
 Write-Output "Packaged portable release v$ResolvedVersion"
 Write-Output "  Binary:   $ResolvedBinary"
 Write-Output "  Output:   $ExeDestPath"
-Write-Output "  Manifest: $ManifestPath"
+
+if ($IncludeManifest) {
+    $ManifestObj = [ordered]@{
+        version    = $ResolvedVersion
+        asset_name = $AssetName
+        sha256     = $Sha256
+    }
+    $ManifestJson = ($ManifestObj | ConvertTo-Json -Depth 2) -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText($ManifestPath, "$ManifestJson`n", $Utf8NoBom)
+    Write-Output "  Manifest: $ManifestPath"
+} elseif (Test-Path -LiteralPath $ManifestPath -PathType Leaf) {
+    Remove-Item -LiteralPath $ManifestPath -Force
+}
+
 Write-Output "  SHA-256:  $Sha256"

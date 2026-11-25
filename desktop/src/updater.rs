@@ -25,6 +25,8 @@ pub const MANIFEST_ASSET_NAME: &str = "portable-manifest.json";
 pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -117,6 +119,22 @@ pub fn find_release_assets(
         .iter()
         .find(|a| a.name == MANIFEST_ASSET_NAME);
     (exe_asset, manifest_asset)
+}
+
+pub fn extract_sha256_from_digest(digest: Option<&str>) -> Option<String> {
+    let raw = digest?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let hex_part = match raw.split_once(':') {
+        Some((alg, rest)) if alg.trim().eq_ignore_ascii_case("sha256") => rest.trim(),
+        _ => raw,
+    };
+    if hex_part.is_empty() {
+        None
+    } else {
+        Some(hex_part.to_ascii_lowercase())
+    }
 }
 
 pub fn compute_sha256_hex(bytes: &[u8]) -> String {
@@ -239,32 +257,35 @@ pub fn prepare_exe_update(
         ));
     };
 
-    let expected_sha = if let Some(manifest) = manifest_asset {
-        let manifest_resp = client
-            .get(&manifest.browser_download_url)
-            .send()
-            .map_err(|e| format!("Failed downloading {MANIFEST_ASSET_NAME}: {e}"))?;
-        if !manifest_resp.status().is_success() {
-            return Err(format!(
-                "HTTP {} downloading {MANIFEST_ASSET_NAME}",
-                manifest_resp.status().as_u16()
-            ));
-        }
-        let manifest_text = manifest_resp
-            .text()
-            .map_err(|e| format!("Failed reading {MANIFEST_ASSET_NAME}: {e}"))?;
-        let parsed = parse_portable_manifest(&manifest_text)?;
-        if let Some(ref asset_name) = parsed.asset_name {
-            if asset_name != EXE_ASSET_NAME {
+    let expected_sha =
+        if let Some(digest_sha) = extract_sha256_from_digest(exe_asset.digest.as_deref()) {
+            Some(digest_sha)
+        } else if let Some(manifest) = manifest_asset {
+            let manifest_resp = client
+                .get(&manifest.browser_download_url)
+                .send()
+                .map_err(|e| format!("Failed downloading {MANIFEST_ASSET_NAME}: {e}"))?;
+            if !manifest_resp.status().is_success() {
                 return Err(format!(
-                    "Manifest asset_name '{asset_name}' does not match '{EXE_ASSET_NAME}'"
+                    "HTTP {} downloading {MANIFEST_ASSET_NAME}",
+                    manifest_resp.status().as_u16()
                 ));
             }
-        }
-        Some(parsed.sha256)
-    } else {
-        None
-    };
+            let manifest_text = manifest_resp
+                .text()
+                .map_err(|e| format!("Failed reading {MANIFEST_ASSET_NAME}: {e}"))?;
+            let parsed = parse_portable_manifest(&manifest_text)?;
+            if let Some(ref asset_name) = parsed.asset_name {
+                if asset_name != EXE_ASSET_NAME {
+                    return Err(format!(
+                        "Manifest asset_name '{asset_name}' does not match '{EXE_ASSET_NAME}'"
+                    ));
+                }
+            }
+            Some(parsed.sha256)
+        } else {
+            None
+        };
 
     let download_client = build_http_client(Duration::from_secs(120))?;
     let exe_bytes = download_bytes(&download_client, &exe_asset.browser_download_url)?;
@@ -388,6 +409,28 @@ mod tests {
             "tag_name": "v0.1.5",
             "assets": [
                 {
+                    "name": "youtube-shorts.exe",
+                    "browser_download_url": "https://example.invalid/youtube-shorts.exe",
+                    "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                }
+            ]
+        }"#;
+
+        let release = parse_github_release(json).unwrap();
+        assert_eq!(release.tag_name, "v0.1.5");
+        let (exe_asset, manifest_asset) = find_release_assets(&release);
+        let exe_asset = exe_asset.unwrap();
+        assert_eq!(exe_asset.name, EXE_ASSET_NAME);
+        assert_eq!(
+            exe_asset.digest.as_deref(),
+            Some("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+        assert!(manifest_asset.is_none());
+
+        let json_without_digest = r#"{
+            "tag_name": "v0.1.4",
+            "assets": [
+                {
                     "name": "portable-manifest.json",
                     "browser_download_url": "https://example.invalid/portable-manifest.json"
                 },
@@ -397,12 +440,31 @@ mod tests {
                 }
             ]
         }"#;
+        let legacy_release = parse_github_release(json_without_digest).unwrap();
+        let (legacy_exe, legacy_manifest) = find_release_assets(&legacy_release);
+        assert_eq!(legacy_exe.unwrap().digest, None);
+        assert_eq!(legacy_manifest.unwrap().name, MANIFEST_ASSET_NAME);
+    }
 
-        let release = parse_github_release(json).unwrap();
-        assert_eq!(release.tag_name, "v0.1.5");
-        let (exe_asset, manifest_asset) = find_release_assets(&release);
-        assert_eq!(exe_asset.unwrap().name, EXE_ASSET_NAME);
-        assert_eq!(manifest_asset.unwrap().name, MANIFEST_ASSET_NAME);
+    #[test]
+    fn test_extract_sha256_from_digest() {
+        let upper_hex = "A".repeat(64);
+        let lower_hex = "a".repeat(64);
+        assert_eq!(
+            extract_sha256_from_digest(Some(&format!("sha256:{lower_hex}"))).as_deref(),
+            Some(lower_hex.as_str())
+        );
+        assert_eq!(
+            extract_sha256_from_digest(Some(&format!("  SHA256:{upper_hex}  "))).as_deref(),
+            Some(lower_hex.as_str())
+        );
+        assert_eq!(
+            extract_sha256_from_digest(Some(&upper_hex)).as_deref(),
+            Some(lower_hex.as_str())
+        );
+        assert_eq!(extract_sha256_from_digest(None), None);
+        assert_eq!(extract_sha256_from_digest(Some("   ")), None);
+        assert_eq!(extract_sha256_from_digest(Some("sha256:")), None);
     }
 
     #[test]
@@ -435,37 +497,48 @@ mod tests {
     }
 
     fn spawn_mock_release_server(
-        manifest_sha256: String,
+        exe_digest: Option<String>,
+        manifest_sha256: Option<String>,
         exe_bytes: Vec<u8>,
     ) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let base_url = format!("http://{addr}");
 
-        let manifest_json = serde_json::to_string(&PortableManifest {
-            version: "0.2.0".to_string(),
-            asset_name: Some(EXE_ASSET_NAME.to_string()),
-            sha256: manifest_sha256,
-        })
-        .unwrap();
+        let mut assets = Vec::new();
+        let mut expected_requests = 2usize; // /releases/latest + youtube-shorts.exe
+
+        let manifest_json = manifest_sha256.map(|sha| {
+            assets.push(GitHubAsset {
+                name: MANIFEST_ASSET_NAME.to_string(),
+                browser_download_url: format!("{base_url}/{MANIFEST_ASSET_NAME}"),
+                digest: None,
+            });
+            if exe_digest.is_none() {
+                expected_requests += 1;
+            }
+            serde_json::to_string(&PortableManifest {
+                version: "0.2.0".to_string(),
+                asset_name: Some(EXE_ASSET_NAME.to_string()),
+                sha256: sha,
+            })
+            .unwrap()
+        });
+
+        assets.push(GitHubAsset {
+            name: EXE_ASSET_NAME.to_string(),
+            browser_download_url: format!("{base_url}/{EXE_ASSET_NAME}"),
+            digest: exe_digest,
+        });
 
         let release_json = serde_json::to_string(&GitHubRelease {
             tag_name: "v0.2.0".to_string(),
-            assets: vec![
-                GitHubAsset {
-                    name: MANIFEST_ASSET_NAME.to_string(),
-                    browser_download_url: format!("{base_url}/{MANIFEST_ASSET_NAME}"),
-                },
-                GitHubAsset {
-                    name: EXE_ASSET_NAME.to_string(),
-                    browser_download_url: format!("{base_url}/{EXE_ASSET_NAME}"),
-                },
-            ],
+            assets,
         })
         .unwrap();
 
         let handle = std::thread::spawn(move || {
-            for _ in 0..3 {
+            for _ in 0..expected_requests {
                 if let Ok((mut stream, _)) = listener.accept() {
                     let mut buf = [0u8; 2048];
                     let n = stream.read(&mut buf).unwrap_or(0);
@@ -480,13 +553,15 @@ mod tests {
                         let _ = stream.write_all(header.as_bytes());
                         let _ = stream.write_all(body);
                     } else if first_line.contains(MANIFEST_ASSET_NAME) {
-                        let body = manifest_json.as_bytes();
-                        let header = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
-                            body.len()
-                        );
-                        let _ = stream.write_all(header.as_bytes());
-                        let _ = stream.write_all(body);
+                        if let Some(ref manifest) = manifest_json {
+                            let body = manifest.as_bytes();
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(body);
+                        }
                     } else if first_line.contains(EXE_ASSET_NAME) {
                         let header = format!(
                             "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
@@ -503,10 +578,14 @@ mod tests {
     }
 
     #[test]
-    fn test_end_to_end_prepare_exe_update_with_mock_http_server() {
+    fn test_end_to_end_prepare_exe_update_with_github_digest() {
         let exe_bytes = b"MZ-v0.2.0-single-exe-binary".to_vec();
         let valid_sha = compute_sha256_hex(&exe_bytes);
-        let (base_url, handle) = spawn_mock_release_server(valid_sha, exe_bytes.clone());
+        let (base_url, handle) = spawn_mock_release_server(
+            Some(format!("sha256:{}", valid_sha.to_uppercase())),
+            None,
+            exe_bytes.clone(),
+        );
 
         let exe_dir = TempDir::new().unwrap();
         let (version, new_exe_path) = prepare_exe_update(
@@ -525,9 +604,55 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_exe_update_deletes_new_file_on_sha256_mismatch() {
+    fn test_prepare_exe_update_deletes_new_file_on_digest_sha256_mismatch() {
         let exe_bytes = b"corrupted-exe-payload".to_vec();
-        let (base_url, handle) = spawn_mock_release_server("f".repeat(64), exe_bytes);
+        let (base_url, handle) = spawn_mock_release_server(
+            Some(format!("sha256:{}", "f".repeat(64))),
+            None,
+            exe_bytes,
+        );
+
+        let exe_dir = TempDir::new().unwrap();
+        let err = prepare_exe_update(
+            &format!("{base_url}/releases/latest"),
+            "0.1.0",
+            exe_dir.path(),
+        )
+        .unwrap_err();
+
+        let _ = handle.join();
+
+        assert!(err.contains("SHA-256 verification failed"));
+        assert!(!exe_dir.path().join("youtube-shorts.exe.new").exists());
+    }
+
+    #[test]
+    fn test_prepare_exe_update_falls_back_to_manifest_when_digest_absent() {
+        let exe_bytes = b"MZ-v0.2.0-legacy-manifest-fallback".to_vec();
+        let valid_sha = compute_sha256_hex(&exe_bytes);
+        let (base_url, handle) =
+            spawn_mock_release_server(None, Some(valid_sha), exe_bytes.clone());
+
+        let exe_dir = TempDir::new().unwrap();
+        let (version, new_exe_path) = prepare_exe_update(
+            &format!("{base_url}/releases/latest"),
+            "0.1.0",
+            exe_dir.path(),
+        )
+        .unwrap()
+        .expect("Expected newer version via manifest fallback");
+
+        let _ = handle.join();
+
+        assert_eq!(version, Version::new(0, 2, 0));
+        assert_eq!(fs::read(&new_exe_path).unwrap(), exe_bytes);
+    }
+
+    #[test]
+    fn test_prepare_exe_update_deletes_new_file_on_manifest_fallback_mismatch() {
+        let exe_bytes = b"corrupted-legacy-exe-payload".to_vec();
+        let (base_url, handle) =
+            spawn_mock_release_server(None, Some("f".repeat(64)), exe_bytes);
 
         let exe_dir = TempDir::new().unwrap();
         let err = prepare_exe_update(
