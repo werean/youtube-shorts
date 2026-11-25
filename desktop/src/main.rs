@@ -2,41 +2,51 @@
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use youtube_shorts_desktop::backend::{self, BackendProcess};
-use youtube_shorts_desktop::updater::{self, UpdateOutcome};
+use youtube_shorts_desktop::backend::{self, BackendProcess, RuntimeMode};
+use youtube_shorts_desktop::updater::{self, UpdateOutcome, EXE_ASSET_NAME};
 
 struct BackendState(Arc<Mutex<Option<BackendProcess>>>);
 
 fn main() {
-    let portable_root = match backend::resolve_portable_root() {
-        Ok(root) => root,
+    let runtime_mode = match backend::resolve_runtime_mode() {
+        Ok(mode) => mode,
         Err(err) => {
             eprintln!("[desktop] Fatal: {err}");
             std::process::exit(1);
         }
     };
+    let portable_root = runtime_mode.root().to_path_buf();
 
-    match updater::check_and_apply_startup_update(&portable_root, None) {
-        Ok(UpdateOutcome::RestartScheduled {
-            version,
-            script_path,
-        }) => {
-            eprintln!(
-                "[updater] Update {version} staged; executing {} and exiting.",
-                script_path.display()
-            );
-            std::process::exit(0);
+    if matches!(runtime_mode, RuntimeMode::Portable(_)) {
+        match updater::check_and_apply_startup_update(&portable_root, None) {
+            Ok(UpdateOutcome::RestartScheduled {
+                version,
+                script_path,
+            }) => {
+                eprintln!(
+                    "[updater] Update {version} downloaded; executing {} and exiting.",
+                    script_path.display()
+                );
+                std::process::exit(0);
+            }
+            Ok(UpdateOutcome::Disabled) => {}
+            Ok(UpdateOutcome::UpToDate { current, latest }) => {
+                eprintln!("[updater] Up to date (current={current}, latest={latest}).");
+            }
+            Ok(UpdateOutcome::NoPortableAsset { latest }) => {
+                eprintln!(
+                    "[updater] Release {latest} has no {EXE_ASSET_NAME} asset; continuing."
+                );
+            }
+            Err(err) => {
+                eprintln!("[updater] Startup update check skipped due to error: {err}");
+            }
         }
-        Ok(UpdateOutcome::Disabled) => {}
-        Ok(UpdateOutcome::UpToDate { current, latest }) => {
-            eprintln!("[updater] Up to date (current={current}, latest={latest}).");
-        }
-        Ok(UpdateOutcome::NoPortableAsset { latest }) => {
-            eprintln!("[updater] Release {latest} has no portable zip asset; continuing.");
-        }
-        Err(err) => {
-            eprintln!("[updater] Startup update check skipped due to error: {err}");
-        }
+    }
+
+    if let Err(err) = backend::ensure_embedded_runtime(&portable_root) {
+        eprintln!("[backend] Failed to prepare embedded runtime: {err}");
+        std::process::exit(1);
     }
 
     let backend_proc = match backend::start_or_attach_backend(&portable_root) {

@@ -112,7 +112,7 @@ jobs:
       - name: Build desktop release binary
         run: cargo build --release --manifest-path desktop/Cargo.toml
 
-      - name: Package portable Windows archive and manifest
+      - name: Package portable Windows executable and manifest
         run: pwsh -File scripts/package-portable.ps1 -Version "$env:RELEASE_VERSION"
 
       - name: Publish GitHub Release
@@ -124,5 +124,5 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            dist-portable/youtube-shorts-portable-win64.zip
+            dist-portable/youtube-shorts.exe
             dist-portable/portable-manifest.json

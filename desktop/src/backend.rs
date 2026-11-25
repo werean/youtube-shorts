@@ -1,7 +1,10 @@
 use reqwest::blocking::Client;
+use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+use zip::ZipArchive;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -12,6 +15,19 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub const DEFAULT_HEALTH_URL: &str = "http://127.0.0.1:8000/health";
 pub const BACKEND_HOST: &str = "127.0.0.1";
 pub const BACKEND_PORT: &str = "8000";
+pub const EMBEDDED_VERSION_FILE: &str = ".embedded-version";
+
+pub const EMBEDDED_RUNTIME_ZIP: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/embedded-runtime.zip"));
+
+pub const PRESERVED_RELATIVE_PATHS: &[&str] = &[
+    "data/settings.json",
+    "data/custom_settings.json",
+    "data/saved_llm_prompts.json",
+    "data/jobs",
+    "data/profile",
+    "backend/.venv",
+];
 
 pub const MINIMAL_SERVER_DEPS: &[&str] = &[
     "fastapi>=0.115.0",
@@ -22,6 +38,24 @@ pub const MINIMAL_SERVER_DEPS: &[&str] = &[
     "numpy>=1.26.0",
     "scipy>=1.13.0",
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeMode {
+    DevRepo(PathBuf),
+    Portable(PathBuf),
+}
+
+impl RuntimeMode {
+    pub fn root(&self) -> &Path {
+        match self {
+            Self::DevRepo(p) | Self::Portable(p) => p.as_path(),
+        }
+    }
+
+    pub fn is_dev_repo(&self) -> bool {
+        matches!(self, Self::DevRepo(_))
+    }
+}
 
 #[derive(Debug)]
 pub struct BackendProcess {
@@ -77,41 +111,179 @@ pub fn has_backend_entrypoint(dir: &Path) -> bool {
     dir.join("backend").join("app").join("main.py").is_file()
 }
 
-pub fn resolve_portable_root_from(
+pub fn is_dev_repo_root(dir: &Path) -> bool {
+    has_backend_entrypoint(dir) && dir.join("desktop").join("Cargo.toml").is_file()
+}
+
+fn is_under_desktop_target(exe_dir: &Path, repo_root: &Path) -> bool {
+    let target_dir = repo_root.join("desktop").join("target");
+    exe_dir.starts_with(&target_dir)
+}
+
+pub fn resolve_runtime_mode_from(
     exe_dir: Option<&Path>,
     current_dir: Option<&Path>,
-) -> Option<PathBuf> {
+) -> Option<RuntimeMode> {
     if let Some(dir) = exe_dir {
-        if has_backend_entrypoint(dir) {
-            return Some(dir.to_path_buf());
-        }
-        for ancestor in dir.ancestors().skip(1) {
-            if has_backend_entrypoint(ancestor) {
-                return Some(ancestor.to_path_buf());
+        for ancestor in dir.ancestors() {
+            if is_dev_repo_root(ancestor) && is_under_desktop_target(dir, ancestor) {
+                return Some(RuntimeMode::DevRepo(ancestor.to_path_buf()));
             }
         }
+        return Some(RuntimeMode::Portable(dir.to_path_buf()));
     }
 
     if let Some(cwd) = current_dir {
         for ancestor in cwd.ancestors() {
-            if has_backend_entrypoint(ancestor) {
-                return Some(ancestor.to_path_buf());
+            if is_dev_repo_root(ancestor) {
+                return Some(RuntimeMode::DevRepo(ancestor.to_path_buf()));
             }
         }
+        return Some(RuntimeMode::Portable(cwd.to_path_buf()));
     }
 
     None
 }
 
-pub fn resolve_portable_root() -> Result<PathBuf, String> {
+pub fn resolve_runtime_mode() -> Result<RuntimeMode, String> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
     let cwd = std::env::current_dir().ok();
 
-    resolve_portable_root_from(exe_dir.as_deref(), cwd.as_deref()).ok_or_else(|| {
-        "Unable to locate portable root directory containing backend/app/main.py".to_string()
-    })
+    resolve_runtime_mode_from(exe_dir.as_deref(), cwd.as_deref())
+        .ok_or_else(|| "Unable to determine runtime root directory".to_string())
+}
+
+pub fn resolve_portable_root_from(
+    exe_dir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    resolve_runtime_mode_from(exe_dir, current_dir).map(|mode| mode.root().to_path_buf())
+}
+
+pub fn resolve_portable_root() -> Result<PathBuf, String> {
+    resolve_runtime_mode().map(|mode| mode.root().to_path_buf())
+}
+
+fn is_allowed_embedded_entry(rel_posix: &str) -> bool {
+    (rel_posix.starts_with("backend/app/") && rel_posix.len() > "backend/app/".len())
+        || rel_posix == "backend/pyproject.toml"
+        || rel_posix == "data/default_configs.json"
+}
+
+fn path_to_posix(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Extracts `backend/app/`, `backend/pyproject.toml`, and `data/default_configs.json`
+/// from `zip_bytes` into `root` whenever `.embedded-version` differs from `version`
+/// or `backend/app/main.py` is missing.
+///
+/// Strictly preserves user data (`data/settings.json`, `data/custom_settings.json`,
+/// `data/saved_llm_prompts.json`, `data/jobs/`, `data/profile/`, `backend/.venv/`).
+pub fn extract_embedded_runtime(
+    root: &Path,
+    version: &str,
+    zip_bytes: &[u8],
+) -> Result<bool, String> {
+    let version_path = root.join(EMBEDDED_VERSION_FILE);
+    let current_marker = fs::read_to_string(&version_path).ok();
+    let marker_matches = current_marker
+        .as_deref()
+        .map(str::trim)
+        == Some(version.trim());
+
+    if marker_matches && has_backend_entrypoint(root) {
+        return Ok(false);
+    }
+
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive =
+        ZipArchive::new(cursor).map_err(|e| format!("Invalid embedded runtime archive: {e}"))?;
+
+    // Pass 1: validate entries and confirm backend/app/main.py is present before modifying disk.
+    let mut has_main_py = false;
+    for idx in 0..archive.len() {
+        let entry = archive
+            .by_index(idx)
+            .map_err(|e| format!("Failed inspecting embedded entry #{idx}: {e}"))?;
+        let enclosed = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("Unsafe path in embedded archive: {}", entry.name()))?;
+        let rel_posix = path_to_posix(&enclosed);
+        if rel_posix == "backend/app/main.py" && !entry.is_dir() {
+            has_main_py = true;
+        }
+    }
+
+    if !has_main_py {
+        return Err("Embedded runtime archive is missing backend/app/main.py".to_string());
+    }
+
+    // Replace backend/app cleanly so deleted modules do not linger across updates,
+    // while leaving backend/.venv and all user data untouched.
+    let target_backend_app = root.join("backend").join("app");
+    if target_backend_app.exists() {
+        fs::remove_dir_all(&target_backend_app).map_err(|e| {
+            format!(
+                "Failed replacing existing {}: {e}",
+                target_backend_app.display()
+            )
+        })?;
+    }
+
+    // Pass 2: extract only allowlisted runtime files.
+    for idx in 0..archive.len() {
+        let mut entry = archive
+            .by_index(idx)
+            .map_err(|e| format!("Failed reading embedded entry #{idx}: {e}"))?;
+        let enclosed = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("Unsafe path in embedded archive: {}", entry.name()))?
+            .to_path_buf();
+
+        let rel_posix = path_to_posix(&enclosed);
+        if !is_allowed_embedded_entry(&rel_posix) {
+            continue;
+        }
+
+        let out_path = root.join(&enclosed);
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path)
+                .map_err(|e| format!("Failed creating {}: {e}", out_path.display()))?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed creating {}: {e}", parent.display()))?;
+            }
+            let mut out_file = fs::File::create(&out_path)
+                .map_err(|e| format!("Failed creating {}: {e}", out_path.display()))?;
+            std::io::copy(&mut entry, &mut out_file)
+                .map_err(|e| format!("Failed extracting {}: {e}", out_path.display()))?;
+        }
+    }
+
+    fs::create_dir_all(root.join("data"))
+        .map_err(|e| format!("Failed ensuring data directory: {e}"))?;
+    fs::write(&version_path, version.trim()).map_err(|e| {
+        format!(
+            "Failed writing embedded version marker {}: {e}",
+            version_path.display()
+        )
+    })?;
+
+    Ok(true)
+}
+
+pub fn ensure_embedded_runtime(root: &Path) -> Result<bool, String> {
+    if is_dev_repo_root(root) {
+        return Ok(false);
+    }
+    extract_embedded_runtime(root, env!("CARGO_PKG_VERSION"), EMBEDDED_RUNTIME_ZIP)
 }
 
 pub fn venv_python_path_for(root: &Path, is_windows: bool) -> PathBuf {
@@ -301,6 +473,8 @@ pub fn wait_for_health_or_exit(
 }
 
 pub fn start_or_attach_backend(root: &Path) -> Result<BackendProcess, String> {
+    ensure_embedded_runtime(root)?;
+
     if is_health_ok(DEFAULT_HEALTH_URL, Duration::from_millis(1200)) {
         return Ok(BackendProcess::attached_existing());
     }
@@ -354,53 +528,183 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tempfile::TempDir;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
 
-    fn create_backend_entrypoint(root: &Path) {
+    fn create_dev_repo_layout(root: &Path) {
         let app_dir = root.join("backend").join("app");
-        std::fs::create_dir_all(&app_dir).unwrap();
-        std::fs::write(app_dir.join("main.py"), "app = object()\n").unwrap();
+        let desktop_dir = root.join("desktop");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&desktop_dir).unwrap();
+        fs::write(app_dir.join("main.py"), "app = object()\n").unwrap();
+        fs::write(
+            desktop_dir.join("Cargo.toml"),
+            "[package]\nname = \"youtube-shorts-desktop\"\n",
+        )
+        .unwrap();
+    }
+
+    fn build_runtime_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = SimpleFileOptions::default();
+            for (path, content) in entries {
+                zip.start_file(path, options).unwrap();
+                zip.write_all(content).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        cursor.into_inner()
     }
 
     #[test]
-    fn test_resolve_portable_root_from_exe_dir() {
+    fn test_resolve_runtime_mode_dev_target_vs_portable() {
         let tmp = TempDir::new().unwrap();
-        create_backend_entrypoint(tmp.path());
+        create_dev_repo_layout(tmp.path());
 
-        let resolved = resolve_portable_root_from(Some(tmp.path()), None);
-        assert_eq!(resolved.as_deref(), Some(tmp.path()));
-    }
-
-    #[test]
-    fn test_resolve_portable_root_from_dev_ancestor() {
-        let tmp = TempDir::new().unwrap();
-        create_backend_entrypoint(tmp.path());
         let target_debug = tmp.path().join("desktop").join("target").join("debug");
-        std::fs::create_dir_all(&target_debug).unwrap();
+        let target_release = tmp.path().join("desktop").join("target").join("release");
+        fs::create_dir_all(&target_debug).unwrap();
+        fs::create_dir_all(&target_release).unwrap();
 
-        let resolved = resolve_portable_root_from(Some(&target_debug), None);
-        assert_eq!(resolved.as_deref(), Some(tmp.path()));
-    }
-
-    #[test]
-    fn test_resolve_portable_root_from_cwd_fallback() {
-        let tmp = TempDir::new().unwrap();
-        create_backend_entrypoint(tmp.path());
-        let unrelated_exe_dir = TempDir::new().unwrap();
-        let nested_cwd = tmp.path().join("desktop");
-        std::fs::create_dir_all(&nested_cwd).unwrap();
-
-        let resolved =
-            resolve_portable_root_from(Some(unrelated_exe_dir.path()), Some(&nested_cwd));
-        assert_eq!(resolved.as_deref(), Some(tmp.path()));
-    }
-
-    #[test]
-    fn test_resolve_portable_root_returns_none_when_missing() {
-        let tmp = TempDir::new().unwrap();
         assert_eq!(
-            resolve_portable_root_from(Some(tmp.path()), Some(tmp.path())),
-            None
+            resolve_runtime_mode_from(Some(&target_debug), None),
+            Some(RuntimeMode::DevRepo(tmp.path().to_path_buf()))
         );
+        assert_eq!(
+            resolve_runtime_mode_from(Some(&target_release), None),
+            Some(RuntimeMode::DevRepo(tmp.path().to_path_buf()))
+        );
+
+        // Even inside the repo (e.g. dist-portable/), a binary NOT inside desktop/target/
+        // runs in Portable mode using its own exe_dir.
+        let dist_portable = tmp.path().join("dist-portable");
+        fs::create_dir_all(&dist_portable).unwrap();
+        assert_eq!(
+            resolve_runtime_mode_from(Some(&dist_portable), None),
+            Some(RuntimeMode::Portable(dist_portable))
+        );
+
+        // Standalone empty folder uses exe_dir as Portable root even before extraction.
+        let empty_portable = TempDir::new().unwrap();
+        assert_eq!(
+            resolve_runtime_mode_from(Some(empty_portable.path()), Some(tmp.path())),
+            Some(RuntimeMode::Portable(empty_portable.path().to_path_buf()))
+        );
+    }
+
+    #[test]
+    fn test_resolve_runtime_mode_cwd_fallback_when_no_exe_dir() {
+        let tmp = TempDir::new().unwrap();
+        create_dev_repo_layout(tmp.path());
+        let nested_cwd = tmp.path().join("desktop");
+
+        assert_eq!(
+            resolve_runtime_mode_from(None, Some(&nested_cwd)),
+            Some(RuntimeMode::DevRepo(tmp.path().to_path_buf()))
+        );
+    }
+
+    #[test]
+    fn test_extract_embedded_runtime_version_sync_and_preserves_user_data() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Pre-populate user state that must NEVER be touched or overwritten
+        fs::create_dir_all(root.join("backend/.venv/Scripts")).unwrap();
+        fs::create_dir_all(root.join("data/jobs/job_1")).unwrap();
+        fs::create_dir_all(root.join("data/profile/marca-dagua")).unwrap();
+        fs::write(root.join("backend/.venv/Scripts/python.exe"), b"user-venv").unwrap();
+        fs::write(root.join("data/settings.json"), b"{\"base_dir\":\"D:/Videos\"}").unwrap();
+        fs::write(root.join("data/custom_settings.json"), b"{\"custom\":1}").unwrap();
+        fs::write(root.join("data/saved_llm_prompts.json"), b"[{\"name\":\"p1\"}]").unwrap();
+        fs::write(root.join("data/jobs/job_1/job.json"), b"{\"id\":\"job_1\"}").unwrap();
+        fs::write(root.join("data/profile/marca-dagua/watermark.png"), b"png").unwrap();
+
+        let zip_v1 = build_runtime_zip(&[
+            ("backend/app/main.py", b"print('v1')"),
+            ("backend/app/old_only.py", b"old"),
+            ("backend/pyproject.toml", b"version='0.1.0'"),
+            ("data/default_configs.json", b"{\"v\":1}"),
+            // Attempted poison entries must be ignored by the allowlist
+            ("data/settings.json", b"{\"overwrite\":true}"),
+            ("backend/.venv/Scripts/python.exe", b"poison"),
+        ]);
+
+        // Initial extraction on empty runtime
+        assert!(extract_embedded_runtime(root, "0.1.0", &zip_v1).unwrap());
+        assert_eq!(fs::read_to_string(root.join(EMBEDDED_VERSION_FILE)).unwrap(), "0.1.0");
+        assert_eq!(fs::read(root.join("backend/app/main.py")).unwrap(), b"print('v1')");
+        assert_eq!(fs::read(root.join("backend/app/old_only.py")).unwrap(), b"old");
+        assert_eq!(fs::read(root.join("backend/pyproject.toml")).unwrap(), b"version='0.1.0'");
+        assert_eq!(fs::read(root.join("data/default_configs.json")).unwrap(), b"{\"v\":1}");
+
+        // Second run with same version is a no-op
+        assert!(!extract_embedded_runtime(root, "0.1.0", &zip_v1).unwrap());
+
+        // Missing backend/app/main.py forces re-extraction even when version matches
+        fs::remove_file(root.join("backend/app/main.py")).unwrap();
+        assert!(extract_embedded_runtime(root, "0.1.0", &zip_v1).unwrap());
+        assert!(root.join("backend/app/main.py").is_file());
+
+        // Version upgrade replaces backend/app cleanly and updates default_configs.json
+        let zip_v2 = build_runtime_zip(&[
+            ("backend/app/main.py", b"print('v2')"),
+            ("backend/pyproject.toml", b"version='0.2.0'"),
+            ("data/default_configs.json", b"{\"v\":2}"),
+        ]);
+        assert!(extract_embedded_runtime(root, "0.2.0", &zip_v2).unwrap());
+        assert_eq!(fs::read_to_string(root.join(EMBEDDED_VERSION_FILE)).unwrap(), "0.2.0");
+        assert_eq!(fs::read(root.join("backend/app/main.py")).unwrap(), b"print('v2')");
+        assert!(!root.join("backend/app/old_only.py").exists());
+        assert_eq!(fs::read(root.join("backend/pyproject.toml")).unwrap(), b"version='0.2.0'");
+        assert_eq!(fs::read(root.join("data/default_configs.json")).unwrap(), b"{\"v\":2}");
+
+        // User data and .venv strictly preserved
+        assert_eq!(
+            fs::read(root.join("backend/.venv/Scripts/python.exe")).unwrap(),
+            b"user-venv"
+        );
+        assert_eq!(
+            fs::read(root.join("data/settings.json")).unwrap(),
+            b"{\"base_dir\":\"D:/Videos\"}"
+        );
+        assert_eq!(
+            fs::read(root.join("data/custom_settings.json")).unwrap(),
+            b"{\"custom\":1}"
+        );
+        assert_eq!(
+            fs::read(root.join("data/saved_llm_prompts.json")).unwrap(),
+            b"[{\"name\":\"p1\"}]"
+        );
+        assert_eq!(
+            fs::read(root.join("data/jobs/job_1/job.json")).unwrap(),
+            b"{\"id\":\"job_1\"}"
+        );
+        assert_eq!(
+            fs::read(root.join("data/profile/marca-dagua/watermark.png")).unwrap(),
+            b"png"
+        );
+    }
+
+    #[test]
+    fn test_compiled_embedded_runtime_zip_contains_expected_files() {
+        let mut archive = ZipArchive::new(Cursor::new(EMBEDDED_RUNTIME_ZIP)).unwrap();
+        let mut names = Vec::new();
+        for idx in 0..archive.len() {
+            let entry = archive.by_index(idx).unwrap();
+            let name = entry.name().to_string();
+            assert!(!name.contains("__pycache__"), "unexpected pycache entry: {name}");
+            assert!(!name.contains(".pytest_cache"), "unexpected pytest_cache entry: {name}");
+            assert!(!name.ends_with(".pyc"), "unexpected .pyc entry: {name}");
+            assert!(!name.ends_with(".pyo"), "unexpected .pyo entry: {name}");
+            names.push(name);
+        }
+
+        assert!(names.iter().any(|n| n == "backend/app/main.py"));
+        assert!(names.iter().any(|n| n == "backend/pyproject.toml"));
+        assert!(names.iter().any(|n| n == "data/default_configs.json"));
     }
 
     #[test]
@@ -461,7 +765,6 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         let _ = handle.join();
 
-        // Closed port must return false
         assert!(!is_health_ok(&url, Duration::from_millis(300)));
     }
 }
