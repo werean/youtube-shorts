@@ -15,6 +15,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+pub const DEFAULT_REPO: &str = "werean/youtube-shorts";
 pub const DEFAULT_RELEASE_API_URL: &str =
     "https://api.github.com/repos/werean/youtube-shorts/releases/latest";
 pub const USER_AGENT: &str = "youtube-shorts-desktop";
@@ -33,7 +34,29 @@ pub struct GitHubAsset {
 pub struct GitHubRelease {
     pub tag_name: String,
     #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
     pub assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppVersionInfo {
+    pub current_version: String,
+    pub is_portable: bool,
+    pub repo: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub release_url: Option<String>,
+    pub can_auto_update: bool,
+    pub status: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -223,12 +246,8 @@ fn download_bytes(client: &Client, url: &str) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-pub fn prepare_exe_update(
-    api_url: &str,
-    current_version: &str,
-    exe_dir: &Path,
-) -> Result<Option<(Version, PathBuf)>, String> {
-    let client = build_http_client(Duration::from_secs(15))?;
+fn fetch_github_release(api_url: &str, timeout: Duration) -> Result<GitHubRelease, String> {
+    let client = build_http_client(timeout)?;
     let release_resp = client
         .get(api_url)
         .header("Accept", "application/vnd.github+json")
@@ -243,13 +262,63 @@ pub fn prepare_exe_update(
     let release_text = release_resp
         .text()
         .map_err(|e| format!("Failed reading release JSON: {e}"))?;
-    let release = parse_github_release(&release_text)?;
+    parse_github_release(&release_text)
+}
 
-    let Some((_current, latest)) = is_newer_version(current_version, &release.tag_name)? else {
-        return Ok(None);
+pub fn check_update_status(
+    api_url: &str,
+    current_version: &str,
+    is_portable: bool,
+) -> Result<AppUpdateInfo, String> {
+    let current = parse_release_version(current_version)?;
+    let release = fetch_github_release(api_url, Duration::from_secs(10))?;
+    let latest = parse_release_version(&release.tag_name)?;
+    let release_url = release
+        .html_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+
+    let (exe_asset, _manifest_asset) = find_release_assets(&release);
+    let has_exe_asset = exe_asset.is_some();
+    let update_available = latest > current;
+    let can_auto_update = is_portable && update_available && has_exe_asset;
+
+    let (status, message) = if !update_available {
+        (
+            "up_to_date".to_string(),
+            format!("Você já está na versão mais recente (v{current})."),
+        )
+    } else if has_exe_asset {
+        (
+            "update_available".to_string(),
+            format!("Nova versão v{latest} disponível!"),
+        )
+    } else {
+        (
+            "no_asset".to_string(),
+            format!("Versão v{latest} encontrada, mas sem executável portable nos assets."),
+        )
     };
 
-    let (exe_asset, manifest_asset) = find_release_assets(&release);
+    Ok(AppUpdateInfo {
+        current_version: current.to_string(),
+        latest_version: Some(latest.to_string()),
+        update_available,
+        release_url,
+        can_auto_update,
+        status,
+        message,
+    })
+}
+
+fn stage_release_exe(
+    client: &Client,
+    release: &GitHubRelease,
+    exe_dir: &Path,
+) -> Result<PathBuf, String> {
+    let (exe_asset, manifest_asset) = find_release_assets(release);
     let Some(exe_asset) = exe_asset else {
         return Err(format!(
             "Release {} is missing asset {}",
@@ -307,58 +376,26 @@ pub fn prepare_exe_update(
         }
     }
 
+    Ok(new_exe_path)
+}
+
+pub fn prepare_exe_update(
+    api_url: &str,
+    current_version: &str,
+    exe_dir: &Path,
+) -> Result<Option<(Version, PathBuf)>, String> {
+    let client = build_http_client(Duration::from_secs(15))?;
+    let release = fetch_github_release(api_url, Duration::from_secs(15))?;
+
+    let Some((_current, latest)) = is_newer_version(current_version, &release.tag_name)? else {
+        return Ok(None);
+    };
+
+    let new_exe_path = stage_release_exe(&client, &release, exe_dir)?;
     Ok(Some((latest, new_exe_path)))
 }
 
-pub fn check_and_apply_startup_update(
-    exe_dir: &Path,
-    backend_proc: Option<&mut BackendProcess>,
-) -> Result<UpdateOutcome, String> {
-    if is_auto_update_disabled() {
-        return Ok(UpdateOutcome::Disabled);
-    }
-
-    let api_url = resolve_update_api_url();
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    let client = build_http_client(Duration::from_secs(5))?;
-    let release_resp = client
-        .get(&api_url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .map_err(|e| format!("Update check request failed: {e}"))?;
-    if !release_resp.status().is_success() {
-        return Err(format!(
-            "Update check returned HTTP {}",
-            release_resp.status().as_u16()
-        ));
-    }
-    let release_text = release_resp
-        .text()
-        .map_err(|e| format!("Failed reading update release JSON: {e}"))?;
-    let release = parse_github_release(&release_text)?;
-
-    let current = parse_release_version(current_version)?;
-    let latest = parse_release_version(&release.tag_name)?;
-    if latest <= current {
-        return Ok(UpdateOutcome::UpToDate { current, latest });
-    }
-
-    let (exe_asset, _manifest_asset) = find_release_assets(&release);
-    if exe_asset.is_none() {
-        return Ok(UpdateOutcome::NoPortableAsset { latest });
-    }
-
-    let Some((version, _new_exe_path)) =
-        prepare_exe_update(&api_url, current_version, exe_dir)?
-    else {
-        return Ok(UpdateOutcome::UpToDate { current, latest });
-    };
-
-    if let Some(proc_handle) = backend_proc {
-        proc_handle.shutdown();
-    }
-
+pub fn schedule_update_and_relaunch(exe_dir: &Path) -> Result<PathBuf, String> {
     let script_path = std::env::temp_dir().join("update-and-relaunch.cmd");
     let script_content =
         build_update_and_relaunch_cmd(std::process::id(), exe_dir, EXE_ASSET_NAME);
@@ -378,10 +415,52 @@ pub fn check_and_apply_startup_update(
             .map_err(|e| format!("Failed spawning update script: {e}"))?;
     }
 
+    Ok(script_path)
+}
+
+pub fn apply_update_and_schedule_relaunch(
+    api_url: &str,
+    current_version: &str,
+    exe_dir: &Path,
+    backend_proc: Option<&mut BackendProcess>,
+) -> Result<UpdateOutcome, String> {
+    let release = fetch_github_release(api_url, Duration::from_secs(10))?;
+    let current = parse_release_version(current_version)?;
+    let latest = parse_release_version(&release.tag_name)?;
+    if latest <= current {
+        return Ok(UpdateOutcome::UpToDate { current, latest });
+    }
+
+    let (exe_asset, _manifest_asset) = find_release_assets(&release);
+    if exe_asset.is_none() {
+        return Ok(UpdateOutcome::NoPortableAsset { latest });
+    }
+
+    let client = build_http_client(Duration::from_secs(15))?;
+    let _new_exe_path = stage_release_exe(&client, &release, exe_dir)?;
+
+    if let Some(proc_handle) = backend_proc {
+        proc_handle.shutdown();
+    }
+
+    let script_path = schedule_update_and_relaunch(exe_dir)?;
     Ok(UpdateOutcome::RestartScheduled {
-        version,
+        version: latest,
         script_path,
     })
+}
+
+pub fn check_and_apply_startup_update(
+    exe_dir: &Path,
+    backend_proc: Option<&mut BackendProcess>,
+) -> Result<UpdateOutcome, String> {
+    if is_auto_update_disabled() {
+        return Ok(UpdateOutcome::Disabled);
+    }
+
+    let api_url = resolve_update_api_url();
+    let current_version = env!("CARGO_PKG_VERSION");
+    apply_update_and_schedule_relaunch(&api_url, current_version, exe_dir, backend_proc)
 }
 
 #[cfg(test)]
@@ -533,6 +612,7 @@ mod tests {
 
         let release_json = serde_json::to_string(&GitHubRelease {
             tag_name: "v0.2.0".to_string(),
+            html_url: Some(format!("{base_url}/releases/tag/v0.2.0")),
             assets,
         })
         .unwrap();
@@ -666,5 +746,115 @@ mod tests {
 
         assert!(err.contains("SHA-256 verification failed"));
         assert!(!exe_dir.path().join("youtube-shorts.exe.new").exists());
+    }
+
+    fn spawn_single_release_metadata_server(
+        release: GitHubRelease,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base_url = format!("http://{addr}");
+        let release_json = serde_json::to_string(&release).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let body = release_json.as_bytes();
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+
+        (base_url, handle)
+    }
+
+    #[test]
+    fn test_check_update_status_up_to_date() {
+        let (base_url, handle) = spawn_single_release_metadata_server(GitHubRelease {
+            tag_name: "v0.1.3".to_string(),
+            html_url: Some("https://github.com/werean/youtube-shorts/releases/tag/v0.1.3".to_string()),
+            assets: vec![GitHubAsset {
+                name: EXE_ASSET_NAME.to_string(),
+                browser_download_url: "https://example.invalid/youtube-shorts.exe".to_string(),
+                digest: None,
+            }],
+        });
+
+        let info = check_update_status(&format!("{base_url}/releases/latest"), "0.1.3", true)
+            .unwrap();
+        let _ = handle.join();
+
+        assert_eq!(info.current_version, "0.1.3");
+        assert_eq!(info.latest_version.as_deref(), Some("0.1.3"));
+        assert!(!info.update_available);
+        assert!(!info.can_auto_update);
+        assert_eq!(info.status, "up_to_date");
+        assert_eq!(
+            info.release_url.as_deref(),
+            Some("https://github.com/werean/youtube-shorts/releases/tag/v0.1.3")
+        );
+        assert!(info.message.contains("v0.1.3"));
+    }
+
+    #[test]
+    fn test_check_update_status_update_available_portable_vs_non_portable() {
+        let release = GitHubRelease {
+            tag_name: "v0.2.0".to_string(),
+            html_url: Some("https://github.com/werean/youtube-shorts/releases/tag/v0.2.0".to_string()),
+            assets: vec![GitHubAsset {
+                name: EXE_ASSET_NAME.to_string(),
+                browser_download_url: "https://example.invalid/youtube-shorts.exe".to_string(),
+                digest: Some("sha256:abcdef".to_string()),
+            }],
+        };
+
+        let (base_url_portable, handle_portable) =
+            spawn_single_release_metadata_server(release.clone());
+        let portable_info =
+            check_update_status(&format!("{base_url_portable}/releases/latest"), "0.1.3", true)
+                .unwrap();
+        let _ = handle_portable.join();
+
+        assert_eq!(portable_info.current_version, "0.1.3");
+        assert_eq!(portable_info.latest_version.as_deref(), Some("0.2.0"));
+        assert!(portable_info.update_available);
+        assert!(portable_info.can_auto_update);
+        assert_eq!(portable_info.status, "update_available");
+        assert!(portable_info.message.contains("v0.2.0"));
+
+        let (base_url_dev, handle_dev) = spawn_single_release_metadata_server(release);
+        let non_portable_info =
+            check_update_status(&format!("{base_url_dev}/releases/latest"), "0.1.3", false)
+                .unwrap();
+        let _ = handle_dev.join();
+
+        assert!(non_portable_info.update_available);
+        assert!(!non_portable_info.can_auto_update);
+        assert_eq!(non_portable_info.status, "update_available");
+    }
+
+    #[test]
+    fn test_check_update_status_no_asset() {
+        let (base_url, handle) = spawn_single_release_metadata_server(GitHubRelease {
+            tag_name: "v0.2.1".to_string(),
+            html_url: Some("https://github.com/werean/youtube-shorts/releases/tag/v0.2.1".to_string()),
+            assets: vec![],
+        });
+
+        let info = check_update_status(&format!("{base_url}/releases/latest"), "0.1.3", true)
+            .unwrap();
+        let _ = handle.join();
+
+        assert_eq!(info.current_version, "0.1.3");
+        assert_eq!(info.latest_version.as_deref(), Some("0.2.1"));
+        assert!(info.update_available);
+        assert!(!info.can_auto_update);
+        assert_eq!(info.status, "no_asset");
+        assert!(info.message.contains("v0.2.1"));
     }
 }

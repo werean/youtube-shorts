@@ -101,3 +101,16 @@ export {
   type RemoveOllamaModelResponse,
   type SavedLLMPrompt,
 } from "./config";
+
+// App Updater API (Tauri IPC + browser fallback)
+export {
+  BROWSER_DEV_VERSION,
+  GITHUB_RELEASES_URL,
+  GITHUB_REPO,
+  isTauriRuntime,
+  getAppVersionInfo,
+  checkForAppUpdate,
+  installAppUpdate,
+  type AppVersionInfo,
+  type AppUpdateInfo,
+} from "./updater";

@@ -4,10 +4,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use youtube_shorts_desktop::backend::{self, BackendProcess, RuntimeMode};
-use youtube_shorts_desktop::updater::{self, UpdateOutcome, EXE_ASSET_NAME};
+use youtube_shorts_desktop::updater::{
+    self, AppUpdateInfo, AppVersionInfo, UpdateOutcome, EXE_ASSET_NAME,
+};
 
 const APP_WINDOW_TITLE: &str = "YouTube Shorts";
 const SINGLE_INSTANCE_MUTEX_NAME: &str = "Local\\YouTubeShortsPortableInstance";
+
+struct AppRuntimeState {
+    mode: RuntimeMode,
+    root: PathBuf,
+}
 
 struct BackendLifecycle {
     process: Option<BackendProcess>,
@@ -16,6 +23,80 @@ struct BackendLifecycle {
 
 struct BackendState {
     inner: Arc<Mutex<BackendLifecycle>>,
+}
+
+#[tauri::command]
+fn get_app_version_info(runtime: tauri::State<'_, AppRuntimeState>) -> AppVersionInfo {
+    AppVersionInfo {
+        current_version: env!("CARGO_PKG_VERSION").to_string(),
+        is_portable: matches!(runtime.mode, RuntimeMode::Portable(_)),
+        repo: updater::DEFAULT_REPO.to_string(),
+    }
+}
+
+#[tauri::command]
+async fn check_for_app_update(
+    runtime: tauri::State<'_, AppRuntimeState>,
+) -> Result<AppUpdateInfo, String> {
+    let is_portable = matches!(runtime.mode, RuntimeMode::Portable(_));
+    let api_url = updater::resolve_update_api_url();
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    tauri::async_runtime::spawn_blocking(move || {
+        updater::check_update_status(&api_url, current_version, is_portable)
+    })
+    .await
+    .map_err(|e| format!("Falha interna ao verificar atualização: {e}"))?
+}
+
+#[tauri::command]
+async fn install_app_update(
+    app_handle: tauri::AppHandle,
+    runtime: tauri::State<'_, AppRuntimeState>,
+    backend: tauri::State<'_, BackendState>,
+) -> Result<String, String> {
+    if !matches!(runtime.mode, RuntimeMode::Portable(_)) {
+        return Err(
+            "Atualização automática está disponível apenas no modo portable (youtube-shorts.exe)."
+                .to_string(),
+        );
+    }
+
+    let exe_dir = runtime.root.clone();
+    let api_url = updater::resolve_update_api_url();
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    let prepared = tauri::async_runtime::spawn_blocking({
+        let exe_dir = exe_dir.clone();
+        move || updater::prepare_exe_update(&api_url, current_version, &exe_dir)
+    })
+    .await
+    .map_err(|e| format!("Falha interna ao baixar atualização: {e}"))??;
+
+    let Some((version, _new_exe_path)) = prepared else {
+        return Err(format!(
+            "Você já está na versão mais recente (v{current_version})."
+        ));
+    };
+
+    shutdown_backend_lifecycle(&backend.inner);
+
+    let script_path = updater::schedule_update_and_relaunch(&exe_dir)?;
+    let msg = format!(
+        "[updater] Manual update {version} prepared; executing {} and exiting.",
+        script_path.display()
+    );
+    eprintln!("{msg}");
+    backend::append_startup_log(&exe_dir, &msg);
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        app_handle.exit(0);
+    });
+
+    Ok(format!(
+        "Atualização v{version} baixada e verificada. Reiniciando..."
+    ))
 }
 
 fn is_shutting_down(lifecycle: &Mutex<BackendLifecycle>) -> bool {
@@ -336,9 +417,18 @@ fn main() {
     let setup_lifecycle = Arc::clone(&shared_lifecycle);
 
     let app = match tauri::Builder::default()
+        .manage(AppRuntimeState {
+            mode: runtime_mode.clone(),
+            root: portable_root.clone(),
+        })
         .manage(BackendState {
             inner: Arc::clone(&shared_lifecycle),
         })
+        .invoke_handler(tauri::generate_handler![
+            get_app_version_info,
+            check_for_app_update,
+            install_app_update
+        ])
         .setup(move |app| {
             let window = WebviewWindowBuilder::new(
                 app,

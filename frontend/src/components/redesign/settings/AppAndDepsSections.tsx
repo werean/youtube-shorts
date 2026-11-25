@@ -1,5 +1,6 @@
 import {
   ArrowsClockwise,
+  ArrowSquareOut,
   Brain,
   Cpu,
   Cube,
@@ -10,10 +11,22 @@ import {
   Microphone,
   Monitor,
   DotsThree,
+  Package,
   Terminal,
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { selectFolder, type PytorchGpuTier } from "../../../api";
+import {
+  BROWSER_DEV_VERSION,
+  checkForAppUpdate,
+  getAppVersionInfo,
+  GITHUB_RELEASES_URL,
+  GITHUB_REPO,
+  installAppUpdate,
+  selectFolder,
+  type AppUpdateInfo,
+  type AppVersionInfo,
+  type PytorchGpuTier,
+} from "../../../api";
 import {
   GhostButton,
   PickTile,
@@ -328,6 +341,255 @@ export function AppDownloadSection({
       </PickTileGroup>
       <p className="mt-3 text-sm text-text-3">Usada ao baixar vídeos do YouTube.</p>
     </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tela 02b — Aplicação › Atualizações                                         */
+/* -------------------------------------------------------------------------- */
+
+function formatVersionDisplay(version: string | null | undefined): string {
+  if (!version) return "—";
+  const trimmed = version.trim();
+  if (!trimmed || trimmed === BROWSER_DEV_VERSION) {
+    return trimmed || "—";
+  }
+  return trimmed.startsWith("v") || trimmed.startsWith("V") ? trimmed : `v${trimmed}`;
+}
+
+function updateErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return "Não foi possível verificar atualizações.";
+}
+
+export function AppUpdatesSection() {
+  const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
+  const [loadingVersion, setLoadingVersion] = useState(true);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingVersion(true);
+
+    getAppVersionInfo()
+      .then((info) => {
+        if (!cancelled) {
+          setVersionInfo(info);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setErrorMsg(updateErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingVersion(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleCheckUpdate(): Promise<void> {
+    if (checking || installing) return;
+    setChecking(true);
+    setErrorMsg(null);
+    try {
+      const info = await checkForAppUpdate();
+      setUpdateInfo(info);
+    } catch (error) {
+      setErrorMsg(updateErrorMessage(error));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function handleInstallUpdate(): Promise<void> {
+    if (installing || checking) return;
+    setInstalling(true);
+    setErrorMsg(null);
+    try {
+      await installAppUpdate();
+    } catch (error) {
+      setInstalling(false);
+      setErrorMsg(updateErrorMessage(error));
+    }
+  }
+
+  const currentVersionLabel = loadingVersion
+    ? "Verificando…"
+    : formatVersionDisplay(versionInfo?.currentVersion ?? BROWSER_DEV_VERSION);
+  const repoName = versionInfo?.repo || GITHUB_REPO;
+  const isPortable = Boolean(versionInfo?.isPortable);
+  const isBrowserMode =
+    !loadingVersion &&
+    (!versionInfo || versionInfo.currentVersion === BROWSER_DEV_VERSION);
+  const modeBadgeLabel = loadingVersion
+    ? "Carregando"
+    : isPortable
+      ? "Portátil (.exe)"
+      : isBrowserMode
+        ? "Modo navegador"
+        : "Desktop (dev)";
+
+  const releasesHref = updateInfo?.releaseUrl || GITHUB_RELEASES_URL;
+
+  const statusTone = installing
+    ? "cloud"
+    : errorMsg
+      ? "danger"
+      : updateInfo
+        ? updateInfo.status === "up_to_date"
+          ? "success"
+          : updateInfo.updateAvailable && updateInfo.canAutoUpdate
+            ? "cloud"
+            : updateInfo.status === "browser_dev"
+              ? "neutral"
+              : "warning"
+        : "neutral";
+
+  const statusLabel = installing
+    ? "Atualizando"
+    : errorMsg
+      ? "Erro"
+      : updateInfo
+        ? updateInfo.status === "up_to_date"
+          ? "Atualizado"
+          : updateInfo.status === "update_available"
+            ? "Atualização disponível"
+            : updateInfo.status === "no_asset"
+              ? "Pacote .exe ausente na release"
+              : updateInfo.status === "browser_dev"
+                ? "Modo navegador (dev)"
+                : "Verificado"
+        : "Pronto para verificar";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div
+        className="flex flex-wrap items-center justify-between gap-4 rounded-card border border-line bg-glass px-5 py-4"
+        style={{ boxShadow: "inset 2px 0 0 var(--accent-soft)" }}
+      >
+        <div className="flex items-center gap-4 min-w-0">
+          <span
+            aria-hidden="true"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-item bg-glass-hover text-accent-soft"
+          >
+            <Package size={22} weight="regular" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-label font-medium uppercase tracking-[0.06em] text-accent-soft">
+                Versão atual
+              </p>
+              <span className="inline-flex items-center rounded-pill border border-line bg-glass-hover px-2 py-0.5 text-[11px] font-medium text-text-2">
+                {modeBadgeLabel}
+              </span>
+            </div>
+            <p className="text-heading text-text-1 tabular-nums truncate">
+              {currentVersionLabel}
+            </p>
+            <p className="text-sm text-text-3 font-mono truncate">{repoName}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <GhostButton
+            onClick={() => void handleCheckUpdate()}
+            disabled={checking || installing}
+            leadingIcon={
+              <ArrowsClockwise
+                size={14}
+                weight="regular"
+                className={checking ? "animate-spin" : undefined}
+              />
+            }
+          >
+            {checking ? "Verificando…" : "Verificar atualização"}
+          </GhostButton>
+
+          {updateInfo?.updateAvailable && updateInfo.canAutoUpdate && (
+            <GhostButton
+              variant="accent"
+              onClick={() => void handleInstallUpdate()}
+              disabled={installing || checking}
+              leadingIcon={<DownloadSimple size={14} weight="regular" />}
+            >
+              Atualizar e reiniciar
+            </GhostButton>
+          )}
+        </div>
+      </div>
+
+      <section>
+        <SettingsSectionLabel>Status da atualização</SettingsSectionLabel>
+        <div className={`${CARD_CLASS} px-4 py-3.5 space-y-3`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <StatusDot tone={statusTone} label={statusLabel} />
+            {updateInfo?.latestVersion && !installing && (
+              <span className="text-xs font-mono text-text-3 tabular-nums">
+                Última release: {formatVersionDisplay(updateInfo.latestVersion)}
+              </span>
+            )}
+          </div>
+
+          {installing ? (
+            <p role="status" className="text-sm text-text-2">
+              Baixando atualização e reiniciando...
+            </p>
+          ) : errorMsg ? (
+            <p role="alert" className="text-sm text-danger">
+              {errorMsg}
+            </p>
+          ) : updateInfo ? (
+            <div className="space-y-1.5">
+              <p role="status" className="text-sm text-text-2">
+                {updateInfo.message}
+              </p>
+              {!isPortable && updateInfo.status !== "browser_dev" && (
+                <p className="text-xs text-text-3">
+                  A atualização automática direta funciona apenas no executável portátil
+                  (youtube-shorts.exe).
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-text-3">
+              Clique em &quot;Verificar atualização&quot; para consultar a versão mais
+              recente publicada no GitHub.
+            </p>
+          )}
+
+          <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-line">
+            <span className="text-xs text-text-3">
+              {isPortable
+                ? "Atualizações são validadas com SHA-256 antes de substituir o executável."
+                : "Você pode acompanhar as notas de lançamento diretamente no GitHub."}
+            </span>
+            <a
+              href={releasesHref}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1.5 rounded-pill border border-line-strong px-3 h-7 text-xs font-medium text-text-2 hover:text-text-1 hover:bg-glass-hover transition-colors duration-fast"
+            >
+              <ArrowSquareOut size={13} weight="regular" />
+              <span>GitHub Releases</span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

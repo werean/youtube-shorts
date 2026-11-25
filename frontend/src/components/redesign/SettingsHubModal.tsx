@@ -26,6 +26,7 @@ import {
 import {
   AppDownloadSection,
   AppFoldersSection,
+  AppUpdatesSection,
   DependenciesSection,
   type DependenciesSectionProps,
   type DependencyStatus,
@@ -421,6 +422,8 @@ export function SettingsHubModal({
             reporter={reporter}
           />
         );
+      case "app-updates":
+        return <AppUpdatesSection />;
       case "dependencies":
         return (
           <DependenciesSection

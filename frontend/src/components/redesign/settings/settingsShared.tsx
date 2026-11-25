@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 export type SectionId =
   | "app-folders"
   | "app-download"
+  | "app-updates"
   | "dependencies"
   | "ai-model"
   | "ai-search"
@@ -62,6 +63,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
     children: [
       { id: "app-folders", label: "Pastas" },
       { id: "app-download", label: "Download" },
+      { id: "app-updates", label: "Atualizações" },
     ],
   },
   {
@@ -121,6 +123,9 @@ export interface SectionMeta {
 }
 
 export function getSectionMeta(id: SectionId): SectionMeta {
+  if (id === "app-updates") {
+    return { title: "Atualizações", groupId: "aplicacao", showSaved: false };
+  }
   if (id === "batch") {
     return { title: "Processar em lote", groupId: SETTINGS_FOOTER_GROUP_ID, showSaved: false };
   }
