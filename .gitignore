@@ -49,3 +49,9 @@ temp/
 # Eval harness (docs/analysis-v2): third-party transcripts and run outputs stay out of git
 backend/evals/corpus/*/
 backend/evals/runs/
+
+# Desktop (Rust / Tauri) and portable build artifacts
+desktop/target/
+dist-portable/
+dist-portable/*.zip
+dist-portable/**/*.zip

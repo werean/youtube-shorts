@@ -123,9 +123,11 @@ const args = [
   "--port",
   port.toString(),
   "--reload",
+  "--reload-dir",
+  "app",
 ];
 
-console.log(`[dev] Iniciando FastAPI backend: ${pythonExecutable} -m uvicorn app.main:app --host 0.0.0.0 --port ${port} --reload`);
+console.log(`[dev] Iniciando FastAPI backend: ${pythonExecutable} -m uvicorn app.main:app --host 0.0.0.0 --port ${port} --reload --reload-dir app`);
 
 const child = Bun.spawn(args, {
   cwd: backendDir,

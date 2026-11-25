@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.metadata
+import os
 import re
 import shutil
 import subprocess
@@ -18,7 +21,7 @@ from fastapi.responses import JSONResponse
 from app.application.job_lifecycle import utc_now_iso
 from app.application.runtime_service import CancelToken, get_container
 from app.core.config import PROMPT_VERSION, SYSTEM_PROMPT_TEMPLATE, config
-from app.core.paths import saved_llm_prompts_file_path
+from app.core.paths import project_root, saved_llm_prompts_file_path
 from app.core.settings import default_settings, load_settings, save_settings, update_settings
 from app.core.tool_configs import (
     get_tool_configs_payload,
@@ -44,10 +47,10 @@ INSTALLATION_GUIDES: dict[str, dict[str, Any]] = {
         "name": "Python",
         "manual": {
             "title": "Instalação Manual do Python",
-            "description": "Python é necessário para executar Whisper e PyTorch. Recomenda-se Python 3.10 ou superior.",
+            "description": "Python é necessário para executar Whisper e PyTorch. Recomenda-se Python 3.12 (3.11 a 3.13 suportados).",
             "steps": [
                 "1. Acesse https://www.python.org/downloads/",
-                "2. Baixe a versão mais recente (3.11 ou superior recomendado)",
+                "2. Baixe a versão Python 3.12 (ou 3.11 / 3.13)",
                 "3. Execute o instalador e marque 'Add Python to PATH'",
                 "4. Clique em 'Install Now'",
                 "5. Abra um novo terminal e verifique com: python --version",
@@ -55,25 +58,25 @@ INSTALLATION_GUIDES: dict[str, dict[str, Any]] = {
             "links": [{"text": "Download Python", "url": "https://www.python.org/downloads/"}],
         },
         "automatic": {
-            "command": "choco install python -y",
-            "description": "Usa Chocolatey para instalar Python automaticamente (requer Chocolatey instalado)",
+            "command": "winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements",
+            "description": "Usa winget para instalar Python 3.12 automaticamente",
         },
     },
     "whisper": {
         "name": "Whisper",
         "manual": {
             "title": "Instalação Manual do Whisper",
-            "description": "faster-whisper / Whisper é usado para transcrição local de áudio com suporte GPU CUDA.",
+            "description": "faster-whisper é usado para transcrição local de áudio com suporte GPU CUDA.",
             "steps": [
                 "1. Abra um terminal/PowerShell",
-                "2. Execute: pip install -U faster-whisper openai-whisper",
+                "2. Execute: pip install -U faster-whisper",
                 "3. Verifique a instalação com: python -c \"import faster_whisper\"",
             ],
             "links": [{"text": "Documentação faster-whisper", "url": "https://github.com/SYSTRAN/faster-whisper"}],
         },
         "automatic": {
-            "command": "pip install -U faster-whisper openai-whisper",
-            "description": "Instala Whisper via pip",
+            "command": "pip install -U faster-whisper",
+            "description": "Instala faster-whisper via pip",
         },
     },
     "ytdlp": {
@@ -112,7 +115,7 @@ INSTALLATION_GUIDES: dict[str, dict[str, Any]] = {
             "links": [{"text": "FFmpeg Builds", "url": "https://www.gyan.dev/ffmpeg/builds/"}],
         },
         "automatic": {
-            "command": "winget install Gyan.FFmpeg",
+            "command": "winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements",
             "description": "Instala FFmpeg via winget",
         },
     },
@@ -141,14 +144,14 @@ INSTALLATION_GUIDES: dict[str, dict[str, Any]] = {
             "description": "PyTorch é a biblioteca de machine learning necessária para GPU CUDA (incluindo RTX 5070 CUDA 12.8).",
             "steps": [
                 "1. Acesse https://pytorch.org/get-started/locally/",
-                "2. RTX 4000 ou inferior: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121",
-                "3. RTX 5000 series (RTX 5070): pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128",
+                "2. RTX 4000 ou inferior: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126",
+                "3. RTX 5000 series (RTX 5070): pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128",
             ],
             "links": [{"text": "PyTorch Get Started", "url": "https://pytorch.org/get-started/locally/"}],
         },
         "automatic": {
-            "command": "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121",
-            "description": "Instala PyTorch com suporte CUDA 12.1 (RTX 4000 ou inferior) ou Nightly CUDA 12.8 (RTX 5000).",
+            "command": "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126",
+            "description": "Instala PyTorch com suporte CUDA 12.6 (RTX 4000 ou inferior) ou CUDA 12.8 (RTX 5000).",
         },
     },
     "ollama": {
@@ -976,25 +979,312 @@ async def select_folder() -> dict[str, Any]:
 # --- Dependencies (`/config/dependencies*`) ---
 
 
+def _project_venv_dir() -> Path:
+    return project_root() / "backend" / ".venv"
+
+
+def _project_venv_python() -> Path:
+    venv_dir = _project_venv_dir()
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+def _venv_site_packages_paths() -> list[str]:
+    venv_dir = _project_venv_dir()
+    if not venv_dir.exists():
+        return []
+    if os.name == "nt":
+        sp = venv_dir / "Lib" / "site-packages"
+        return [str(sp)] if sp.exists() else []
+    lib_dir = venv_dir / "lib"
+    if not lib_dir.exists():
+        return []
+    return [str(p) for p in lib_dir.glob("python*/site-packages") if p.is_dir()]
+
+
+def _probe_venv_distributions() -> dict[str, str]:
+    """Read installed package versions from the project venv without importing heavy modules."""
+    sp_paths = _venv_site_packages_paths()
+    if not sp_paths:
+        return {}
+    versions: dict[str, str] = {}
+    for dist in importlib.metadata.distributions(path=sp_paths):
+        raw_name = dist.metadata.get("Name") or dist.name
+        if not raw_name:
+            continue
+        norm_name = re.sub(r"[-_.]+", "-", raw_name).lower()
+        versions.setdefault(norm_name, str(dist.version))
+    return versions
+
+
+COMPATIBLE_PYTHON_VERSIONS: tuple[str, ...] = ("3.12", "3.13", "3.11")
+PYTORCH_INDEX_URLS: dict[str, str] = {
+    "rtx_4000_or_lower": "https://download.pytorch.org/whl/cu126",
+    "rtx_5000": "https://download.pytorch.org/whl/cu128",
+}
+
+
+def _refresh_windows_path_from_registry() -> None:
+    """Merge HKLM and HKCU PATH entries from the Windows Registry into os.environ['PATH']."""
+    if os.name != "nt":
+        return
+    try:
+        import winreg
+    except ImportError:
+        return
+
+    registry_locations = (
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+    )
+    raw_segments: list[str] = []
+    for hive, subkey in registry_locations:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                value, _ = winreg.QueryValueEx(key, "Path")
+                if isinstance(value, str) and value.strip():
+                    expanded = os.path.expandvars(value)
+                    raw_segments.extend(seg.strip() for seg in expanded.split(os.pathsep) if seg.strip())
+        except OSError:
+            continue
+
+    if not raw_segments:
+        return
+
+    current_path = os.environ.get("PATH", "")
+    current_parts = [p for p in current_path.split(os.pathsep) if p]
+    seen = {os.path.normcase(os.path.normpath(p)) for p in current_parts}
+    added = False
+    for seg in raw_segments:
+        norm = os.path.normcase(os.path.normpath(seg))
+        if norm not in seen:
+            current_parts.append(seg)
+            seen.add(norm)
+            added = True
+    if added:
+        os.environ["PATH"] = os.pathsep.join(current_parts)
+
+
+def _prepend_to_process_path(dir_path: Path) -> None:
+    dir_str = str(dir_path)
+    current_path = os.environ.get("PATH", "")
+    current_parts = [p for p in current_path.split(os.pathsep) if p]
+    norm_target = os.path.normcase(os.path.normpath(dir_str))
+    if any(os.path.normcase(os.path.normpath(p)) == norm_target for p in current_parts):
+        return
+    os.environ["PATH"] = os.pathsep.join([dir_str, *current_parts]) if current_parts else dir_str
+
+
+def _find_ffmpeg_executable() -> str | None:
+    """Locate ffmpeg, refreshing Windows PATH / WinGet package paths and updating os.environ['PATH']."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    if os.name == "nt":
+        _refresh_windows_path_from_registry()
+        found = shutil.which("ffmpeg")
+        if found:
+            return found
+
+        candidates: list[Path] = []
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            winget_dir = Path(local_app_data) / "Microsoft" / "WinGet"
+            candidates.append(winget_dir / "Links" / "ffmpeg.exe")
+            packages_dir = winget_dir / "Packages"
+            if packages_dir.is_dir():
+                for pkg_dir in sorted(packages_dir.glob("Gyan.FFmpeg*")):
+                    candidates.extend(sorted(pkg_dir.rglob("ffmpeg.exe")))
+
+        program_files = os.environ.get("ProgramFiles") or r"C:\Program Files"
+        candidates.extend(
+            [
+                Path(r"C:\ffmpeg\bin\ffmpeg.exe"),
+                Path(program_files) / "ffmpeg" / "bin" / "ffmpeg.exe",
+                Path(r"C:\ProgramData\chocolatey\bin\ffmpeg.exe"),
+            ]
+        )
+
+        for candidate in candidates:
+            if candidate.is_file():
+                _prepend_to_process_path(candidate.parent)
+                return str(candidate)
+
+    return None
+
+
+def _probe_python_major_minor(exe_path: str) -> str | None:
+    """Query a Python executable for its `major.minor` version string."""
+    try:
+        res = subprocess.run(
+            [exe_path, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    out = res.stdout.strip().splitlines()
+    return out[-1].strip() if out else None
+
+
+def _is_inside_project_venv(candidate: str | Path) -> bool:
+    try:
+        cand_resolved = Path(candidate).resolve()
+        venv_resolved = _project_venv_dir().resolve()
+        return cand_resolved == venv_resolved or venv_resolved in cand_resolved.parents
+    except OSError:
+        return False
+
+
+def _find_compatible_python_executable() -> str:
+    """Locate a compatible Python (3.12, 3.13, or 3.11) before falling back to sys.executable."""
+    py_launcher = shutil.which("py")
+    if py_launcher:
+        for ver in COMPATIBLE_PYTHON_VERSIONS:
+            try:
+                res = subprocess.run(
+                    [py_launcher, f"-{ver}", "-c", "import sys; print(sys.executable)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if res.returncode == 0 and res.stdout.strip():
+                cand = res.stdout.strip().splitlines()[-1].strip()
+                if cand and Path(cand).exists() and not _is_inside_project_venv(cand):
+                    return cand
+
+    for ver in COMPATIBLE_PYTHON_VERSIONS:
+        cand = shutil.which(f"python{ver}")
+        if cand and not _is_inside_project_venv(cand) and _probe_python_major_minor(cand) == ver:
+            return cand
+
+    if os.name == "nt":
+        _refresh_windows_path_from_registry()
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        program_files = os.environ.get("ProgramFiles") or r"C:\Program Files"
+        win_candidates: list[Path] = []
+        for ver in COMPATIBLE_PYTHON_VERSIONS:
+            compact = ver.replace(".", "")
+            if local_app_data:
+                win_candidates.append(Path(local_app_data) / "Programs" / "Python" / f"Python{compact}" / "python.exe")
+                win_candidates.append(Path(local_app_data) / "Python" / f"pythoncore-{ver}-64" / "python.exe")
+            win_candidates.append(Path(program_files) / f"Python{compact}" / "python.exe")
+        for win_cand in win_candidates:
+            if win_cand.is_file() and not _is_inside_project_venv(win_cand):
+                return str(win_cand)
+
+    for cmd_name in ("python3", "python"):
+        cand = shutil.which(cmd_name)
+        if cand and not _is_inside_project_venv(cand):
+            ver = _probe_python_major_minor(cand)
+            if ver in COMPATIBLE_PYTHON_VERSIONS:
+                return cand
+
+    return sys.executable
+
+
+def _read_venv_python_version(venv_dir: Path, venv_py: Path) -> str | None:
+    """Return the Python version inside `backend/.venv` from `pyvenv.cfg` or `venv_py`."""
+    if not venv_py.exists():
+        return None
+    pyvenv_cfg = venv_dir / "pyvenv.cfg"
+    if pyvenv_cfg.is_file():
+        try:
+            text = pyvenv_cfg.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+        for key in ("version", "version_info"):
+            match = re.search(rf"^\s*{key}\s*=\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", text, flags=re.MULTILINE | re.IGNORECASE)
+            if match:
+                return match.group(1)
+    try:
+        res = subprocess.run(
+            [str(venv_py), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip().splitlines()[-1].strip()
+    return None
+
+
+def _resolve_pip_python() -> Path:
+    venv_py = _project_venv_python()
+    if venv_py.exists():
+        return venv_py
+    return Path(sys.executable)
+
+
+def _ensure_project_venv_sync() -> Path:
+    venv_dir = _project_venv_dir()
+    venv_py = _project_venv_python()
+    if venv_py.exists():
+        return venv_py
+    backend_dir = venv_dir.parent
+    if backend_dir.exists():
+        base_python = _find_compatible_python_executable()
+        subprocess.run([base_python, "-m", "venv", str(venv_dir)], check=True)
+        if venv_py.exists():
+            return venv_py
+    return Path(sys.executable)
+
+
 async def _default_probe_dependencies() -> dict[str, Any]:
-    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    venv_dir = _project_venv_dir()
+    venv_py = _project_venv_python()
+    py_ver = (
+        _read_venv_python_version(venv_dir, venv_py)
+        or f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+    venv_dists = _probe_venv_distributions()
+
+    whisper_ver = venv_dists.get("faster-whisper")
+    ytdlp_ver = venv_dists.get("yt-dlp")
+    pytorch_ver = venv_dists.get("torch")
+
+    ffmpeg_bin = _find_ffmpeg_executable()
+    nvidia_smi = shutil.which("nvidia-smi")
+    ollama_bin = shutil.which("ollama")
+
     return {
         "dependencies": {
-            "python": {"installed": True, "version": py_ver},
-            "whisper": {"installed": True, "version": "1.2.1"},
-            "ytdlp": {"installed": True, "version": "installed"},
+            "python": {
+                "installed": venv_py.exists() or bool(sys.executable),
+                "version": py_ver,
+            },
+            "whisper": {
+                "installed": whisper_ver is not None,
+                "version": whisper_ver,
+            },
+            "ytdlp": {
+                "installed": ytdlp_ver is not None,
+                "version": ytdlp_ver,
+            },
             "ffmpeg": {
-                "installed": shutil.which("ffmpeg") is not None,
-                "version": "installed" if shutil.which("ffmpeg") else None,
+                "installed": ffmpeg_bin is not None,
+                "version": "installed" if ffmpeg_bin else None,
             },
             "cuda": {
-                "installed": shutil.which("nvidia-smi") is not None,
-                "version": "installed" if shutil.which("nvidia-smi") else None,
+                "installed": nvidia_smi is not None,
+                "version": "installed" if nvidia_smi else None,
             },
-            "pytorch": {"installed": False, "version": None},
+            "pytorch": {
+                "installed": pytorch_ver is not None,
+                "version": pytorch_ver,
+            },
             "ollama": {
-                "installed": shutil.which("ollama") is not None,
-                "version": "installed" if shutil.which("ollama") else None,
+                "installed": ollama_bin is not None,
+                "version": "installed" if ollama_bin else None,
             },
         },
         "diagnostics": [],
@@ -1023,6 +1313,114 @@ async def get_dependency_instructions(name: str) -> Any:
     return guide
 
 
+def _build_dependency_process_args(
+    name: str,
+    mode: str,
+    tier: str | None = None,
+    *,
+    ensure_venv: bool = False,
+) -> list[str] | None:
+    if name in ("whisper", "ytdlp", "pytorch"):
+        py_exec = _ensure_project_venv_sync() if ensure_venv else _resolve_pip_python()
+        if name == "whisper":
+            if mode == "uninstall":
+                return [str(py_exec), "-m", "pip", "uninstall", "-y", "faster-whisper", "openai-whisper"]
+            return [str(py_exec), "-m", "pip", "install", "-U", "faster-whisper"]
+        if name == "ytdlp":
+            if mode == "uninstall":
+                return [str(py_exec), "-m", "pip", "uninstall", "-y", "yt-dlp"]
+            return [str(py_exec), "-m", "pip", "install", "-U", "yt-dlp"]
+        if name == "pytorch":
+            if mode == "uninstall":
+                return [str(py_exec), "-m", "pip", "uninstall", "-y", "torch", "torchvision", "torchaudio"]
+            if not tier or tier not in PYTORCH_INDEX_URLS:
+                return None
+            index_url = PYTORCH_INDEX_URLS[tier]
+            return [str(py_exec), "-m", "pip", "install", "torch", "torchvision", "torchaudio", "--index-url", index_url]
+
+    if name == "ffmpeg":
+        if os.name == "nt":
+            if mode == "uninstall":
+                return ["winget", "uninstall", "--id", "Gyan.FFmpeg", "-e"]
+            return [
+                "winget",
+                "install",
+                "--id",
+                "Gyan.FFmpeg",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ]
+        return None
+
+    if name == "python":
+        if os.name == "nt":
+            if mode == "uninstall":
+                return ["winget", "uninstall", "--id", "Python.Python.3.12", "-e"]
+            return [
+                "winget",
+                "install",
+                "--id",
+                "Python.Python.3.12",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ]
+        return None
+
+    return None
+
+
+async def _run_dependency_command(
+    cmd: list[str],
+    token: CancelToken | None = None,
+    on_log: Any = None,
+) -> tuple[int, bool]:
+    if on_log is not None:
+        on_log(f"$ {' '.join(cmd)}")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+
+    async def _stream_output() -> None:
+        if proc.stdout is None:
+            return
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            if line and on_log is not None:
+                on_log(line)
+
+    stream_task = asyncio.create_task(_stream_output())
+    try:
+        while proc.returncode is None:
+            if token is not None and token.is_set():
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                return -1, True
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+        await stream_task
+        return int(proc.returncode or 0), False
+    finally:
+        if not stream_task.done():
+            stream_task.cancel()
+        try:
+            await stream_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
 async def _execute_dependency_install(
     name: str,
     options: dict[str, Any] | None = None,
@@ -1037,7 +1435,8 @@ async def _execute_dependency_install(
     if not guide:
         return 404, {"success": False, "message": f"Dependency '{name}' not found"}
 
-    if name == "pytorch" and not (options or {}).get("pytorchGpuTier"):
+    tier = _parse_pytorch_gpu_tier(options)
+    if name == "pytorch" and not tier:
         return 400, {"success": False, "message": PYTORCH_GPU_TIER_REQUIRED_MESSAGE}
 
     if not guide.get("automatic"):
@@ -1055,7 +1454,50 @@ async def _execute_dependency_install(
             "message": f"Instalação de {guide['name']} cancelada pelo usuário",
         }
 
+    try:
+        cmd = await asyncio.to_thread(_build_dependency_process_args, name, "install", tier, ensure_venv=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        snap = await (container.dependency_prober or _default_probe_dependencies)()
+        return 500, {
+            "success": False,
+            "message": f"Failed to prepare virtual environment for {guide['name']}: {exc}",
+            "dependencies": snap.get("dependencies"),
+            "diagnostics": snap.get("diagnostics", []),
+        }
+    if not cmd:
+        snap = await (container.dependency_prober or _default_probe_dependencies)()
+        return 400, {
+            "success": False,
+            "message": f"Automatic installation command unavailable for {name} on this OS",
+            "dependencies": snap.get("dependencies"),
+        }
+
+    try:
+        returncode, cancelled = await _run_dependency_command(cmd, token, on_log)
+    except FileNotFoundError as exc:
+        snap = await (container.dependency_prober or _default_probe_dependencies)()
+        return 500, {
+            "success": False,
+            "message": f"Installer command not found: {exc}",
+            "dependencies": snap.get("dependencies"),
+            "diagnostics": snap.get("diagnostics", []),
+        }
+
+    if cancelled:
+        return 499, {
+            "success": False,
+            "message": f"Instalação de {guide['name']} cancelada pelo usuário",
+        }
+
     snap = await (container.dependency_prober or _default_probe_dependencies)()
+    if returncode != 0:
+        return 500, {
+            "success": False,
+            "message": f"Failed to install {guide['name']} (exit code {returncode})",
+            "dependencies": snap.get("dependencies"),
+            "diagnostics": snap.get("diagnostics", []),
+        }
+
     return 200, {
         "success": True,
         "message": f"{guide['name']} installed and validated successfully",
@@ -1083,7 +1525,41 @@ async def _execute_dependency_uninstall(
             "message": f"Desinstalação de {guide['name']} cancelada pelo usuário",
         }
 
+    cmd = _build_dependency_process_args(name, "uninstall", ensure_venv=False)
+    if not cmd:
+        snap = await (container.dependency_prober or _default_probe_dependencies)()
+        return 400, {
+            "success": False,
+            "message": f"Automatic uninstallation unavailable for {name}",
+            "dependencies": snap.get("dependencies"),
+        }
+
+    try:
+        returncode, cancelled = await _run_dependency_command(cmd, token, on_log)
+    except FileNotFoundError as exc:
+        snap = await (container.dependency_prober or _default_probe_dependencies)()
+        return 500, {
+            "success": False,
+            "message": f"Uninstaller command not found: {exc}",
+            "dependencies": snap.get("dependencies"),
+            "diagnostics": snap.get("diagnostics", []),
+        }
+
+    if cancelled:
+        return 499, {
+            "success": False,
+            "message": f"Desinstalação de {guide['name']} cancelada pelo usuário",
+        }
+
     snap = await (container.dependency_prober or _default_probe_dependencies)()
+    if returncode != 0:
+        return 500, {
+            "success": False,
+            "message": f"Failed to uninstall {guide['name']} (exit code {returncode})",
+            "dependencies": snap.get("dependencies"),
+            "diagnostics": snap.get("diagnostics", []),
+        }
+
     return 200, {
         "success": True,
         "message": f"{guide['name']} uninstalled and validated successfully",
@@ -1173,22 +1649,26 @@ async def cancel_install_session(session_id: str) -> Any:
 def _get_terminal_command(name: str, mode: str, tier: str | None) -> str | None:
     if name not in INSTALLATION_GUIDES:
         return None
+    pip_prefix = f'"{_resolve_pip_python()}" -m pip'
     if name == "pytorch":
         if mode == "uninstall":
-            return "pip uninstall -y torch torchvision torchaudio"
-        if not tier:
+            return f"{pip_prefix} uninstall -y torch torchvision torchaudio"
+        if not tier or tier not in PYTORCH_INDEX_URLS:
             return None
-        if tier == "rtx_5000":
-            return "pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128"
-        return "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+        index_url = PYTORCH_INDEX_URLS[tier]
+        return f"{pip_prefix} install torch torchvision torchaudio --index-url {index_url}"
     if mode == "uninstall":
         uninstall_cmds = {
-            "python": "winget uninstall Python.Python.3.11",
-            "ffmpeg": "winget uninstall Gyan.FFmpeg",
-            "whisper": "pip uninstall -y faster-whisper openai-whisper",
-            "ytdlp": "pip uninstall -y yt-dlp",
+            "python": "winget uninstall --id Python.Python.3.12 -e",
+            "ffmpeg": "winget uninstall --id Gyan.FFmpeg -e",
+            "whisper": f"{pip_prefix} uninstall -y faster-whisper openai-whisper",
+            "ytdlp": f"{pip_prefix} uninstall -y yt-dlp",
         }
         return uninstall_cmds.get(name)
+    if name == "whisper":
+        return f"{pip_prefix} install -U faster-whisper"
+    if name == "ytdlp":
+        return f"{pip_prefix} install -U yt-dlp"
     auto = INSTALLATION_GUIDES[name].get("automatic")
     return auto.get("command") if isinstance(auto, dict) else None
 
